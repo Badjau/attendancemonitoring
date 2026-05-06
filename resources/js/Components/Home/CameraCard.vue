@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import {Camera, LogIn, LogOut} from "@lucide/vue";
+import {Camera, Fingerprint, LogIn, LogOut} from "@lucide/vue";
 import {nextTick, onMounted, onUnmounted, ref, watch} from "vue";
 import {router, usePage} from '@inertiajs/vue3'
 import {useToast} from "primevue";
@@ -7,7 +7,15 @@ import {useToast} from "primevue";
 const page = usePage();
 const toast = useToast();
 
-const attendanceType = ref('')
+type AttendanceAction = "time-in" | "time-out"
+type AttendanceMethod = "rfid" | "keypad" | "fingerprint"
+type AttendanceGreeting = {
+    first_name: string
+    is_birthday: boolean
+    attendance_type: AttendanceAction
+}
+
+const attendanceType = ref<AttendanceAction | ''>('')
 const videoRef = ref<HTMLVideoElement | null>(null)
 const canvasRef = ref<HTMLCanvasElement | null>(null)
 const isLoading = ref(true)
@@ -17,12 +25,12 @@ const isVideoReady = ref(false)
 const currentTime = ref("")
 const currentDate = ref("")
 
-const hasTimedIn = ref(false)
-const showTimeInInputField = ref(false);
+const showEmployeeIdInputField = ref(false);
 
-const rfidInput = ref(null)
-const empIdInput = ref(null)
+const rfidInput = ref<HTMLInputElement | null>(null)
+const empIdInput = ref<HTMLInputElement | null>(null)
 const rfidBuffer = ref('')
+const manualEmployeeId = ref('')
 
 let stream: MediaStream | null = null
 let interval: ReturnType<typeof setInterval>
@@ -31,9 +39,6 @@ let rfidTimeout: any = null
 
 const lastScannedTime = ref(0)
 const SCAN_COOLDOWN_MS = 1000
-
-const empIdBuffer = ref('')
-let empIdTimeout: any = null
 
 const initializeCamera = async () => {
     try {
@@ -107,13 +112,26 @@ const updateTime = () => {
     })
 }
 
-const handleTimeAction = (actionName: "time-in" | "time-out") => {
-    const isTimeIn = actionName === "time-in"
+const handleTimeAction = (actionName: AttendanceAction) => {
     attendanceType.value = actionName
+    showEmployeeIdInputField.value = true
+    forceRFIDFocus()
+}
 
-    if (isTimeIn && !hasTimedIn.value) {
-        showTimeInInputField.value = true
-    }
+const resetAttendanceSelection = () => {
+    attendanceType.value = ''
+    showEmployeeIdInputField.value = false
+    manualEmployeeId.value = ''
+    isLoading.value = false
+    setTimeout(() => forceRFIDFocus(), 50)
+}
+
+const announceAttendanceGreeting = (greeting?: AttendanceGreeting) => {
+    if (!greeting?.first_name) return
+
+    window.dispatchEvent(new CustomEvent('attendance:greeting', {
+        detail: greeting,
+    }))
 }
 
 const focusRFID = () => {
@@ -157,16 +175,7 @@ const onRFIDInput = () => {
         if (rfidTimeout) clearTimeout(rfidTimeout)
 
         rfidTimeout = setTimeout(() => {
-            processRFIDData(rfidBuffer.value)
-            rfidBuffer.value = ''
-            if (rfidInput.value) {
-                rfidInput.value.value = ''
-            }
-
-            // Ensure focus returns to RFID input after processing
-            setTimeout(() => {
-                ensureRFIDFocus()
-            }, 50)
+            submitRFIDAttendance(rfidBuffer.value)
         }, 100)
     }
 }
@@ -177,70 +186,37 @@ const onRFIDKeydown = (e: any) => {
 
         if (rfidTimeout) clearTimeout(rfidTimeout)
 
-        processRFIDData(rfidBuffer.value || rfidInput.value?.value)
-        rfidBuffer.value = ''
-        if (rfidInput.value) {
-            rfidInput.value.value = ''
-        }
-        // Ensure focus returns to RFID input after processing
-        setTimeout(() => {
-            ensureRFIDFocus()
-        }, 50)
+        submitRFIDAttendance(rfidBuffer.value || rfidInput.value?.value)
     }
 }
 
-// EmpID field can steal focus (watch(showTimeInInputField) focuses it), which means
-// RFID scanner input ends up here. Treat it the same as RFID input: debounce/Enter
-// triggers processing, and ensure each scan replaces (not concatenates) the previous.
 const onEmpIdFocus = (e: FocusEvent) => {
-    // Select-all so the next scan overwrites the existing value instead of appending.
     const el = e.target as HTMLInputElement | null
     el?.select?.()
-}
-
-const onEmpIdInput = () => {
-    const data = empIdInput.value?.value?.trim()
-    if (!data) return
-
-    empIdBuffer.value = data
-    if (empIdTimeout) clearTimeout(empIdTimeout)
-
-    empIdTimeout = setTimeout(() => {
-        processRFIDData(empIdBuffer.value)
-        empIdBuffer.value = ''
-        if (empIdInput.value) empIdInput.value.value = ''
-        // After a scan is processed, return focus to the hidden RFID input.
-        setTimeout(() => forceRFIDFocus(), 50)
-    }, 100)
 }
 
 const onEmpIdKeydown = (e: any) => {
     if (e.key !== 'Enter') return
     e.preventDefault()
 
-    if (empIdTimeout) clearTimeout(empIdTimeout)
-    processRFIDData(empIdBuffer.value || empIdInput.value?.value)
-    empIdBuffer.value = ''
-    if (empIdInput.value) empIdInput.value.value = ''
-    setTimeout(() => forceRFIDFocus(), 50)
+    submitManualAttendance()
 }
 
-const processRFIDData = async (data: any) => {
-    if (!data || data.trim().length === 0) {
-        console.log('No RFID data provided:', data);
-        return;
+const ensureAttendanceTypeSelected = (actionLabel: string): boolean => {
+    if (!attendanceType.value) {
+        toast.add({
+            severity: 'warn',
+            summary: 'Warning',
+            detail: `Select attendance type first before ${actionLabel}`,
+            life: 5000,
+        })
+        return false
     }
 
-    const now = Date.now()
-    if (now - lastScannedTime.value < SCAN_COOLDOWN_MS) {
-        console.log('Scan cooldown active, ignoring scan');
-        return;
-    }
-    lastScannedTime.value = now
+    return true
+}
 
-    console.log('Processing RFID scan:', data);
-
-    // Auto-capture image
+const captureAttendanceImage = (): string | null => {
     const image = captureImage()
 
     if (!image) {
@@ -252,30 +228,94 @@ const processRFIDData = async (data: any) => {
         })
 
         console.log('Camera not ready. Please allow camera access.')
-        return
+        return null
     }
 
-    // Submit attendance immediately without waiting for user confirmation
+    return image
+}
+
+const submitRFIDAttendance = async (rfid: any) => {
+    const scannedRfid = rfid?.trim()
+
+    rfidBuffer.value = ''
+    if (rfidInput.value) rfidInput.value.value = ''
+
+    setTimeout(() => ensureRFIDFocus(), 50)
+
+    if (!scannedRfid) {
+        console.log('No RFID data provided:', rfid);
+        return;
+    }
+
+    if (!ensureAttendanceTypeSelected('scanning')) return
+
+    const now = Date.now()
+    if (now - lastScannedTime.value < SCAN_COOLDOWN_MS) {
+        console.log('Scan cooldown active, ignoring scan');
+        return;
+    }
+    lastScannedTime.value = now
+
+    console.log('Processing RFID scan:', scannedRfid);
+
+    const image = captureAttendanceImage()
+    if (!image) return
+
     try {
-        console.log('Submitting attendance...');
-        // Send RFID + captured image to your backend
-        await submitAttendance(data.trim(), image)
+        console.log('Submitting RFID attendance...');
+        await submitAttendance(scannedRfid, image, 'rfid')
     } catch (e) {
-        console.error('Error submitting attendance:', e);
-        toast.add({
-            severity: 'error',
-            summary: 'Error',
-            detail: 'Failed to record attendance.',
-            life: 5000,
-        })
+        console.error('Error submitting RFID attendance:', e);
     }
 }
 
-const submitAttendance = (rfid: string, image: string): Promise<void> => {
+const submitManualAttendance = async () => {
+    const employeeId = manualEmployeeId.value.trim()
+
+    if (!employeeId) {
+        toast.add({
+            severity: 'warn',
+            summary: 'Warning',
+            detail: 'Enter employee ID first.',
+            life: 5000,
+        })
+        return
+    }
+
+    if (!ensureAttendanceTypeSelected('submitting')) return
+
+    const image = captureAttendanceImage()
+    if (!image) return
+
+    try {
+        console.log('Submitting keypad attendance...');
+        await submitAttendance(employeeId, image, 'keypad')
+        manualEmployeeId.value = ''
+        setTimeout(() => forceRFIDFocus(), 50)
+    } catch (e) {
+        console.error('Error submitting keypad attendance:', e);
+    }
+}
+
+const submitFingerprintAttendance = async () => {
+    if (!ensureAttendanceTypeSelected('fingerprint scanning')) return
+
+    toast.add({
+        severity: 'info',
+        summary: 'Fingerprint',
+        detail: 'Fingerprint attendance is not configured yet.',
+        life: 5000,
+    })
+}
+
+const submitAttendance = (employeeIdentifier: string, image: string, method: AttendanceMethod): Promise<void> => {
     return new Promise((resolve, reject) => {
         const formData = new FormData()
 
-        formData.append('rfid', rfid)
+        // Keep "rfid" for the existing backend contract. attendance_method
+        // separates RFID, keypad, and fingerprint submissions for future handling.
+        formData.append('rfid', employeeIdentifier)
+        formData.append('attendance_method', method)
         formData.append('attendance_type', attendanceType.value)
 
         const blob = base64ToBlob(image, 'image/jpeg')
@@ -296,8 +336,7 @@ const submitAttendance = (rfid: string, image: string): Promise<void> => {
                         detail: flash.error,
                         life: 5000,
                     })
-                    showTimeInInputField.value = false
-                    isLoading.value = false
+                    resetAttendanceSelection()
 
                     reject(new Error(flash.error))
                     return
@@ -310,7 +349,8 @@ const submitAttendance = (rfid: string, image: string): Promise<void> => {
                     life: 5000,
                 })
 
-                showTimeInInputField.value = false
+                announceAttendanceGreeting(flash?.greeting)
+                resetAttendanceSelection()
 
                 resolve()
             },
@@ -321,8 +361,7 @@ const submitAttendance = (rfid: string, image: string): Promise<void> => {
                     detail: Object.values(errors)[0] ?? 'Failed to record attendance.',
                     life: 5000,
                 })
-                showTimeInInputField.value = false
-                isLoading.value = false
+                resetAttendanceSelection()
 
                 reject(new Error('Validation error.'))
             },
@@ -340,10 +379,10 @@ const base64ToBlob = (base64: string, mimeType: string): Blob => {
     return new Blob([buffer], {type: mimeType})
 }
 
-watch(showTimeInInputField, async (val) => {
+watch(showEmployeeIdInputField, async (val) => {
     if (val) {
         await nextTick()
-        empIdInput.value?.focus()
+        forceRFIDFocus()
     }
 })
 
@@ -381,13 +420,12 @@ onUnmounted(() => {
     document.removeEventListener('click', onDocumentClick)
     document.removeEventListener('touchend', onDocumentClick)
     if (rfidTimeout) clearTimeout(rfidTimeout)
-    if (empIdTimeout) clearTimeout(empIdTimeout)
 })
 </script>
 
 <template>
     <div
-        class="bg-brand-card rounded-[2.5rem] p-4 shadow-[12px_12px_0px_0px_#001e1d] border-2 border-brand-stroke grow relative overflow-hidden flex flex-col"
+        class="bg-brand-card rounded-[2.5rem] p-4 shadow-[12px_12px_0px_0px_#001e1d] border-2 border-brand-stroke relative overflow-hidden flex flex-col h-[260px] sm:h-[320px] lg:h-[360px] xl:h-[390px]"
     >
         <div
             class="absolute top-8 left-8 z-10 bg-brand-stroke rounded-full px-4 py-2 flex items-center gap-2 shadow-lg"
@@ -399,7 +437,7 @@ onUnmounted(() => {
         </div>
 
         <div
-            class="w-full h-full rounded-4xl bg-brand-stroke overflow-hidden relative flex items-center justify-center grow"
+            class="w-full h-full rounded-4xl bg-brand-stroke overflow-hidden relative flex items-center justify-center"
         >
             <div
                 v-if="isLoading"
@@ -415,7 +453,7 @@ onUnmounted(() => {
                 autoplay
                 playsinline
                 muted
-                class="w-full rounded-2xl border-2 border-brand-stroke"
+                class="h-full w-full rounded-2xl border-2 border-brand-stroke object-cover"
                 :class="{ loaded: isVideoReady }"
             ></video>
 
@@ -487,19 +525,41 @@ onUnmounted(() => {
                         />
 
                         <input
-                            v-if="showTimeInInputField"
+                            v-if="showEmployeeIdInputField"
                             ref="empIdInput"
+                            v-model="manualEmployeeId"
                             type="text"
                             placeholder="Employee ID"
                             class="text-brand-stroke border-2 border-brand-stroke rounded-xl py-3 px-3 text-sm w-full mt-4"
                             @focus="onEmpIdFocus"
-                            @input="onEmpIdInput"
                             @keydown="onEmpIdKeydown"
                         />
+
+                        <div
+                            v-if="showEmployeeIdInputField"
+                            class="grid grid-cols-[1fr_auto] gap-3 mt-3"
+                        >
+                            <button
+                                type="button"
+                                class="bg-brand-stroke text-brand-headline border-2 border-brand-stroke rounded-xl py-3 px-4 text-sm font-bold shadow-[3px_3px_0px_0px_#abd1c6] active:translate-x-1 active:translate-y-1 active:shadow-none"
+                                @click="submitManualAttendance"
+                            >
+                                Submit ID
+                            </button>
+
+                            <button
+                                type="button"
+                                class="inline-flex items-center justify-center bg-brand-card text-brand-stroke border-2 border-brand-stroke rounded-xl py-3 px-4 shadow-[3px_3px_0px_0px_#001e1d] active:translate-x-1 active:translate-y-1 active:shadow-none"
+                                title="Fingerprint"
+                                @click="submitFingerprintAttendance"
+                            >
+                                <Fingerprint class="w-5 h-5"/>
+                            </button>
+                        </div>
                     </div>
 
                     <p
-                        v-if="showTimeInInputField"
+                        v-if="showEmployeeIdInputField"
                         class="text-brand-stroke text-sm font-bold italic"
                     >
                         Look straight at the camera to record your attendance.

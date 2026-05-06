@@ -1,0 +1,390 @@
+@import '../../../../vendor/filament/filament/resources/css/theme.css';
+
+@source '../../../../app/Filament/**/*';
+@source '../../../../resources/views/filament/**/*';
+@source '../../../../vendor/filament/**/*.blade.php';
+
+:root {
+    --brand-bg: #004643;
+    --brand-card: #e8e4e6;
+    --brand-accent: #f9bc60;
+    --brand-headline: #fffffe;
+    --brand-paragraph: #abd1c6;
+    --brand-stroke: #001e1d;
+    --brand-tertiary: #e16162;
+    --admin-bg: #f4f7f6;
+    --admin-surface: #ffffff;
+    --admin-surface-muted: #f8faf9;
+    --admin-border: #d9e4e0;
+    --admin-text: #102321;
+    --admin-muted: #64756f;
+}
+
+html,
+.fi-body {
+    background: var(--admin-bg);
+    color: var(--admin-text);
+}
+
+.fi-body {
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+}
+
+.fi-main-ctn {
+    background:
+        linear-gradient(180deg, rgb(171 209 198 / 0.28) 0, rgb(244 247 246 / 0) 15rem),
+        var(--admin-bg);
+}
+
+.fi-main {
+    padding: 0 clamp(1rem, 2.2vw, 2rem) 2rem;
+}
+
+.fi-topbar {
+    min-height: 4.5rem;
+    border-bottom: 1px solid var(--admin-border);
+    background:
+        linear-gradient(90deg, #ffffff 0, #ffffff 17rem, rgb(255 255 255 / 0.9) 17rem),
+        rgb(255 255 255 / 0.94) !important;
+    box-shadow: 0 1px 2px rgb(0 30 29 / 0.07), 0 14px 38px rgb(0 30 29 / 0.05);
+    backdrop-filter: blur(14px);
+    padding-inline: 1.25rem 2rem;
+}
+
+.fi-topbar-start {
+    display: flex !important;
+    align-items: center;
+    width: 15.75rem;
+    margin-inline-end: 1rem;
+}
+
+.fi-topbar-open-sidebar-btn,
+.fi-topbar-close-sidebar-btn,
+.fi-topbar-open-collapse-sidebar-btn,
+.fi-topbar-close-collapse-sidebar-btn {
+    border: 1px solid var(--admin-border) !important;
+    border-radius: 0.55rem !important;
+    background: #ffffff !important;
+    color: var(--brand-bg) !important;
+}
+
+.fi-topbar-end {
+    gap: 0.85rem;
+}
+
+.fi-topbar .fi-icon-btn {
+    border: 1px solid var(--admin-border);
+    border-radius: 0.55rem;
+    background: #ffffff;
+    color: var(--brand-bg);
+}
+
+.fi-global-search-field {
+    min-width: min(22rem, 30vw);
+    border: 1px solid var(--admin-border) !important;
+    border-radius: 0.65rem !important;
+    background: #ffffff !important;
+    box-shadow: 0 1px 2px rgb(0 30 29 / 0.04) !important;
+}
+
+.fi-global-search-field:focus-within {
+    border-color: var(--brand-bg) !important;
+    box-shadow: 0 0 0 3px rgb(0 70 67 / 0.1) !important;
+}
+
+.fi-topbar .fi-avatar {
+    width: 2.4rem;
+    height: 2.4rem;
+    border: 2px solid #ffffff;
+    outline: 1px solid var(--brand-bg);
+    background: var(--brand-stroke) !important;
+    box-shadow: 0 8px 18px rgb(0 30 29 / 0.16);
+}
+
+.fi-sidebar {
+    border-right: 1px solid rgb(0 30 29 / 0.72);
+    background:
+        linear-gradient(180deg, rgb(249 188 96 / 0.09), transparent 14rem),
+        linear-gradient(180deg, var(--brand-stroke) 0%, var(--brand-bg) 100%) !important;
+    color: var(--brand-headline);
+}
+
+.fi-sidebar-header {
+    height: 4.5rem;
+    justify-content: flex-start !important;
+    border-bottom: 1px solid rgb(255 255 254 / 0.1);
+    background: transparent !important;
+    padding-inline: 1rem !important;
+}
+
+.fi-logo {
+    height: auto !important;
+    color: var(--brand-headline);
+}
+
+.hr-brand-mark {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    min-width: 12rem;
+}
+
+.hr-brand-icon {
+    display: grid;
+    width: 2.25rem;
+    height: 2.25rem;
+    place-items: center;
+    border: 1px solid rgb(249 188 96 / 0.32);
+    border-radius: 0.5rem;
+    background: rgb(249 188 96 / 0.14);
+    color: var(--brand-accent);
+    font-size: 0.76rem;
+    font-weight: 800;
+}
+
+.hr-brand-copy {
+    display: grid;
+    gap: 0.1rem;
+    line-height: 1.05;
+}
+
+.hr-brand-name {
+    color: var(--brand-headline);
+    font-size: 0.95rem;
+    font-weight: 780;
+}
+
+.hr-brand-context {
+    color: var(--brand-paragraph);
+    font-size: 0.68rem;
+    font-weight: 650;
+    text-transform: uppercase;
+}
+
+.fi-sidebar-nav {
+    gap: 1.25rem;
+    padding: 1rem 0.875rem;
+}
+
+.fi-sidebar-nav-groups {
+    gap: 1.25rem;
+}
+
+.fi-sidebar-group {
+    gap: 0.375rem;
+}
+
+.fi-sidebar-group-label {
+    color: rgb(171 209 198 / 0.78) !important;
+    font-size: 0.68rem;
+    font-weight: 760;
+    letter-spacing: 0.08em;
+    padding-inline: 0.625rem;
+    text-transform: uppercase;
+}
+
+.fi-sidebar-item-btn,
+.fi-sidebar-database-notifications-btn {
+    min-height: 2.45rem;
+    justify-content: flex-start;
+    border: 1px solid transparent;
+    border-radius: 0.55rem;
+    color: rgb(255 255 254 / 0.78);
+    padding-inline: 0.7rem;
+}
+
+.fi-sidebar-item-label,
+.fi-sidebar-database-notifications-btn-label {
+    color: inherit !important;
+    font-size: 0.875rem;
+    font-weight: 610;
+}
+
+.fi-sidebar-item-icon,
+.fi-sidebar-database-notifications-btn .fi-icon {
+    color: rgb(171 209 198 / 0.74) !important;
+}
+
+.fi-sidebar-item.fi-sidebar-item-has-url > .fi-sidebar-item-btn:hover,
+.fi-sidebar-database-notifications-btn:hover {
+    border-color: rgb(255 255 254 / 0.12);
+    background: rgb(255 255 254 / 0.07) !important;
+    color: var(--brand-headline);
+}
+
+.fi-sidebar-item.fi-active > .fi-sidebar-item-btn,
+.fi-sidebar-item.fi-sidebar-item-has-active-child-items > .fi-sidebar-item-btn {
+    border-color: rgb(249 188 96 / 0.52);
+    background: rgb(249 188 96 / 0.18) !important;
+    box-shadow: inset 3px 0 0 var(--brand-accent);
+    color: var(--brand-headline) !important;
+}
+
+.fi-sidebar-item.fi-active .fi-sidebar-item-icon,
+.fi-sidebar-item.fi-sidebar-item-has-active-child-items .fi-sidebar-item-icon {
+    color: var(--brand-accent) !important;
+}
+
+.fi-sidebar-footer {
+    border-top: 1px solid rgb(255 255 254 / 0.1);
+    margin: 0.5rem 0.875rem 0.875rem;
+    padding-top: 0.875rem;
+}
+
+.fi-header {
+    align-items: flex-start;
+    gap: 1rem;
+    margin-bottom: 0.25rem;
+    padding-top: 1.75rem;
+}
+
+.fi-header .fi-breadcrumbs {
+    display: block !important;
+    margin-bottom: 0.45rem;
+}
+
+.fi-breadcrumbs,
+.fi-breadcrumbs a {
+    color: var(--admin-muted) !important;
+    font-size: 0.78rem;
+    font-weight: 680;
+}
+
+.fi-header-heading {
+    color: var(--brand-stroke);
+    font-size: clamp(1.6rem, 2.1vw, 2.1rem);
+    font-weight: 820;
+    letter-spacing: 0;
+}
+
+.fi-header-actions-ctn {
+    margin-top: 2rem;
+}
+
+.fi-header-actions-ctn .fi-btn {
+    min-height: 2.7rem;
+    padding-inline: 1rem;
+}
+
+.fi-page-content {
+    gap: 1rem;
+}
+
+.fi-section,
+.fi-ta,
+.fi-wi-widget,
+.fi-modal-window,
+.fi-dropdown-panel {
+    border: 1px solid var(--admin-border) !important;
+    border-radius: 0.65rem !important;
+    background: var(--admin-surface) !important;
+    box-shadow: 0 1px 2px rgb(0 30 29 / 0.05) !important;
+}
+
+.fi-section-header,
+.fi-ta-header {
+    min-height: 3rem;
+    border-bottom: 1px solid #e6eeeb !important;
+    background: var(--admin-surface-muted);
+    padding: 0.8rem 1rem !important;
+}
+
+.fi-section-header-heading,
+.fi-ta-header-heading {
+    color: var(--brand-stroke);
+    font-size: 0.92rem;
+    font-weight: 740;
+}
+
+.fi-section-content {
+    padding: 1rem !important;
+}
+
+.fi-fo-field-wrp-label,
+.fi-in-entry-wrp-label,
+.fi-ta-header-cell-label {
+    color: #213b38 !important;
+    font-size: 0.82rem !important;
+    font-weight: 680 !important;
+}
+
+.fi-input-wrp,
+.fi-select-input,
+.fi-textarea,
+.fi-fo-rich-editor {
+    border: 1px solid var(--admin-border) !important;
+    border-radius: 0.5rem !important;
+    background: #ffffff !important;
+    box-shadow: none !important;
+}
+
+.fi-input-wrp:focus-within,
+.fi-fo-rich-editor:focus-within {
+    border-color: var(--brand-bg) !important;
+    box-shadow: 0 0 0 3px rgb(0 70 67 / 0.12) !important;
+}
+
+.fi-ta-table thead {
+    background: #f8faf9;
+}
+
+.fi-ta-header-cell {
+    border-bottom: 1px solid var(--admin-border);
+}
+
+.fi-ta-row {
+    border-color: #e8efed !important;
+}
+
+.fi-ta-row:hover {
+    background: rgb(171 209 198 / 0.12) !important;
+}
+
+.fi-btn {
+    border-radius: 0.5rem !important;
+    font-weight: 680;
+    box-shadow: none !important;
+}
+
+.fi-btn-color-primary {
+    background: var(--brand-bg) !important;
+    color: var(--brand-headline) !important;
+}
+
+.fi-btn-color-primary:hover {
+    background: var(--brand-stroke) !important;
+}
+
+.fi-btn-color-gray {
+    border: 1px solid var(--admin-border) !important;
+    background: #ffffff !important;
+}
+
+.fi-badge {
+    border-radius: 999px;
+    font-weight: 680;
+}
+
+.fi-simple-layout {
+    background:
+        linear-gradient(135deg, rgb(249 188 96 / 0.18), transparent 34rem),
+        linear-gradient(180deg, var(--brand-bg) 0%, var(--brand-stroke) 100%);
+}
+
+.fi-simple-main {
+    max-width: 28rem;
+    border: 1px solid rgb(255 255 254 / 0.14) !important;
+    border-radius: 0.8rem !important;
+    background: #ffffff !important;
+    box-shadow: 0 24px 70px rgb(0 30 29 / 0.32) !important;
+}
+
+@media (max-width: 1023px) {
+    .fi-topbar {
+        min-height: 4rem;
+    }
+
+    .hr-brand-context {
+        display: none;
+    }
+}

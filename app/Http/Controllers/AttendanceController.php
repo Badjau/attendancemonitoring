@@ -22,8 +22,17 @@ class AttendanceController extends Controller
     public function recordTimeIn(Request $request): RedirectResponse
     {
         try {
-            $this->attendanceService->recordAttendance($request);
-            return redirect()->back()->with('success', 'Attendance recorded successfully.');
+            $attendance = $this->attendanceService->recordAttendance($request);
+            $attendance->load('employee');
+            $employee = $attendance->employee;
+
+            return redirect()->back()
+                ->with('success', 'Attendance recorded successfully.')
+                ->with('greeting', [
+                    'first_name' => $employee->first_name,
+                    'is_birthday' => $employee->date_of_birth?->isBirthday() ?? false,
+                    'attendance_type' => $request->attendance_type,
+                ]);
         } catch (\Exception $e) {
             Log::info('error in recording the attendance: ' . $e->getMessage());
 

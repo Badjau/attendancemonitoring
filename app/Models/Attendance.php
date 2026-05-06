@@ -56,6 +56,8 @@ class Attendance extends Model implements HasMedia
     public function registerMediaCollections(): void
     {
         $this->addMediaCollection('attendance-image')->singleFile();
+        $this->addMediaCollection('time-in-image')->singleFile();
+        $this->addMediaCollection('time-out-image')->singleFile();
     }
 
     public function scopeIsLate(Builder $query)

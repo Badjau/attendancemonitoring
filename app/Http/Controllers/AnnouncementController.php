@@ -1,0 +1,22 @@
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Models\Announcement;
+use Inertia\Inertia;
+use Inertia\Response;
+
+class AnnouncementController extends Controller
+{
+    public function index(): Response
+    {
+        return Inertia::render('Announcements/Index', [
+            'announcements' => Announcement::with('media')
+                ->published()
+                ->latest('published_at')
+                ->latest()
+                ->paginate(10)
+                ->withQueryString(),
+        ]);
+    }
+}

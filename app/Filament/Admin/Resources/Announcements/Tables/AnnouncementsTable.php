@@ -1,50 +1,47 @@
 <?php
 
-namespace App\Filament\Admin\Resources\Employees\Tables;
+namespace App\Filament\Admin\Resources\Announcements\Tables;
 
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
 use Filament\Actions\ViewAction;
+use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
 
-class EmployeesTable
+class AnnouncementsTable
 {
     public static function configure(Table $table): Table
     {
         return $table
             ->columns([
-                TextColumn::make('employee_id')
-                    ->label('Employee ID')
-                    ->searchable()
+                TextColumn::make('title')
+                    ->searchable(),
+                TextColumn::make('type')
+                    ->badge(),
+                TextColumn::make('status')
+                    ->badge(),
+                TextColumn::make('created_by')
+                    ->numeric()
                     ->sortable(),
-
-                TextColumn::make('first_name')
-                    ->searchable()
+                TextColumn::make('published_at')
+                    ->dateTime()
                     ->sortable(),
-
-                TextColumn::make('last_name')
-                    ->searchable()
+                TextColumn::make('expires_at')
+                    ->dateTime()
                     ->sortable(),
-
-                TextColumn::make('middle_name')
-                    ->searchable()
-                    ->sortable(),
-
-                TextColumn::make('date_of_birth')
-                    ->date('F d, Y')
-                    ->sortable(),
-
-                TextColumn::make('position')
-                    ->searchable()
-                    ->sortable(),
-
+                IconColumn::make('is_pinned')
+                    ->boolean(),
                 TextColumn::make('created_at')
                     ->dateTime()
                     ->sortable()
                     ->toggleable(isToggledHiddenByDefault: true),
                 TextColumn::make('updated_at')
+                    ->dateTime()
+                    ->sortable()
+                    ->toggleable(isToggledHiddenByDefault: true),
+                TextColumn::make('deleted_at')
                     ->dateTime()
                     ->sortable()
                     ->toggleable(isToggledHiddenByDefault: true),

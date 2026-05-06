@@ -1,11 +1,18 @@
 <?php
 
 use App\Http\Controllers\AttendanceController;
+use App\Http\Controllers\AnnouncementController;
 use App\Http\Controllers\HomeController;
 use Illuminate\Support\Facades\Route;
-use Inertia\Inertia;
 
 Route::get('/', [HomeController::class, 'home'])->name('home');
+
+Route::controller(AnnouncementController::class)
+    ->prefix('announcements')
+    ->as('announcements.')
+    ->group(function () {
+        Route::get('/', 'index')->name('index');
+    });
 
 Route::controller(AttendanceController::class)
 ->prefix('attendance')

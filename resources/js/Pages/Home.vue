@@ -4,11 +4,12 @@ import FeedAndStaff from "@/Components/Home/FeedAndStaff.vue";
 import PresentToday from "@/Components/Home/PresentToday.vue";
 import CameraCard from "@/Components/Home/CameraCard.vue";
 import GreetingsCard from "@/Components/Home/GreetingsCard.vue";
-import {Toast} from "primevue"
+import Toast from "@/Components/Toast.vue";
 
 const props = defineProps<{
     attendanceToday: any
-    currentMonthBirthdayCelebrants: any
+    todayBirthdayCelebrants: any
+    announcements: any
 }>();
 
 </script>
@@ -16,30 +17,7 @@ const props = defineProps<{
 <template>
     <Head title="Home"/>
 
-    <Toast
-        position="top-right"
-        :pt="{
-            root: { class: 'flex flex-col gap-3 w-80' },
-            message: ({ props }) => ({
-                class: [
-                    'relative flex items-center gap-3 px-5 py-4 rounded-2xl border-2 border-brand-stroke shadow-[6px_6px_0px_0px_#001e1d] animate-fade-up',
-                    {
-                        'bg-brand-accent text-brand-stroke'       : props.message.severity === 'success',
-                        'bg-brand-tertiary text-brand-headline'   : props.message.severity === 'error',
-                        'bg-blue-100 text-blue-800'               : props.message.severity === 'info',
-                        'bg-yellow-100 text-yellow-800'           : props.message.severity === 'warn',
-                    }
-                ]
-            }),
-            messageIcon: { class: 'w-5 h-5 shrink-0' },
-            messageText: { class: 'font-black text-sm uppercase tracking-tight' },
-            summary:     { class: 'font-black text-sm uppercase tracking-tight' },
-            detail:      { class: 'font-medium text-xs opacity-80' },
-            closeButton: { class: 'shrink-0 p-1 rounded-lg opacity-60 hover:opacity-100 transition-opacity' },
-            closeIcon:   { class: 'w-4 h-4' },
-        }"
-    />
-
+    <Toast />
 
     <div class="min-h-screen p-4 md:p-8 flex flex-col antialiased">
         <!-- Toast Notification Container -->
@@ -47,7 +25,10 @@ const props = defineProps<{
             class="max-w-450 w-full mx-auto grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-8 grow items-stretch"
         >
             <!-- ================= 1. RIGHT COLUMN: Feed & Staff ================= -->
-            <FeedAndStaff :current-month-birthday-celebrants="props.currentMonthBirthdayCelebrants"/>
+            <FeedAndStaff
+                :today-birthday-celebrants="props.todayBirthdayCelebrants"
+                :announcements="props.announcements"
+            />
 
             <!-- ================= 2. CENTER COLUMN: Camera ================= -->
             <section
@@ -122,4 +103,3 @@ video.loaded {
     animation: slideIn 0.4s ease-out forwards;
 }
 </style>
-

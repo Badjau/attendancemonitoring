@@ -9,6 +9,7 @@ use Filament\Actions\ViewAction;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
 
 class AttendancesTable
 {
@@ -16,62 +17,80 @@ class AttendancesTable
     {
         return $table
             ->columns([
-                TextColumn::make('employee.id')
-                    ->formatStateUsing(fn ($record) => "{$record->employee->first_name} {$record->employee->last_name}")
-                    ->searchable(),
+                TextColumn::make('employee.first_name')
+                    ->label('Employee')
+                    ->formatStateUsing(fn($record) => "{$record->employee->first_name} {$record->employee->last_name}")
+                    ->searchable(query: function (Builder $query, string $search) {
+                        $query->whereHas('employee', function (Builder $query) use ($search) {
+                            $query->where('first_name', 'like', "%{$search}%")
+                                ->orWhere('last_name', 'like', "%{$search}%");
+                        });
+                    }),
 
                 TextColumn::make('rfid_uid')
                     ->searchable(),
+
                 TextColumn::make('attendance_date')
                     ->date()
                     ->sortable(),
+
                 TextColumn::make('time_in')
-                    ->dateTime()
+                    ->dateTime('h:i A')
                     ->sortable(),
+
                 TextColumn::make('time_out')
-                    ->dateTime()
+                    ->dateTime('h:i A')
                     ->sortable(),
+
                 TextColumn::make('total_hours')
                     ->numeric()
                     ->sortable(),
+
                 TextColumn::make('status')
                     ->badge()
                     ->searchable(),
+
                 IconColumn::make('is_late')
                     ->boolean(),
+
                 TextColumn::make('late_minutes')
                     ->numeric()
                     ->sortable(),
+
                 IconColumn::make('is_undertime')
-                    ->boolean(),
+                    ->boolean()
+                    ->toggleable(isToggledHiddenByDefault: true),
+
                 TextColumn::make('undertime_minutes')
                     ->numeric()
-                    ->sortable(),
-                IconColumn::make('is_overtime')
-                    ->boolean(),
-                TextColumn::make('overtime_minutes')
-                    ->numeric()
-                    ->sortable(),
-                TextColumn::make('overtime_status')
-                    ->badge()
-                    ->searchable(),
-                TextColumn::make('location')
-                    ->searchable(),
-                TextColumn::make('latitude')
-                    ->numeric()
-                    ->sortable(),
-                TextColumn::make('longitude')
-                    ->numeric()
-                    ->sortable(),
-                TextColumn::make('recorded_by')
-                    ->numeric()
-                    ->sortable(),
-                TextColumn::make('created_at')
-                    ->dateTime()
                     ->sortable()
                     ->toggleable(isToggledHiddenByDefault: true),
-                TextColumn::make('updated_at')
-                    ->dateTime()
+
+                IconColumn::make('is_overtime')
+                    ->boolean()
+                    ->toggleable(isToggledHiddenByDefault: true),
+
+                TextColumn::make('overtime_minutes')
+                    ->numeric()
+                    ->sortable()
+                    ->toggleable(isToggledHiddenByDefault: true),
+
+                TextColumn::make('overtime_status')
+                    ->badge()
+                    ->searchable()
+                    ->toggleable(isToggledHiddenByDefault: true),
+
+                TextColumn::make('location')
+                    ->searchable()
+                    ->toggleable(isToggledHiddenByDefault: true),
+
+                TextColumn::make('latitude')
+                    ->numeric()
+                    ->sortable()
+                    ->toggleable(isToggledHiddenByDefault: true),
+
+                TextColumn::make('longitude')
+                    ->numeric()
                     ->sortable()
                     ->toggleable(isToggledHiddenByDefault: true),
             ])

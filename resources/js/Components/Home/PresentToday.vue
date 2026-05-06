@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import {Users} from "@lucide/vue";
+import {CircleUser, Users} from "@lucide/vue";
 
 const props = defineProps<{
     attendanceToday: any;
@@ -39,10 +39,16 @@ const props = defineProps<{
                     class="flex items-center gap-3 p-2 rounded-xl hover:bg-brand-paragraph/20 transition-colors"
                 >
                     <img
-                        src="https://i.pravatar.cc/150?img=68"
-                        alt="avatar"
-                        class="w-10 h-10 rounded-full border border-brand-stroke"
+                        v-if="attendance?.employee?.media.length > 0"
+                        :src="attendance?.employee?.media[0].original_url"
+                        alt="Employee Profile"
+                        class="w-12 h-12 rounded-full border-2 border-brand-stroke"
                     />
+                    <CircleUser
+                        v-else
+                        class="w-8 h-8 text-brand-stroke"
+                    />
+
                     <div>
                         <p class="font-bold text-brand-stroke text-sm">
                             {{ attendance.employee.first_name }} {{ attendance.employee.last_name }}

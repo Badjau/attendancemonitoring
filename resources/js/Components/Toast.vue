@@ -1,33 +1,35 @@
 <script setup lang="ts">
 import {LogIn, LogOut} from '@lucide/vue'
 import {useToast} from "@/Composables/useToast";
+import {Toast} from "primevue";
 
 const {toasts} = useToast()
 </script>
 
 <template>
-    <div class="fixed top-6 right-6 space-y-3 z-50">
-        <div
-            v-for="toast in toasts"
-            :key="toast.id"
-            class="animate-fade-up flex items-center gap-4 px-6 py-4 rounded-2xl border-2 border-brand-stroke shadow-[6px_6px_0px_0px_#001e1d]"
-            :class="toast.type === 'in'
-        ? 'bg-brand-accent text-brand-stroke'
-        : 'bg-brand-tertiary text-brand-headline'"
-        >
-            <div class="p-2 bg-white/30 rounded-lg">
-                <LogIn v-if="toast.type === 'in'" class="w-5 h-5"/>
-                <LogOut v-else class="w-5 h-5"/>
-            </div>
-
-            <div>
-                <p class="font-black text-sm uppercase tracking-tight">
-                    {{ toast.message }}
-                </p>
-                <p v-if="toast.time" class="text-xs font-bold opacity-80">
-                    {{ toast.time }}
-                </p>
-            </div>
-        </div>
-    </div>
+    <Toast
+        position="top-right"
+        :pt="{
+            root: { class: 'flex flex-col gap-3 w-[20rem] max-w-[calc(100vw-2rem)]' },
+            message: ({ props }) => ({
+                class: [
+                    'relative w-full overflow-hidden rounded-2xl border-2 border-brand-stroke shadow-[6px_6px_0px_0px_#001e1d] animate-fade-up',
+                    {
+                        'bg-brand-accent text-brand-stroke'       : props.message.severity === 'success',
+                        'bg-brand-tertiary text-brand-headline'   : props.message.severity === 'error',
+                        'bg-blue-100 text-blue-800'               : props.message.severity === 'info',
+                        'bg-yellow-100 text-yellow-800'           : props.message.severity === 'warn',
+                    }
+                ]
+            }),
+            messageContent: { class: 'flex items-start gap-3 px-5 py-4' },
+            messageIcon: { class: 'mt-0.5 w-5 h-5 shrink-0' },
+            messageText: { class: 'min-w-0 flex-1' },
+            summary:     { class: 'block font-black text-sm uppercase leading-tight tracking-normal break-words' },
+            detail:      { class: 'mt-1 text-xs font-semibold leading-snug opacity-80 break-words' },
+            buttonContainer: { class: 'ml-auto shrink-0 self-start' },
+            closeButton: { class: 'inline-flex h-7 w-7 items-center justify-center rounded-lg opacity-60 hover:opacity-100 transition-opacity' },
+            closeIcon:   { class: 'w-4 h-4' },
+        }"
+    />
 </template>

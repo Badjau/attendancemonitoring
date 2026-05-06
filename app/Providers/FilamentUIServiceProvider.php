@@ -92,7 +92,7 @@ class FilamentUIServiceProvider extends ServiceProvider
         \Filament\Actions\Action::configureUsing(function (\Filament\Actions\Action $action) {
             $action
                 ->closeModalByClickingAway(false)
-                ->modalWidth(Width::FourExtraLarge);
+                ->modalWidth(Width::Medium);
         });
     }
 }
