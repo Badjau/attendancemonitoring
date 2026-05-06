@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import * as faceapi from 'face-api.js';
+import axios from 'axios';
 import {Camera, Fingerprint, LogIn, LogOut} from "@lucide/vue";
 import {nextTick, onMounted, onUnmounted, ref, watch} from "vue";
 import {router, usePage} from '@inertiajs/vue3'
@@ -14,6 +16,14 @@ type AttendanceGreeting = {
     is_birthday: boolean
     attendance_type: AttendanceAction
 }
+type VerifiedEmployee = {
+    id: number
+    employee_id: string
+    first_name: string
+    last_name: string
+    position: string
+    profile_url: string
+}
 
 const attendanceType = ref<AttendanceAction | ''>('')
 const videoRef = ref<HTMLVideoElement | null>(null)
@@ -21,6 +31,8 @@ const canvasRef = ref<HTMLCanvasElement | null>(null)
 const isLoading = ref(true)
 const isError = ref(false)
 const isVideoReady = ref(false)
+const isFaceModelReady = ref(false)
+const faceStatusText = ref('Face verification ready.')
 
 const currentTime = ref("")
 const currentDate = ref("")
@@ -36,9 +48,35 @@ let stream: MediaStream | null = null
 let interval: ReturnType<typeof setInterval>
 let focusInterval: ReturnType<typeof setInterval>
 let rfidTimeout: any = null
+const registeredFaceDescriptors = new Map<string, Float32Array>()
 
 const lastScannedTime = ref(0)
 const SCAN_COOLDOWN_MS = 1000
+const FACE_MODEL_PATH = '/models/face-api'
+const FACE_MATCH_THRESHOLD = 0.52
+const faceDetectorOptions = new faceapi.TinyFaceDetectorOptions({
+    inputSize: 416,
+    scoreThreshold: 0.5,
+})
+
+const employeeFullName = (employee: VerifiedEmployee): string => (
+    `${employee.first_name} ${employee.last_name}`.trim()
+)
+
+const loadFaceModels = async () => {
+    if (isFaceModelReady.value) return
+
+    faceStatusText.value = 'Loading face verification...'
+
+    await Promise.all([
+        faceapi.nets.tinyFaceDetector.loadFromUri(FACE_MODEL_PATH),
+        faceapi.nets.faceLandmark68Net.loadFromUri(FACE_MODEL_PATH),
+        faceapi.nets.faceRecognitionNet.loadFromUri(FACE_MODEL_PATH),
+    ])
+
+    isFaceModelReady.value = true
+    faceStatusText.value = 'Face verification ready.'
+}
 
 const initializeCamera = async () => {
     try {
@@ -123,6 +161,7 @@ const resetAttendanceSelection = () => {
     showEmployeeIdInputField.value = false
     manualEmployeeId.value = ''
     isLoading.value = false
+    faceStatusText.value = 'Face verification ready.'
     setTimeout(() => forceRFIDFocus(), 50)
 }
 
@@ -234,6 +273,148 @@ const captureAttendanceImage = (): string | null => {
     return image
 }
 
+const verifyEmployeeIdentifier = async (employeeIdentifier: string): Promise<VerifiedEmployee | null> => {
+    try {
+        faceStatusText.value = 'Checking employee ID...'
+
+        const response = await axios.post('/attendance/verify-employee', {
+            employee_id: employeeIdentifier,
+        })
+
+        return response.data.employee as VerifiedEmployee
+    } catch (error: any) {
+        const message = error?.response?.data?.message
+            ?? Object.values(error?.response?.data?.errors ?? {})?.[0]?.[0]
+            ?? 'Employee ID is not existing.'
+
+        toast.add({
+            severity: 'error',
+            summary: 'Employee',
+            detail: message,
+            life: 5000,
+        })
+
+        faceStatusText.value = message
+        resetAttendanceSelection()
+
+        return null
+    }
+}
+
+const getRegisteredFaceDescriptor = async (employee: VerifiedEmployee): Promise<Float32Array | null> => {
+    const cachedDescriptor = registeredFaceDescriptors.get(employee.employee_id)
+    if (cachedDescriptor) return cachedDescriptor
+
+    const image = await faceapi.fetchImage(employee.profile_url)
+    const detection = await faceapi
+        .detectSingleFace(image, faceDetectorOptions)
+        .withFaceLandmarks()
+        .withFaceDescriptor()
+
+    if (!detection) return null
+
+    registeredFaceDescriptors.set(employee.employee_id, detection.descriptor)
+
+    return detection.descriptor
+}
+
+const verifyLiveFaceMatchesEmployee = async (employee: VerifiedEmployee): Promise<boolean> => {
+    if (!videoRef.value || !isVideoReady.value) {
+        toast.add({
+            severity: 'error',
+            summary: 'Camera',
+            detail: 'Camera not ready. Please allow camera access.',
+            life: 5000,
+        })
+        return false
+    }
+
+    try {
+        await loadFaceModels()
+
+        faceStatusText.value = `Checking face for ${employeeFullName(employee)}...`
+
+        const registeredDescriptor = await getRegisteredFaceDescriptor(employee)
+        if (!registeredDescriptor) {
+            toast.add({
+                severity: 'error',
+                summary: 'Face Verification',
+                detail: 'The registered face photo cannot be read. Please register this face again.',
+                life: 6000,
+            })
+            faceStatusText.value = 'Registered face cannot be read.'
+            return false
+        }
+
+        const detections = await faceapi
+            .detectAllFaces(videoRef.value, faceDetectorOptions)
+            .withFaceLandmarks()
+            .withFaceDescriptors()
+
+        if (detections.length !== 1) {
+            const detail = detections.length === 0
+                ? 'No face detected. Look straight at the camera.'
+                : 'Only one face should be visible before scanning.'
+
+            toast.add({
+                severity: 'warn',
+                summary: 'Face Verification',
+                detail,
+                life: 5000,
+            })
+            faceStatusText.value = detail
+            return false
+        }
+
+        const distance = faceapi.euclideanDistance(registeredDescriptor, detections[0].descriptor)
+        const isMatch = distance <= FACE_MATCH_THRESHOLD
+
+        if (!isMatch) {
+            toast.add({
+                severity: 'error',
+                summary: 'Face Verification',
+                detail: `Face does not match ${employeeFullName(employee)}.`,
+                life: 6000,
+            })
+            faceStatusText.value = `Face mismatch. Distance: ${distance.toFixed(2)}.`
+            return false
+        }
+
+        faceStatusText.value = `Face matched ${employeeFullName(employee)}.`
+        return true
+    } catch (error) {
+        console.error('Face verification failed:', error)
+        toast.add({
+            severity: 'error',
+            summary: 'Face Verification',
+            detail: 'Unable to verify face. Check lighting and registered face image.',
+            life: 6000,
+        })
+        faceStatusText.value = 'Unable to verify face.'
+        return false
+    }
+}
+
+const verifyEmployeeFaceAndSubmit = async (employeeIdentifier: string, method: AttendanceMethod): Promise<void> => {
+    const employee = await verifyEmployeeIdentifier(employeeIdentifier)
+    if (!employee) return
+
+    const isFaceMatch = await verifyLiveFaceMatchesEmployee(employee)
+    if (!isFaceMatch) {
+        isLoading.value = false
+        setTimeout(() => forceRFIDFocus(), 50)
+        return
+    }
+
+    const image = captureAttendanceImage()
+    if (!image) {
+        isLoading.value = false
+        return
+    }
+
+    await submitAttendance(employee.employee_id, image, method)
+}
+
 const submitRFIDAttendance = async (rfid: any) => {
     const scannedRfid = rfid?.trim()
 
@@ -258,14 +439,13 @@ const submitRFIDAttendance = async (rfid: any) => {
 
     console.log('Processing RFID scan:', scannedRfid);
 
-    const image = captureAttendanceImage()
-    if (!image) return
-
     try {
-        console.log('Submitting RFID attendance...');
-        await submitAttendance(scannedRfid, image, 'rfid')
+        isLoading.value = true
+        console.log('Verifying RFID attendance...');
+        await verifyEmployeeFaceAndSubmit(scannedRfid, 'rfid')
     } catch (e) {
         console.error('Error submitting RFID attendance:', e);
+        isLoading.value = false
     }
 }
 
@@ -284,16 +464,15 @@ const submitManualAttendance = async () => {
 
     if (!ensureAttendanceTypeSelected('submitting')) return
 
-    const image = captureAttendanceImage()
-    if (!image) return
-
     try {
-        console.log('Submitting keypad attendance...');
-        await submitAttendance(employeeId, image, 'keypad')
+        isLoading.value = true
+        console.log('Verifying keypad attendance...');
+        await verifyEmployeeFaceAndSubmit(employeeId, 'keypad')
         manualEmployeeId.value = ''
         setTimeout(() => forceRFIDFocus(), 50)
     } catch (e) {
         console.error('Error submitting keypad attendance:', e);
+        isLoading.value = false
     }
 }
 
@@ -396,6 +575,10 @@ onMounted(async () => {
     interval = setInterval(updateTime, 1000)
 
     await initializeCamera()
+    await loadFaceModels().catch((error) => {
+        console.error('Face model load failed:', error)
+        faceStatusText.value = 'Face verification failed to load.'
+    })
 
     ensureRFIDFocus()
 
@@ -563,6 +746,12 @@ onUnmounted(() => {
                         class="text-brand-stroke text-sm font-bold italic"
                     >
                         Look straight at the camera to record your attendance.
+                    </p>
+                    <p
+                        v-if="showEmployeeIdInputField || faceStatusText !== 'Face verification ready.'"
+                        class="text-brand-bg text-xs font-black uppercase tracking-wide"
+                    >
+                        {{ faceStatusText }}
                     </p>
                 </div>
             </div>

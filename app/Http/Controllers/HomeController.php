@@ -19,7 +19,7 @@ class HomeController extends Controller
             ->take(10)
             ->get();
 
-        $todayBirthdayCelebrants = Employee::with(['media'])
+        $todayBirthdayCelebrants = Employee::with(['media', 'department'])
             ->whereMonth('date_of_birth', Carbon::now()->month)
             ->whereDay('date_of_birth', Carbon::now()->day)
             ->get();

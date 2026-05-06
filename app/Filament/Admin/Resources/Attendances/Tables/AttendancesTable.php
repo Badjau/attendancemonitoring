@@ -2,14 +2,19 @@
 
 namespace App\Filament\Admin\Resources\Attendances\Tables;
 
+use App\Enums\Attendance\Status;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
 use Filament\Actions\ViewAction;
+use Filament\Forms\Components\Select;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
+use Malzariey\FilamentDaterangepickerFilter\Filters\DateRangeFilter;
+use pxlrbt\FilamentExcel\Actions\ExportBulkAction;
 
 class AttendancesTable
 {
@@ -28,6 +33,7 @@ class AttendancesTable
                     }),
 
                 TextColumn::make('rfid_uid')
+                    ->label('RFID')
                     ->searchable(),
 
                 TextColumn::make('attendance_date')
@@ -95,7 +101,25 @@ class AttendancesTable
                     ->toggleable(isToggledHiddenByDefault: true),
             ])
             ->filters([
-                //
+                SelectFilter::make('status')
+                    ->options(Status::class),
+
+                SelectFilter::make('employee_id')
+                    ->label('Employee')
+                    ->relationship(
+                        'employee',
+                        'first_name',
+                        fn($query) => $query->orderBy('first_name')->orderBy('last_name')
+                    )
+                    ->getOptionLabelFromRecordUsing(fn($record) => "{$record->first_name} {$record->last_name}")
+                    ->preload()
+                    ->searchable(),
+
+                DateRangeFilter::make('attendance_date')
+                    ->autoApply()
+                    ->linkedCalendars()
+                    ->withIndicator()
+
             ])
             ->recordActions([
                 ViewAction::make(),
@@ -104,6 +128,8 @@ class AttendancesTable
             ->toolbarActions([
                 BulkActionGroup::make([
                     DeleteBulkAction::make(),
+
+                    ExportBulkAction::make()
                 ]),
             ]);
     }
