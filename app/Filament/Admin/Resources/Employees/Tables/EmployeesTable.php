@@ -7,6 +7,7 @@ use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
 use Filament\Actions\ViewAction;
 use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 
 class EmployeesTable
@@ -40,6 +41,11 @@ class EmployeesTable
                     ->searchable()
                     ->sortable(),
 
+                TextColumn::make('department.name')
+                    ->label('Department')
+                    ->searchable()
+                    ->sortable(),
+
                 TextColumn::make('created_at')
                     ->dateTime()
                     ->sortable()
@@ -50,7 +56,13 @@ class EmployeesTable
                     ->toggleable(isToggledHiddenByDefault: true),
             ])
             ->filters([
-                //
+                SelectFilter::make('department_id')
+                    ->label('Department')
+                    ->relationship('department', 'name')
+                    ->searchable()
+                    ->preload(),
+
+                SelectFilter::make('position')
             ])
             ->recordActions([
                 ViewAction::make(),

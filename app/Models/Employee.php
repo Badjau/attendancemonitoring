@@ -25,9 +25,16 @@ class Employee extends Model implements HasMedia
         'date_of_birth' => 'date',
     ];
 
+    protected $appends = ['name'];
+
     public function registerMediaCollections(): void
     {
         $this->addMediaCollection('employee-profile')->singleFile();
+    }
+
+    public function getNameAttribute(): string
+    {
+        return "{$this->first_name} {$this->last_name}";
     }
 
     public function department(): BelongsTo

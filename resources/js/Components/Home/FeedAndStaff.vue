@@ -152,7 +152,7 @@ const closeAnnouncement = () => {
                     <div>
                         <p class="font-bold text-sm">{{ celebrant.first_name }} {{ celebrant.last_name }}</p>
                         <p class="text-xs opacity-70">{{ formatDate(celebrant.date_of_birth) }}</p>
-                        <p class="text-xs opacity-70">Marketing Dept</p>
+                        <p class="text-xs opacity-70">{{ celebrant.department?.name ?? null }}</p>
                     </div>
                 </div>
                 <div

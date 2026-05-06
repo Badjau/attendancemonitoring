@@ -2,6 +2,7 @@
 
 namespace App\Filament\Admin\Resources\Employees\Schemas;
 
+use Filament\Infolists\Components\SpatieMediaLibraryImageEntry;
 use Filament\Infolists\Components\TextEntry;
 use Filament\Schemas\Schema;
 
@@ -11,15 +12,38 @@ class EmployeeInfolist
     {
         return $schema
             ->components([
-                TextEntry::make('employee_id'),
-                TextEntry::make('first_name'),
-                TextEntry::make('last_name'),
-                TextEntry::make('middle_name'),
-                TextEntry::make('created_at')
-                    ->dateTime()
+                SpatieMediaLibraryImageEntry::make('registered_face')
+                    ->label('Registered Face')
+                    ->collection('employee-profile')
+                    ->imageHeight(220)
+                    ->imageWidth(220)
+                    ->circular()
+                    ->columnSpanFull()
+                    ->placeholder('No registered face.'),
+
+                TextEntry::make('employee_id')
+                    ->label('Employee ID'),
+
+                TextEntry::make('first_name')
+                    ->label('First Name'),
+
+                TextEntry::make('last_name')
+                    ->label('Last Name'),
+
+                TextEntry::make('middle_name')
+                    ->label('Middle Name'),
+
+                TextEntry::make('date_of_birth')
+                    ->label('Date of Birth')
+                    ->date('F d, Y')
                     ->placeholder('-'),
-                TextEntry::make('updated_at')
-                    ->dateTime()
+
+                TextEntry::make('position')
+                    ->label('Position')
+                    ->placeholder('-'),
+
+                TextEntry::make('department.name')
+                    ->label('Department')
                     ->placeholder('-'),
             ]);
     }
