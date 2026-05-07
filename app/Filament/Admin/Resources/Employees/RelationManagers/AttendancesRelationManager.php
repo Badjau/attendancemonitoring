@@ -1,41 +1,27 @@
 <?php
 
-namespace App\Filament\Admin\Resources\Attendances\Tables;
+namespace App\Filament\Admin\Resources\Employees\RelationManagers;
 
 use App\Enums\Attendance\Status;
-use Filament\Actions\BulkActionGroup;
-use Filament\Actions\DeleteBulkAction;
-use Filament\Actions\EditAction;
-use Filament\Actions\ViewAction;
-use Filament\Forms\Components\Select;
+use App\Filament\Admin\Resources\Attendances\AttendanceResource;
+use Filament\Actions\CreateAction;
+use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
-use Illuminate\Database\Eloquent\Builder;
 use Malzariey\FilamentDaterangepickerFilter\Filters\DateRangeFilter;
-use pxlrbt\FilamentExcel\Actions\ExportBulkAction;
 
-class AttendancesTable
+class AttendancesRelationManager extends RelationManager
 {
-    public static function configure(Table $table): Table
+    protected static string $relationship = 'attendances';
+
+    protected static ?string $relatedResource = AttendanceResource::class;
+
+    public function table(Table $table): Table
     {
         return $table
             ->columns([
-                TextColumn::make('employee.first_name')
-                    ->label('Employee')
-                    ->formatStateUsing(fn($record) => "{$record->employee->first_name} {$record->employee->last_name}")
-                    ->searchable(query: function (Builder $query, string $search) {
-                        $query->whereHas('employee', function (Builder $query) use ($search) {
-                            $query->where('first_name', 'like', "%{$search}%")
-                                ->orWhere('last_name', 'like', "%{$search}%");
-                        });
-                    }),
-
-                TextColumn::make('rfid_uid')
-                    ->label('RFID')
-                    ->searchable(),
-
                 TextColumn::make('attendance_date')
                     ->date()
                     ->sortable(),
@@ -102,17 +88,7 @@ class AttendancesTable
             ])
             ->filters([
                 SelectFilter::make('status')
-                    ->options(Status::class),
-
-                SelectFilter::make('employee_id')
-                    ->label('Employee')
-                    ->relationship(
-                        'employee',
-                        'first_name',
-                        fn($query) => $query->orderBy('first_name')->orderBy('last_name')
-                    )
-                    ->getOptionLabelFromRecordUsing(fn($record) => "{$record->first_name} {$record->last_name}")
-                    ->preload()
+                    ->options(Status::class)
                     ->searchable(),
 
                 DateRangeFilter::make('attendance_date')
@@ -120,16 +96,8 @@ class AttendancesTable
                     ->linkedCalendars()
                     ->withIndicator()
             ])
-            ->recordActions([
-                ViewAction::make(),
-                EditAction::make(),
-            ])
-            ->toolbarActions([
-                BulkActionGroup::make([
-                    DeleteBulkAction::make(),
-
-                    ExportBulkAction::make()
-                ]),
+            ->headerActions([
+                CreateAction::make(),
             ]);
     }
 }

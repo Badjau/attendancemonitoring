@@ -6,6 +6,7 @@ use App\Filament\Admin\Resources\Employees\Pages\CreateEmployee;
 use App\Filament\Admin\Resources\Employees\Pages\EditEmployee;
 use App\Filament\Admin\Resources\Employees\Pages\ListEmployees;
 use App\Filament\Admin\Resources\Employees\Pages\ViewEmployee;
+use App\Filament\Admin\Resources\Employees\RelationManagers\AttendancesRelationManager;
 use App\Filament\Admin\Resources\Employees\Schemas\EmployeeForm;
 use App\Filament\Admin\Resources\Employees\Schemas\EmployeeInfolist;
 use App\Filament\Admin\Resources\Employees\Tables\EmployeesTable;
@@ -42,7 +43,7 @@ class EmployeeResource extends Resource
     public static function getRelations(): array
     {
         return [
-            //
+            AttendancesRelationManager::class
         ];
     }
 

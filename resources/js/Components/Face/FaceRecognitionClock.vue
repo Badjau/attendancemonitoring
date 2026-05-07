@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import * as faceapi from 'face-api.js';
-import {Camera, CheckCircle2, Clock, LogIn, LogOut, ScanFace, UserRound, UsersRound} from '@lucide/vue';
+import {Camera, CheckCircle2, Clock, LoaderCircle, LogIn, LogOut, MapPin, ScanFace, TriangleAlert, UserRound, UsersRound} from '@lucide/vue';
 import {computed, nextTick, onMounted, onUnmounted, ref} from 'vue';
 import {router, usePage} from '@inertiajs/vue3';
 import {useToast} from 'primevue';
+import {useGeolocator} from '@/Composables/useGeolocator.js';
 
 type AttendanceAction = 'time-in' | 'time-out'
 
@@ -28,6 +29,13 @@ const props = defineProps<{
 
 const page = usePage();
 const toast = useToast();
+const {
+    coords,
+    error: locationError,
+    loading: locationLoading,
+    accuracyWarning,
+    getLocation,
+} = useGeolocator();
 
 const videoRef = ref<HTMLVideoElement | null>(null);
 const overlayRef = ref<HTMLCanvasElement | null>(null);
@@ -62,6 +70,10 @@ const detectorOptions = computed(() => new faceapi.TinyFaceDetectorOptions({
 
 const employeesWithPhotos = computed(() => props.employees.filter((employee) => employee.profile_url));
 const selectedActionLabel = computed(() => attendanceType.value === 'time-in' ? 'Time In' : 'Time Out');
+const isLocationReady = computed(() => Boolean(coords.value)
+    && Number.isFinite(coords.value.latitude)
+    && Number.isFinite(coords.value.longitude)
+    && !locationError.value);
 
 const employeeName = (employee: FaceEmployee) => `${employee.first_name} ${employee.last_name}`.trim();
 
@@ -199,6 +211,16 @@ const submitAttendance = (employee: FaceEmployee) => {
     const now = Date.now();
     if (isSubmitting.value || now - lastSubmitAt < submitCooldownMs) return;
 
+    if (locationLoading.value || locationError.value || !isLocationReady.value) {
+        toast.add({
+            severity: 'error',
+            summary: 'Location',
+            detail: locationError.value || 'Waiting for GPS location.',
+            life: 5000,
+        });
+        return;
+    }
+
     const image = captureAttendanceImage();
     if (!image) {
         toast.add({
@@ -214,13 +236,21 @@ const submitAttendance = (employee: FaceEmployee) => {
     isSubmitting.value = true;
     statusText.value = `Recording ${selectedActionLabel.value.toLowerCase()} for ${employeeName(employee)}...`;
 
-    const formData = new FormData();
-    formData.append('rfid', employee.employee_id);
-    formData.append('attendance_method', 'face');
-    formData.append('attendance_type', attendanceType.value);
-    formData.append('attendance-image', image, `face_attendance_${Date.now()}.jpg`);
+    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content');
+    const payload = {
+        rfid: employee.employee_id,
+        attendance_method: 'face',
+        attendance_type: attendanceType.value,
+        latitude: coords.value.latitude,
+        longitude: coords.value.longitude,
+        'attendance-image': new File([image], `face_attendance_${Date.now()}.jpg`, {
+            type: 'image/jpeg',
+        }),
+        ...(csrfToken ? {_token: csrfToken} : {}),
+    };
 
-    router.post('/attendance/record-time-in', formData, {
+    router.post('/attendance/record-time-in', payload, {
+        forceFormData: true,
         preserveState: true,
         preserveScroll: true,
         onSuccess: () => {
@@ -338,6 +368,7 @@ const startRecognitionLoop = () => {
 onMounted(async () => {
     updateTime();
     clockInterval = setInterval(updateTime, 1000);
+    getLocation().catch(() => null);
 
     try {
         await loadModels();
@@ -394,6 +425,20 @@ onUnmounted(() => {
                     <span class="h-2.5 w-2.5 rounded-full bg-brand-tertiary" :class="{'animate-pulse': isCameraReady && isModelReady}"/>
                     <span class="text-xs font-black uppercase text-brand-stroke">
                         {{ isSubmitting ? 'Recording' : 'Live Recognition' }}
+                    </span>
+                </div>
+
+                <div class="absolute right-4 top-4 flex items-center gap-2 rounded-full border border-brand-stroke bg-brand-card px-4 py-2">
+                    <LoaderCircle v-if="locationLoading" class="h-4 w-4 animate-spin text-brand-stroke"/>
+                    <TriangleAlert v-else-if="locationError" class="h-4 w-4 text-red-600"/>
+                    <TriangleAlert v-else-if="accuracyWarning" class="h-4 w-4 text-yellow-600"/>
+                    <MapPin v-else class="h-4 w-4 text-green-600"/>
+                    <span class="text-xs font-black uppercase text-brand-stroke">
+                        <template v-if="locationLoading">Getting location...</template>
+                        <template v-else-if="locationError">Location unavailable</template>
+                        <template v-else-if="accuracyWarning">Low GPS accuracy. Please move to an open area.</template>
+                        <template v-else-if="isLocationReady">Location ready</template>
+                        <template v-else>Location pending</template>
                     </span>
                 </div>
             </div>

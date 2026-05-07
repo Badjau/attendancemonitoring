@@ -13,7 +13,7 @@ class EmployeeInfolist
         return $schema
             ->components([
                 SpatieMediaLibraryImageEntry::make('registered_face')
-                    ->label('Registered Face')
+                    ->label(__(null))
                     ->collection('employee-profile')
                     ->imageHeight(220)
                     ->imageWidth(220)

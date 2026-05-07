@@ -2,6 +2,7 @@
 
 namespace App\Filament\Admin\Resources\Employees\Pages;
 
+use App\Filament\Admin\Resources\Attendances\Widgets\AttendanceOverview;
 use App\Filament\Admin\Resources\Employees\EmployeeResource;
 use Filament\Actions\EditAction;
 use Filament\Resources\Pages\ViewRecord;
@@ -14,6 +15,14 @@ class ViewEmployee extends ViewRecord
     {
         return [
             EditAction::make(),
+        ];
+    }
+
+
+    protected function getHeaderWidgets(): array
+    {
+        return [
+            AttendanceOverview::class,
         ];
     }
 }

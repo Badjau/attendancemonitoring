@@ -1,13 +1,22 @@
 <script setup lang="ts">
 import * as faceapi from 'face-api.js';
 import axios from 'axios';
-import {Camera, Fingerprint, LogIn, LogOut} from "@lucide/vue";
-import {nextTick, onMounted, onUnmounted, ref, watch} from "vue";
+import {Camera, Fingerprint, LoaderCircle, LogIn, LogOut, MapPin, TriangleAlert} from "@lucide/vue";
+import {computed, nextTick, onMounted, onUnmounted, ref, watch} from "vue";
 import {router, usePage} from '@inertiajs/vue3'
 import {useToast} from "primevue";
+import {useGeolocator} from '@/Composables/useGeolocator.js';
 
 const page = usePage();
 const toast = useToast();
+const {
+    coords,
+    error: locationError,
+    loading: locationLoading,
+    accuracyWarning,
+    getLocation,
+} = useGeolocator();
+
 
 type AttendanceAction = "time-in" | "time-out"
 type AttendanceMethod = "rfid" | "keypad" | "fingerprint"
@@ -58,6 +67,10 @@ const faceDetectorOptions = new faceapi.TinyFaceDetectorOptions({
     inputSize: 416,
     scoreThreshold: 0.5,
 })
+const isLocationReady = computed(() => Boolean(coords.value)
+    && Number.isFinite(coords.value.latitude)
+    && Number.isFinite(coords.value.longitude)
+    && !locationError.value)
 
 const employeeFullName = (employee: VerifiedEmployee): string => (
     `${employee.first_name} ${employee.last_name}`.trim()
@@ -489,6 +502,18 @@ const submitFingerprintAttendance = async () => {
 
 const submitAttendance = (employeeIdentifier: string, image: string, method: AttendanceMethod): Promise<void> => {
     return new Promise((resolve, reject) => {
+        if (locationLoading.value || locationError.value || !isLocationReady.value) {
+            toast.add({
+                severity: 'error',
+                summary: 'Location',
+                detail: locationError.value || 'Waiting for GPS location.',
+                life: 5000,
+            })
+
+            reject(new Error('Location is not ready.'))
+            return
+        }
+
         const formData = new FormData()
 
         // Keep "rfid" for the existing backend contract. attendance_method
@@ -496,9 +521,18 @@ const submitAttendance = (employeeIdentifier: string, image: string, method: Att
         formData.append('rfid', employeeIdentifier)
         formData.append('attendance_method', method)
         formData.append('attendance_type', attendanceType.value)
+        formData.append('latitude', String(coords.value.latitude))
+        formData.append('longitude', String(coords.value.longitude))
+        console.log('Coordination: ', coords.value)
 
         const blob = base64ToBlob(image, 'image/jpeg')
         formData.append('attendance-image', blob, `attendance_${Date.now()}.jpg`)
+
+        const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content')
+
+        if (csrfToken) {
+            formData.append('_token', csrfToken)
+        }
 
         isLoading.value = true
 
@@ -573,6 +607,7 @@ const onDocumentClick = (e: MouseEvent) => {
 onMounted(async () => {
     updateTime()
     interval = setInterval(updateTime, 1000)
+    getLocation().catch(() => null)
 
     await initializeCamera()
     await loadFaceModels().catch((error) => {
@@ -608,7 +643,7 @@ onUnmounted(() => {
 
 <template>
     <div
-        class="bg-brand-card rounded-[2.5rem] p-4 shadow-[12px_12px_0px_0px_#001e1d] border-2 border-brand-stroke relative overflow-hidden flex flex-col h-[260px] sm:h-[320px] lg:h-[360px] xl:h-[390px]"
+        class="bg-brand-card rounded-[2.5rem] p-4 shadow-[12px_12px_0px_0px_#001e1d] border-2 border-brand-stroke relative overflow-hidden flex flex-col h-65 sm:h-80 lg:h-90 xl:h-97.5"
     >
         <div
             class="absolute top-8 left-8 z-10 bg-brand-stroke rounded-full px-4 py-2 flex items-center gap-2 shadow-lg"
@@ -616,6 +651,22 @@ onUnmounted(() => {
             <div class="w-2 h-2 rounded-full bg-brand-tertiary animate-pulse"></div>
             <span class="text-brand-headline text-xs font-bold tracking-widest">
                 LIVE
+            </span>
+        </div>
+
+        <div
+            class="absolute top-8 right-8 z-10 bg-brand-card rounded-full px-4 py-2 flex items-center gap-2 shadow-lg border border-brand-stroke"
+        >
+            <LoaderCircle v-if="locationLoading" class="h-4 w-4 animate-spin text-brand-stroke"/>
+            <TriangleAlert v-else-if="locationError" class="h-4 w-4 text-red-600"/>
+            <TriangleAlert v-else-if="accuracyWarning" class="h-4 w-4 text-yellow-600"/>
+            <MapPin v-else class="h-4 w-4 text-green-600"/>
+            <span class="text-brand-stroke text-xs font-bold tracking-widest">
+                <template v-if="locationLoading">GPS...</template>
+                <template v-else-if="locationError">GPS blocked</template>
+                <template v-else-if="accuracyWarning">Low GPS</template>
+                <template v-else-if="isLocationReady">GPS ready</template>
+                <template v-else>GPS pending</template>
             </span>
         </div>
 
