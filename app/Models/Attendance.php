@@ -32,6 +32,8 @@ class Attendance extends Model implements HasMedia
         'location',
         'latitude',
         'longitude',
+        'location_status',
+        'zone_id',
         'remarks',
         'recorded_by'
     ];
@@ -49,8 +51,8 @@ class Attendance extends Model implements HasMedia
         'is_overtime' => 'boolean',
         'overtime_minutes' => 'integer',
         'overtime_status' => OvertimeStatus::class,
-        'latitude' => 'decimal:10',
-        'longitude' => 'decimal:10',
+        'latitude' => 'float',
+        'longitude' => 'float',
     ];
 
     public function registerMediaCollections(): void
@@ -90,6 +92,11 @@ class Attendance extends Model implements HasMedia
     public function employee(): BelongsTo
     {
         return $this->belongsTo(Employee::class);
+    }
+
+    public function zone(): BelongsTo
+    {
+        return $this->belongsTo(Zone::class);
     }
 
     public function recordedBy(): BelongsTo

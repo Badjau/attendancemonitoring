@@ -7,6 +7,7 @@ use Filament\Forms\Components\Field;
 use Filament\Infolists\Components\Entry;
 use Filament\Support\Enums\Width;
 use Filament\Tables\Columns\Column;
+use Filament\Tables\Table;
 use Illuminate\Support\ServiceProvider;
 use Filament\Schemas\Components\Component;
 
@@ -93,6 +94,10 @@ class FilamentUIServiceProvider extends ServiceProvider
             $action
                 ->closeModalByClickingAway(false)
                 ->modalWidth(Width::Medium);
+        });
+
+        Table::configureUsing(function (Table $table) {
+            return $table->defaultSort('created_at', 'desc');
         });
     }
 }

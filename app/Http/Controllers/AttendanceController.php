@@ -13,6 +13,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Validation\ValidationException;
 
 class AttendanceController extends Controller
 {
@@ -68,6 +69,8 @@ class AttendanceController extends Controller
                     'is_birthday' => $employee->date_of_birth?->isBirthday() ?? false,
                     'attendance_type' => $request->attendance_type,
                 ]);
+        } catch (ValidationException $e) {
+            return redirect()->back()->withErrors($e->errors());
         } catch (\Exception $e) {
             Log::info('error in recording the attendance: ' . $e->getMessage());
 

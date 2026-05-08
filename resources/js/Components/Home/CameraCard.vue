@@ -1,13 +1,22 @@
 <script setup lang="ts">
 import * as faceapi from 'face-api.js';
 import axios from 'axios';
-import {Camera, Fingerprint, LogIn, LogOut} from "@lucide/vue";
-import {nextTick, onMounted, onUnmounted, ref, watch} from "vue";
+import {Camera, Fingerprint, LoaderCircle, LogIn, LogOut, MapPin, TriangleAlert} from "@lucide/vue";
+import {computed, nextTick, onMounted, onUnmounted, ref, watch} from "vue";
 import {router, usePage} from '@inertiajs/vue3'
 import {useToast} from "primevue";
+import {useGeolocator} from '@/Composables/useGeolocator.js';
 
 const page = usePage();
 const toast = useToast();
+const {
+    coords,
+    error: locationError,
+    loading: locationLoading,
+    accuracyWarning,
+    getLocation,
+} = useGeolocator();
+
 
 type AttendanceAction = "time-in" | "time-out"
 type AttendanceMethod = "rfid" | "keypad" | "fingerprint"
@@ -58,6 +67,10 @@ const faceDetectorOptions = new faceapi.TinyFaceDetectorOptions({
     inputSize: 416,
     scoreThreshold: 0.5,
 })
+const isLocationReady = computed(() => Boolean(coords.value)
+    && Number.isFinite(coords.value.latitude)
+    && Number.isFinite(coords.value.longitude)
+    && !locationError.value)
 
 const employeeFullName = (employee: VerifiedEmployee): string => (
     `${employee.first_name} ${employee.last_name}`.trim()
@@ -253,6 +266,78 @@ const ensureAttendanceTypeSelected = (actionLabel: string): boolean => {
     }
 
     return true
+}
+
+const csrfToken = (): string => document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || ''
+
+const decodeWebAuthn = (input: string): Uint8Array => {
+    input = input.replace(/-/g, '+').replace(/_/g, '/')
+    const pad = input.length % 4
+    if (pad) input += '='.repeat(4 - pad)
+
+    return Uint8Array.from(atob(input), char => char.charCodeAt(0))
+}
+
+const encodeWebAuthn = (buffer: ArrayBuffer): string => btoa(String.fromCharCode(...new Uint8Array(buffer)))
+
+const parseWebAuthnOptions = (publicKey: any): PublicKeyCredentialRequestOptions | PublicKeyCredentialCreationOptions => {
+    publicKey.challenge = decodeWebAuthn(publicKey.challenge)
+
+    if (publicKey.user?.id) {
+        publicKey.user.id = decodeWebAuthn(publicKey.user.id)
+    }
+
+    for (const key of ['excludeCredentials', 'allowCredentials']) {
+        if (!publicKey[key]) continue
+
+        publicKey[key] = publicKey[key].map((credential: any) => ({
+            ...credential,
+            id: decodeWebAuthn(credential.id),
+        }))
+    }
+
+    return publicKey
+}
+
+const parseWebAuthnCredential = (credential: any): any => {
+    const response: Record<string, string> = {}
+
+    for (const key of ['clientDataJSON', 'attestationObject', 'authenticatorData', 'signature', 'userHandle']) {
+        if (credential.response[key]) {
+            response[key] = encodeWebAuthn(credential.response[key])
+        }
+    }
+
+    return {
+        id: credential.id,
+        rawId: encodeWebAuthn(credential.rawId),
+        type: credential.type,
+        authenticatorAttachment: credential.authenticatorAttachment,
+        clientExtensionResults: credential.getClientExtensionResults(),
+        response,
+    }
+}
+
+const postWebAuthnJson = async (url: string, data: Record<string, any> = {}): Promise<any> => {
+    const response = await fetch(url, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: {
+            Accept: 'application/json',
+            'Content-Type': 'application/json',
+            'X-CSRF-TOKEN': csrfToken(),
+            'X-Requested-With': 'XMLHttpRequest',
+        },
+        body: JSON.stringify(data),
+    })
+
+    const payload = await response.json().catch(() => ({}))
+
+    if (!response.ok) {
+        throw new Error(payload.message || Object.values(payload.errors ?? {})?.[0]?.[0] || 'Fingerprint verification failed.')
+    }
+
+    return payload
 }
 
 const captureAttendanceImage = (): string | null => {
@@ -479,16 +564,76 @@ const submitManualAttendance = async () => {
 const submitFingerprintAttendance = async () => {
     if (!ensureAttendanceTypeSelected('fingerprint scanning')) return
 
-    toast.add({
-        severity: 'info',
-        summary: 'Fingerprint',
-        detail: 'Fingerprint attendance is not configured yet.',
-        life: 5000,
-    })
+    if (typeof PublicKeyCredential === 'undefined') {
+        toast.add({
+            severity: 'error',
+            summary: 'Fingerprint',
+            detail: 'This browser does not support fingerprint authentication.',
+            life: 5000,
+        })
+        return
+    }
+
+    if (locationLoading.value || locationError.value || !isLocationReady.value) {
+        toast.add({
+            severity: 'error',
+            summary: 'Location',
+            detail: locationError.value || 'Waiting for GPS location.',
+            life: 5000,
+        })
+        return
+    }
+
+    try {
+        isLoading.value = true
+        faceStatusText.value = 'Waiting for fingerprint verification...'
+
+        const options = await postWebAuthnJson('/attendance/fingerprint/options')
+        const credential = await navigator.credentials.get({
+            publicKey: parseWebAuthnOptions(options) as PublicKeyCredentialRequestOptions,
+        })
+
+        const payload = await postWebAuthnJson('/attendance/fingerprint/record', {
+            ...parseWebAuthnCredential(credential),
+            attendance_type: attendanceType.value,
+            latitude: coords.value.latitude,
+            longitude: coords.value.longitude,
+        })
+
+        toast.add({
+            severity: 'success',
+            summary: 'Success',
+            detail: payload.message ?? 'Attendance recorded successfully.',
+            life: 5000,
+        })
+
+        announceAttendanceGreeting(payload.greeting)
+        resetAttendanceSelection()
+    } catch (error) {
+        toast.add({
+            severity: 'error',
+            summary: 'Fingerprint',
+            detail: error instanceof Error ? error.message : 'Fingerprint attendance failed.',
+            life: 5000,
+        })
+        resetAttendanceSelection()
+    }
 }
 
 const submitAttendance = (employeeIdentifier: string, image: string, method: AttendanceMethod): Promise<void> => {
     return new Promise((resolve, reject) => {
+        if (locationLoading.value || locationError.value || !isLocationReady.value) {
+            toast.add({
+                severity: 'error',
+                summary: 'Location',
+                detail: locationError.value || 'Waiting for GPS location.',
+                life: 5000,
+            })
+
+            reject(new Error('Location is not ready.'))
+            return
+        }
+
         const formData = new FormData()
 
         // Keep "rfid" for the existing backend contract. attendance_method
@@ -496,9 +641,18 @@ const submitAttendance = (employeeIdentifier: string, image: string, method: Att
         formData.append('rfid', employeeIdentifier)
         formData.append('attendance_method', method)
         formData.append('attendance_type', attendanceType.value)
+        formData.append('latitude', String(coords.value.latitude))
+        formData.append('longitude', String(coords.value.longitude))
+        console.log('Coordination: ', coords.value)
 
         const blob = base64ToBlob(image, 'image/jpeg')
         formData.append('attendance-image', blob, `attendance_${Date.now()}.jpg`)
+
+        const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content')
+
+        if (csrfToken) {
+            formData.append('_token', csrfToken)
+        }
 
         isLoading.value = true
 
@@ -573,6 +727,7 @@ const onDocumentClick = (e: MouseEvent) => {
 onMounted(async () => {
     updateTime()
     interval = setInterval(updateTime, 1000)
+    getLocation().catch(() => null)
 
     await initializeCamera()
     await loadFaceModels().catch((error) => {
@@ -608,7 +763,7 @@ onUnmounted(() => {
 
 <template>
     <div
-        class="bg-brand-card rounded-[2.5rem] p-4 shadow-[12px_12px_0px_0px_#001e1d] border-2 border-brand-stroke relative overflow-hidden flex flex-col h-[260px] sm:h-[320px] lg:h-[360px] xl:h-[390px]"
+        class="bg-brand-card rounded-[2.5rem] p-4 shadow-[12px_12px_0px_0px_#001e1d] border-2 border-brand-stroke relative overflow-hidden flex flex-col h-65 sm:h-80 lg:h-90 xl:h-97.5"
     >
         <div
             class="absolute top-8 left-8 z-10 bg-brand-stroke rounded-full px-4 py-2 flex items-center gap-2 shadow-lg"
@@ -616,6 +771,22 @@ onUnmounted(() => {
             <div class="w-2 h-2 rounded-full bg-brand-tertiary animate-pulse"></div>
             <span class="text-brand-headline text-xs font-bold tracking-widest">
                 LIVE
+            </span>
+        </div>
+
+        <div
+            class="absolute top-8 right-8 z-10 bg-brand-card rounded-full px-4 py-2 flex items-center gap-2 shadow-lg border border-brand-stroke"
+        >
+            <LoaderCircle v-if="locationLoading" class="h-4 w-4 animate-spin text-brand-stroke"/>
+            <TriangleAlert v-else-if="locationError" class="h-4 w-4 text-red-600"/>
+            <TriangleAlert v-else-if="accuracyWarning" class="h-4 w-4 text-yellow-600"/>
+            <MapPin v-else class="h-4 w-4 text-green-600"/>
+            <span class="text-brand-stroke text-xs font-bold tracking-widest">
+                <template v-if="locationLoading">GPS...</template>
+                <template v-else-if="locationError">GPS blocked</template>
+                <template v-else-if="accuracyWarning">Low GPS</template>
+                <template v-else-if="isLocationReady">GPS ready</template>
+                <template v-else>GPS pending</template>
             </span>
         </div>
 

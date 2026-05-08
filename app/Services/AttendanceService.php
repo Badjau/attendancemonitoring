@@ -10,10 +10,14 @@ use App\Models\Employee;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Validation\ValidationException;
 
 class AttendanceService
 {
-    public function __construct(public Attendance $model)
+    public function __construct(
+        public Attendance $model,
+        protected GeofenceService $geofenceService,
+    )
     {
     }
 
@@ -46,6 +50,7 @@ class AttendanceService
     private function timeIn(Request $request, Carbon $now): Attendance
     {
         $employee = $this->findEmployee($request->rfid);
+        $locationData = $this->validateLocation($request, $employee);
 
         // Check first if the employee is already time-in to the current day.
         $existingAttendance = $this->model
@@ -79,6 +84,7 @@ class AttendanceService
             'is_late' => $isLate,
             'late_minutes' => $lateMinutes,
             'recorded_by' => Auth::id(),
+            ...$locationData,
         ]);
 
         $this->attachAttendanceImage($request, $attendance, 'time-in-image');
@@ -89,6 +95,7 @@ class AttendanceService
     private function timeOut(Request $request, Carbon $now): Attendance
     {
         $employee = $this->findEmployee($request->rfid);
+        $locationData = $this->validateLocation($request, $employee);
 
         $attendance = $this->model
             ->whereDate('attendance_date', Carbon::today())
@@ -130,6 +137,7 @@ class AttendanceService
             'overtime_minutes' => $overtimeMinutes,
             'overtime_status' => $isOvertime ? OvertimeStatus::Pending->value : null,
             'recorded_by' => Auth::id(),
+            ...$locationData,
         ]);
 
         $this->attachAttendanceImage($request, $attendance, 'time-out-image');
@@ -146,5 +154,44 @@ class AttendanceService
         $attendance
             ->addMedia($request->file('attendance-image'))
             ->toMediaCollection($collection);
+    }
+
+    private function validateLocation(Request $request, Employee $employee): array
+    {
+        $validated = $request->validate([
+            'latitude' => ['required', 'numeric', 'between:-90,90'],
+            'longitude' => ['required', 'numeric', 'between:-180,180'],
+        ]);
+
+        $latitude = (float) $validated['latitude'];
+        $longitude = (float) $validated['longitude'];
+        $zones = $employee->activeZones()->get();
+        $strictZones = $zones->where('policy', 'strict')->values();
+
+        if ($this->geofenceService->hasStrictZone($zones)) {
+            $matchingStrictZone = $this->geofenceService->findMatchingZone($latitude, $longitude, $strictZones);
+
+            if (! $matchingStrictZone) {
+                throw ValidationException::withMessages([
+                    'location' => 'You are outside your assigned field.',
+                ]);
+            }
+
+            return [
+                'latitude' => $latitude,
+                'longitude' => $longitude,
+                'location_status' => 'inside',
+                'zone_id' => $matchingStrictZone->id,
+            ];
+        }
+
+        $matchingZone = $this->geofenceService->findMatchingZone($latitude, $longitude, $zones);
+
+        return [
+            'latitude' => $latitude,
+            'longitude' => $longitude,
+            'location_status' => $matchingZone ? 'inside' : 'outside',
+            'zone_id' => $matchingZone?->id,
+        ];
     }
 }
