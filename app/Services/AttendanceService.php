@@ -145,12 +145,21 @@ class AttendanceService
 
     private function attachAttendanceImage(Request $request, Attendance $attendance, string $collection): void
     {
-        if (! $request->hasFile('attendance-image')) {
+        if ($request->hasFile('attendance-image')) {
+            $attendance
+                ->addMedia($request->file('attendance-image'))
+                ->toMediaCollection($collection);
+
+            return;
+        }
+
+        if (! $request->filled('attendance_image')) {
             return;
         }
 
         $attendance
-            ->addMedia($request->file('attendance-image'))
+            ->addMediaFromBase64($request->string('attendance_image')->toString(), 'image/jpeg', 'image/png')
+            ->usingFileName("attendance_{$attendance->id}.jpg")
             ->toMediaCollection($collection);
     }
 

@@ -1,12 +1,11 @@
 <script setup lang="ts">
 import * as faceapi from 'face-api.js';
 import axios from 'axios';
-import {Camera, LoaderCircle, MapPin, TriangleAlert} from "@lucide/vue";
-import {computed, nextTick, onMounted, onUnmounted, ref} from "vue";
+import {Camera, Fingerprint, LoaderCircle, LogIn, LogOut, MapPin, TriangleAlert} from "@lucide/vue";
+import {computed, nextTick, onMounted, onUnmounted, ref, watch} from "vue";
 import {router, usePage} from '@inertiajs/vue3'
 import {useToast} from "primevue";
 import {useGeolocator} from '@/Composables/useGeolocator.js';
-import AttendanceControlsCard from '@/Components/Home/AttendanceControlsCard.vue';
 
 const page = usePage();
 const toast = useToast();
@@ -49,11 +48,17 @@ const currentTime = ref("")
 const currentDate = ref("")
 
 const showEmployeeIdInputField = ref(false);
-const attendanceControlsRef = ref<InstanceType<typeof AttendanceControlsCard> | null>(null)
+
+const rfidInput = ref<HTMLInputElement | null>(null)
+const empIdInput = ref<HTMLInputElement | null>(null)
+const rfidBuffer = ref('')
+const manualEmployeeId = ref('')
 
 let stream: MediaStream | null = null
 let interval: ReturnType<typeof setInterval>
+let focusInterval: ReturnType<typeof setInterval>
 let faceDetectionInterval: ReturnType<typeof setInterval> | null = null
+let rfidTimeout: any = null
 const registeredFaceDescriptors = new Map<string, Float32Array>()
 
 const lastScannedTime = ref(0)
@@ -244,7 +249,7 @@ const ensureAttendanceFlowReady = async (actionName?: AttendanceAction) => {
         faceStatusText.value = 'Face verification failed to load.'
     })
     if (isFaceModelReady.value) startFaceDetectorOverlay()
-    attendanceControlsRef.value?.forceRFIDFocus()
+    forceRFIDFocus()
 }
 
 const handleTimeAction = async (actionName: AttendanceAction) => {
@@ -254,11 +259,11 @@ const handleTimeAction = async (actionName: AttendanceAction) => {
 const resetAttendanceSelection = () => {
     attendanceType.value = ''
     showEmployeeIdInputField.value = false
-    attendanceControlsRef.value?.clearManualEmployeeId()
+    manualEmployeeId.value = ''
     isLoading.value = false
     faceStatusText.value = 'Face verification ready.'
     stopCamera()
-    setTimeout(() => attendanceControlsRef.value?.forceRFIDFocus(), 50)
+    setTimeout(() => forceRFIDFocus(), 50)
 }
 
 const announceAttendanceGreeting = (greeting?: AttendanceGreeting) => {
@@ -267,6 +272,73 @@ const announceAttendanceGreeting = (greeting?: AttendanceGreeting) => {
     window.dispatchEvent(new CustomEvent('attendance:greeting', {
         detail: greeting,
     }))
+}
+
+const focusRFID = () => {
+    if (!rfidInput.value) return
+    if (document.activeElement === empIdInput.value) return
+
+    try {
+        rfidInput.value.focus()
+    } catch (e) {
+        console.error('Error focusing RFID input:', e)
+    }
+}
+
+const ensureRFIDFocus = () => {
+    if (document.activeElement === empIdInput.value) return
+
+    try {
+        if (rfidInput.value && document.activeElement !== rfidInput.value) {
+            rfidInput.value.focus()
+        }
+    } catch {
+        // Silently fail
+    }
+}
+
+const forceRFIDFocus = () => {
+    try {
+        rfidInput.value?.focus?.()
+    } catch {
+        // Silently fail
+    }
+}
+
+const onRFIDInput = () => {
+    const data = rfidInput.value?.value.trim()
+
+    if (data && data.length > 0) {
+        rfidBuffer.value = data
+
+        if (rfidTimeout) clearTimeout(rfidTimeout)
+
+        rfidTimeout = setTimeout(() => {
+            submitRFIDAttendance(rfidBuffer.value)
+        }, 100)
+    }
+}
+
+const onRFIDKeydown = (e: KeyboardEvent) => {
+    if (e.key === 'Enter') {
+        e.preventDefault()
+
+        if (rfidTimeout) clearTimeout(rfidTimeout)
+
+        submitRFIDAttendance(rfidBuffer.value || rfidInput.value?.value)
+    }
+}
+
+const onEmpIdFocus = (e: FocusEvent) => {
+    const el = e.target as HTMLInputElement | null
+    el?.select?.()
+}
+
+const onEmpIdKeydown = (e: KeyboardEvent) => {
+    if (e.key !== 'Enter') return
+    e.preventDefault()
+
+    submitManualAttendance()
 }
 
 const csrfToken = (): string => document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || ''
@@ -487,7 +559,7 @@ const verifyEmployeeFaceAndSubmit = async (employeeIdentifier: string, method: A
     const isFaceMatch = await verifyLiveFaceMatchesEmployee(employee)
     if (!isFaceMatch) {
         isLoading.value = false
-        setTimeout(() => attendanceControlsRef.value?.forceRFIDFocus(), 50)
+        setTimeout(() => forceRFIDFocus(), 50)
         return
     }
 
@@ -502,6 +574,11 @@ const verifyEmployeeFaceAndSubmit = async (employeeIdentifier: string, method: A
 
 const submitRFIDAttendance = async (rfid: any) => {
     const scannedRfid = rfid?.trim()
+
+    rfidBuffer.value = ''
+    if (rfidInput.value) rfidInput.value.value = ''
+
+    setTimeout(() => ensureRFIDFocus(), 50)
 
     if (!scannedRfid) {
         console.log('No RFID data provided:', rfid)
@@ -529,8 +606,8 @@ const submitRFIDAttendance = async (rfid: any) => {
     }
 }
 
-const submitManualAttendance = async (employeeIdentifier: string) => {
-    const employeeId = employeeIdentifier.trim()
+const submitManualAttendance = async () => {
+    const employeeId = manualEmployeeId.value.trim()
 
     if (!employeeId) {
         toast.add({
@@ -548,8 +625,8 @@ const submitManualAttendance = async (employeeIdentifier: string) => {
         isLoading.value = true
         console.log('Verifying keypad attendance...');
         await verifyEmployeeFaceAndSubmit(employeeId, 'keypad')
-        attendanceControlsRef.value?.clearManualEmployeeId()
-        setTimeout(() => attendanceControlsRef.value?.forceRFIDFocus(), 50)
+        manualEmployeeId.value = ''
+        setTimeout(() => forceRFIDFocus(), 50)
     } catch (e) {
         console.error('Error submitting keypad attendance:', e);
         isLoading.value = false
@@ -567,6 +644,13 @@ const submitFingerprintAttendance = async () => {
             detail: 'This browser does not support fingerprint authentication.',
             life: 5000,
         })
+        return
+    }
+
+    await ensureAttendanceFlowReady(attendanceAction)
+
+    const image = captureAttendanceImage()
+    if (!image) {
         return
     }
 
@@ -592,6 +676,7 @@ const submitFingerprintAttendance = async () => {
         const payload = await postWebAuthnJson('/attendance/fingerprint/record', {
             ...parseWebAuthnCredential(credential),
             attendance_type: attendanceAction,
+            attendance_image: image,
             latitude: coords.value.latitude,
             longitude: coords.value.longitude,
         })
@@ -710,10 +795,31 @@ const base64ToBlob = (base64: string, mimeType: string): Blob => {
     return new Blob([buffer], {type: mimeType})
 }
 
+watch(showEmployeeIdInputField, async (val) => {
+    if (val) {
+        await nextTick()
+        forceRFIDFocus()
+    }
+})
+
+const onDocumentClick = (e: MouseEvent) => {
+    if (e.target === empIdInput.value) return
+    focusRFID()
+}
+
 onMounted(async () => {
     updateTime()
     interval = setInterval(updateTime, 1000)
     getLocation().catch(() => null)
+
+    ensureRFIDFocus()
+
+    focusInterval = setInterval(() => {
+        ensureRFIDFocus()
+    }, 300)
+
+    document.addEventListener('click', onDocumentClick)
+    document.addEventListener('touchend', onDocumentClick)
 })
 
 onUnmounted(() => {
@@ -722,7 +828,12 @@ onUnmounted(() => {
     }
 
     clearInterval(interval)
+    clearInterval(focusInterval)
     stopCamera()
+
+    document.removeEventListener('click', onDocumentClick)
+    document.removeEventListener('touchend', onDocumentClick)
+    if (rfidTimeout) clearTimeout(rfidTimeout)
 })
 </script>
 
@@ -774,7 +885,7 @@ onUnmounted(() => {
                 autoplay
                 playsinline
                 muted
-                class="h-full w-full rounded-2xl border-2 border-brand-stroke object-cover"
+                class="home-camera-video h-full w-full rounded-2xl border-2 border-brand-stroke object-cover"
                 :class="{ loaded: isVideoReady }"
             ></video>
 
@@ -801,18 +912,105 @@ onUnmounted(() => {
     </div>
 
 
-    <AttendanceControlsCard
-        ref="attendanceControlsRef"
-        :current-date="currentDate"
-        :current-time="currentTime"
-        :face-status-text="faceStatusText"
-        :is-loading="isLoading"
-        :show-employee-id-input-field="showEmployeeIdInputField"
-        @fingerprint="submitFingerprintAttendance"
-        @manual-submit="submitManualAttendance"
-        @rfid-scan="submitRFIDAttendance"
-        @time-action="handleTimeAction"
-    />
+    <div class="flex flex-col gap-8">
+        <div
+            class="bg-brand-card rounded-4xl p-8 shadow-[8px_8px_0px_0px_#001e1d] border-2 border-brand-stroke shrink-0 animate-fade-up"
+        >
+            <div class="flex flex-col items-center text-center space-y-1 mb-8">
+                <p class="text-brand-bg font-bold tracking-wider uppercase text-xs">
+                    {{ currentDate }}
+                </p>
+                <h1
+                    class="text-4xl lg:text-5xl font-black tracking-tight text-brand-stroke tabular-nums"
+                >
+                    {{ currentTime }}
+                </h1>
+            </div>
+
+            <div class="w-full">
+                <div class="grid grid-cols-2 gap-4">
+                    <button
+                        @click="handleTimeAction('time-in')"
+                        class="group relative bg-brand-accent hover:bg-[#ffcf81] text-brand-stroke border-2 border-brand-stroke rounded-2xl py-4 px-3 transition-all font-bold shadow-[4px_4px_0px_0px_#001e1d] active:translate-x-1 active:translate-y-1 active:shadow-none flex flex-col items-center gap-2"
+                    >
+                        <LogIn class="w-5 h-5"/>
+                        <span class="text-sm">Time In</span>
+                    </button>
+
+                    <button
+                        @click="handleTimeAction('time-out')"
+                        class="group relative bg-brand-tertiary hover:bg-[#f07a7b] text-brand-headline border-2 border-brand-stroke rounded-2xl py-4 px-3 transition-all font-bold shadow-[4px_4px_0px_0px_#001e1d] active:translate-x-1 active:translate-y-1 active:shadow-none flex flex-col items-center gap-2"
+                    >
+                        <LogOut class="w-5 h-5"/>
+                        <span class="text-sm">Time Out</span>
+                    </button>
+                </div>
+
+                <button
+                    type="button"
+                    class="mt-4 inline-flex w-full items-center justify-center gap-2 bg-brand-card text-brand-stroke border-2 border-brand-stroke rounded-2xl py-4 px-3 transition-all font-bold shadow-[4px_4px_0px_0px_#001e1d] active:translate-x-1 active:translate-y-1 active:shadow-none"
+                    title="Fingerprint"
+                    @click="submitFingerprintAttendance"
+                >
+                    <Fingerprint class="w-5 h-5"/>
+                    <span class="text-sm">Fingerprint</span>
+                </button>
+
+                <div v-if="isLoading" class="mt-5">
+                    <p class="text-brand-bg font-bold tracking-wider uppercase text-xs">
+                        Processing, please wait...
+                    </p>
+                </div>
+
+                <div class="flex flex-col justify-center gap-3" v-else>
+                    <div class="w-full">
+                        <input
+                            ref="rfidInput"
+                            type="text"
+                            autocomplete="off"
+                            class="absolute -top-96"
+                            style="opacity: 0; pointer-events: none;"
+                            @input="onRFIDInput"
+                            @keydown="onRFIDKeydown"
+                        />
+
+                        <div class="flex items-center justify-center gap-2">
+                            <input
+                                v-if="showEmployeeIdInputField"
+                                ref="empIdInput"
+                                v-model="manualEmployeeId"
+                                type="text"
+                                placeholder="Employee ID"
+                                class="text-brand-stroke border-2 border-brand-stroke rounded-xl py-3 px-3 text-sm w-full mt-4"
+                                @focus="onEmpIdFocus"
+                                @keydown="onEmpIdKeydown"
+                            />
+
+                            <div
+                                v-if="showEmployeeIdInputField"
+                                class="mt-3"
+                            >
+                                <button
+                                    type="button"
+                                    class="w-full bg-brand-stroke text-brand-headline border-2 border-brand-stroke rounded-xl py-3 px-4 text-sm font-bold shadow-[3px_3px_0px_0px_#abd1c6] active:translate-x-1 active:translate-y-1 active:shadow-none"
+                                    @click="submitManualAttendance"
+                                >
+                                    Submit
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <p
+                        v-if="showEmployeeIdInputField || faceStatusText !== 'Face verification ready.'"
+                        class="text-brand-bg text-xs font-black uppercase tracking-wide"
+                    >
+                        {{ faceStatusText }}
+                    </p>
+                </div>
+            </div>
+        </div>
+    </div>
 </template>
 
 <style scoped>

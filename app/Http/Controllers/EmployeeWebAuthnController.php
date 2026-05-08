@@ -7,6 +7,7 @@ use App\Models\Employee;
 use App\Services\AttendanceService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
@@ -101,13 +102,23 @@ class EmployeeWebAuthnController extends Controller
             'clientExtensionResults' => ['sometimes', 'array'],
             'authenticatorAttachment' => ['sometimes', 'nullable', 'string'],
             'attendance_type' => ['sometimes', 'nullable', Rule::in([Type::TimeIn->value, Type::TimeOut->value])],
+            'attendance_image' => ['sometimes', 'nullable', 'string'],
             'latitude' => ['required', 'numeric', 'between:-90,90'],
             'longitude' => ['required', 'numeric', 'between:-180,180'],
         ]);
 
         try {
+            $credentialPayload = Arr::only($validated, [
+                'id',
+                'rawId',
+                'response',
+                'type',
+                'clientExtensionResults',
+                'authenticatorAttachment',
+            ]);
+
             $validation = app(AssertionValidator::class)
-                ->send(new AssertionValidation(new JsonTransport($validated)))
+                ->send(new AssertionValidation(new JsonTransport($credentialPayload)))
                 ->thenReturn();
 
             $employee = $validation->credential->authenticatable;
