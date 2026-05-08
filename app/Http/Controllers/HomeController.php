@@ -6,7 +6,6 @@ use App\Models\Announcement;
 use App\Models\Attendance;
 use App\Models\Employee;
 use Carbon\Carbon;
-use Illuminate\Http\Request;
 use Inertia\Inertia;
 
 class HomeController extends Controller
@@ -15,6 +14,12 @@ class HomeController extends Controller
     {
         $attendanceToday = Attendance::with(['employee.media'])
             ->whereDate('attendance_date', Carbon::now())
+            ->whereIn('id', function ($query) {
+                $query->selectRaw('MAX(id)')
+                    ->from('attendances')
+                    ->whereDate('attendance_date', today())
+                    ->groupBy('employee_id');
+            })
             ->latest()
             ->take(10)
             ->get();

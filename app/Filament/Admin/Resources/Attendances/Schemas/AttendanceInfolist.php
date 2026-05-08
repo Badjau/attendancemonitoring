@@ -35,6 +35,17 @@ class AttendanceInfolist
                             ->placeholder('-')
                             ->copyable(),
 
+                        TextEntry::make('attendance_type')
+                            ->label('Type')
+                            ->badge()
+                            ->formatStateUsing(fn (?string $state): string => str($state ?? '-')->headline()->toString()),
+
+                        TextEntry::make('attendance_method')
+                            ->label('Method')
+                            ->badge()
+                            ->formatStateUsing(fn (?string $state): string => str($state ?? '-')->headline()->toString())
+                            ->placeholder('-'),
+
                         TextEntry::make('recordedBy.name')
                             ->label('Recorded By')
                             ->placeholder('-'),
@@ -60,7 +71,7 @@ class AttendanceInfolist
 
                         TextEntry::make('total_hours')
                             ->label('Total Hours')
-                            ->state(fn (Attendance $record): string => $record->total_hours === null ? '-' : number_format((float) $record->total_hours, 2) . ' hrs'),
+                            ->state(fn (Attendance $record): string => $record->total_hours === null ? '-' : number_format((float) $record->total_hours, 2).' hrs'),
                     ])
                     ->columns(4)
                     ->columnSpanFull(),

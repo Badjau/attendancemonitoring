@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import {ArrowRight, Bell, CircleUser, Gift, X} from "@lucide/vue";
-import {Link} from "@inertiajs/vue3";
 import {computed, ref} from "vue";
 import {useDateFormat} from "@/Composables/useDateFormat";
 import {useAnnouncementPresentation} from "@/Composables/useAnnouncementPresentation";
@@ -81,7 +80,7 @@ const closeAnnouncement = () => {
                 <div
                     v-for="announcement in latestAnnouncements"
                     :key="announcement.id"
-                    class="relative pl-6 before:absolute before:left-0 before:top-0 before:bottom-0 before:w-1 before:rounded-full before:bg-[var(--announcement-accent)]"
+                    class="relative pl-6 before:absolute before:left-0 before:top-0 before:bottom-0 before:w-1 before:rounded-full before:bg-(--announcement-accent)"
                     :style="{'--announcement-accent': getAnnouncementStyle(announcement).accent}"
                 >
                     <p class="text-[10px] font-black text-brand-bg uppercase mb-1">
@@ -107,7 +106,7 @@ const closeAnnouncement = () => {
                     </p>
                     <button
                         type="button"
-                        class="mt-3 inline-flex items-center gap-1 rounded-xl border border-brand-stroke bg-white px-3 py-1.5 text-[11px] font-black uppercase text-brand-stroke shadow-[3px_3px_0px_0px_#001e1d] transition-transform hover:-translate-y-0.5"
+                        class="my-2 inline-flex items-center gap-1 rounded-xl border border-brand-stroke bg-white px-3 py-1.5 text-[11px] font-black uppercase text-brand-stroke shadow-[3px_3px_0px_0px_#001e1d] transition-transform hover:-translate-y-0.5"
                         @click="openAnnouncement(announcement)"
                     >
                         View more
@@ -143,7 +142,7 @@ const closeAnnouncement = () => {
                         v-if="celebrant.media.length > 0"
                         :src="celebrant.media[0].original_url"
                         alt="Employee Profile"
-                        class="w-12 h-12 rounded-full border-2 border-brand-stroke"
+                        class="w-12 h-12 rounded-full border-2 border-brand-stroke object-cover"
                     />
                     <CircleUser
                         v-else
@@ -151,8 +150,8 @@ const closeAnnouncement = () => {
                     />
                     <div>
                         <p class="font-bold text-sm">{{ celebrant.first_name }} {{ celebrant.last_name }}</p>
-                        <p class="text-xs opacity-70">{{ formatDate(celebrant.date_of_birth) }}</p>
-                        <p class="text-xs opacity-70">{{ celebrant.department?.name ?? null }}</p>
+                        <p class="text-xs text-brand-bg font-medium">{{ formatDate(celebrant.date_of_birth) }}</p>
+                        <p class="text-xs text-brand-bg font-medium">{{ celebrant.department?.name ?? null }}</p>
                     </div>
                 </div>
                 <div
@@ -166,6 +165,7 @@ const closeAnnouncement = () => {
         </div>
     </aside>
 
+    <!-- Modal for viewing the full details of announcements -->
     <Teleport to="body">
         <div
             v-if="selectedAnnouncement"
@@ -186,7 +186,7 @@ const closeAnnouncement = () => {
                         <p class="mb-2 text-[10px] font-black uppercase text-brand-stroke">
                             {{ getAnnouncementStyle(selectedAnnouncement).label }} Announcement
                         </p>
-                        <h2 class="text-2xl font-black leading-tight text-brand-stroke break-words">
+                        <h2 class="text-2xl font-black leading-tight text-brand-stroke wrap-break-word">
                             {{ selectedAnnouncement.title }}
                         </h2>
                     </div>

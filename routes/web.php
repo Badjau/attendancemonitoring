@@ -8,10 +8,8 @@ use App\Http\Controllers\HomeController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', [HomeController::class, 'home'])->name('home');
-Route::get('/face', [FaceController::class, 'index'])->name('face.index');
-Route::get('/face/register', [FaceController::class, 'register'])->name('face.register');
-Route::post('/face/register', [FaceController::class, 'storeRegistration'])->name('face.register.store');
 
+// ROUTE FOR ANNOUNCEMENT
 Route::controller(AnnouncementController::class)
     ->prefix('announcements')
     ->as('announcements.')
@@ -19,6 +17,7 @@ Route::controller(AnnouncementController::class)
         Route::get('/', 'index')->name('index');
     });
 
+// ROUTE FOR ATTENDANCE
 Route::controller(AttendanceController::class)
     ->prefix('attendance')
     ->as('attendance.')
@@ -28,6 +27,7 @@ Route::controller(AttendanceController::class)
         Route::post('/record-time-in', 'recordTimeIn')->name('record-time-in');
     });
 
+// ROUTE FOR EMPLOYEE WEB AUTHN (FINGERPRINT)
 Route::controller(EmployeeWebAuthnController::class)
     ->prefix('attendance/fingerprint')
     ->as('attendance.fingerprint.')
@@ -36,6 +36,7 @@ Route::controller(EmployeeWebAuthnController::class)
         Route::post('/record', 'recordAttendance')->name('record');
     });
 
+// ROUTE FOR EMPLOYEE WEB AUTHN (ADMIN)
 Route::controller(EmployeeWebAuthnController::class)
     ->middleware('auth')
     ->prefix('admin/employees/{employee}/fingerprint')
@@ -44,3 +45,11 @@ Route::controller(EmployeeWebAuthnController::class)
         Route::post('/options', 'registrationOptions')->name('options');
         Route::post('/', 'register')->name('register');
     });
+
+// ROUTE FOR FACE RECOGNITION
+Route::controller(FaceController::class)
+    ->group(function () {
+        Route::post('/face/register', 'storeRegistration')->name('face.register.store');
+        Route::post('/admin/employees/{employee}/face', 'storeEmployeeRegistration')->middleware('auth')->name('admin.employees.face.register');
+    });
+

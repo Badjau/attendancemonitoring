@@ -28,6 +28,22 @@ class AttendanceForm
 
                 TextInput::make('rfid_uid'),
 
+                Select::make('attendance_type')
+                    ->label('Type')
+                    ->options([
+                        'time-in' => 'Time In',
+                        'time-out' => 'Time Out',
+                    ])
+                    ->required(),
+
+                Select::make('attendance_method')
+                    ->label('Method')
+                    ->options([
+                        'rfid' => 'RFID',
+                        'fingerprint' => 'Fingerprint',
+                        'keypad' => 'Keypad',
+                    ]),
+
                 DatePicker::make('attendance_date')
                     ->required(),
 

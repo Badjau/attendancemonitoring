@@ -16,6 +16,8 @@ export default defineConfig({
                 'resources/css/app.css',
                 'resources/css/filament/admin/theme.css',
                 'resources/js/app.js',
+                'resources/js/filament-face-registration.js',
+                'resources/js/filament-fingerprint-enrollment.js',
             ],
             refresh: true,
         }),

@@ -17,6 +17,8 @@ class Attendance extends Model implements HasMedia
     protected $fillable = [
         'employee_id',
         'rfid_uid',
+        'attendance_type',
+        'attendance_method',
         'attendance_date',
         'time_in',
         'time_out',
@@ -35,7 +37,7 @@ class Attendance extends Model implements HasMedia
         'location_status',
         'zone_id',
         'remarks',
-        'recorded_by'
+        'recorded_by',
     ];
 
     protected $casts = [
@@ -64,7 +66,7 @@ class Attendance extends Model implements HasMedia
 
     public function scopeIsLate(Builder $query)
     {
-        if (!$query) {
+        if (! $query) {
             return $query;
         }
 
@@ -73,7 +75,7 @@ class Attendance extends Model implements HasMedia
 
     public function scopeIsUndertime(Builder $query)
     {
-        if (!$query) {
+        if (! $query) {
             return $query;
         }
 
@@ -82,7 +84,7 @@ class Attendance extends Model implements HasMedia
 
     public function scopeIsOvertime(Builder $query)
     {
-        if (!$query) {
+        if (! $query) {
             return $query;
         }
 

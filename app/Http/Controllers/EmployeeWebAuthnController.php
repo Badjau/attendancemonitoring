@@ -100,7 +100,7 @@ class EmployeeWebAuthnController extends Controller
             'type' => ['required', 'string'],
             'clientExtensionResults' => ['sometimes', 'array'],
             'authenticatorAttachment' => ['sometimes', 'nullable', 'string'],
-            'attendance_type' => ['required', Rule::in([Type::TimeIn->value, Type::TimeOut->value])],
+            'attendance_type' => ['sometimes', 'nullable', Rule::in([Type::TimeIn->value, Type::TimeOut->value])],
             'latitude' => ['required', 'numeric', 'between:-90,90'],
             'longitude' => ['required', 'numeric', 'between:-180,180'],
         ]);
@@ -137,7 +137,7 @@ class EmployeeWebAuthnController extends Controller
                 'greeting' => [
                     'first_name' => $employee->first_name,
                     'is_birthday' => $employee->date_of_birth?->isBirthday() ?? false,
-                    'attendance_type' => $validated['attendance_type'],
+                    'attendance_type' => $request->attendance_type,
                 ],
             ]);
         } catch (ValidationException $exception) {

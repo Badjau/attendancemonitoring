@@ -9,19 +9,19 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('attendances', function (Blueprint $table) {
-            if (!Schema::hasColumn('attendances', 'latitude')) {
+            if (! Schema::hasColumn('attendances', 'latitude')) {
                 $table->decimal('latitude', 10, 7)->nullable()->after('location');
             }
 
-            if (!Schema::hasColumn('attendances', 'longitude')) {
+            if (! Schema::hasColumn('attendances', 'longitude')) {
                 $table->decimal('longitude', 10, 7)->nullable()->after('latitude');
             }
 
-            if (!Schema::hasColumn('attendances', 'location_status')) {
+            if (! Schema::hasColumn('attendances', 'location_status')) {
                 $table->enum('location_status', ['inside', 'outside'])->nullable()->after('longitude');
             }
 
-            if (!Schema::hasColumn('attendances', 'zone_id')) {
+            if (! Schema::hasColumn('attendances', 'zone_id')) {
                 $table->foreignId('zone_id')->nullable()->after('location_status')->constrained('zones')->nullOnDelete();
             }
         });

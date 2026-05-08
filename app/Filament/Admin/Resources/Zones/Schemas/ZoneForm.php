@@ -33,8 +33,8 @@ class ZoneForm
                             ->live()
                             ->afterStateUpdated(function ($state, callable $get, callable $set): void {
                                 $set('location', [
-                                    'lat' => (float)$state,
-                                    'lng' => (float)$get('longitude'),
+                                    'lat' => (float) $state,
+                                    'lng' => (float) $get('longitude'),
                                 ]);
                             }),
 
@@ -47,8 +47,8 @@ class ZoneForm
                             ->live()
                             ->afterStateUpdated(function ($state, callable $get, callable $set): void {
                                 $set('location', [
-                                    'lat' => (float)$get('latitude'),
-                                    'lng' => (float)$state,
+                                    'lat' => (float) $get('latitude'),
+                                    'lng' => (float) $state,
                                 ]);
                             }),
 
@@ -115,10 +115,9 @@ class ZoneForm
                         ViewField::make('location')
                             ->view('filament.admin.resources.zones.zone-map')
                             ->dehydrated(false)
-                            ->columnSpanFull()
-                    ])
+                            ->columnSpanFull(),
+                    ]),
             ]);
-
 
     }
 }

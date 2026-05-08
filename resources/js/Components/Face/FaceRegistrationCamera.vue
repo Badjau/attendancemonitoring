@@ -32,6 +32,7 @@ const isModelReady = ref(false);
 const isSubmitting = ref(false);
 const faceCount = ref(0);
 const capturedPreview = ref('');
+const existingFaceDescriptors = new Map<string, Float32Array>();
 
 let stream: MediaStream | null = null;
 let scanInterval: ReturnType<typeof setInterval> | null = null;
@@ -59,6 +60,28 @@ const loadModels = async () => {
 
     isModelReady.value = true;
     statusText.value = 'Start the camera and center one face.';
+};
+
+const loadExistingFaceDescriptors = async () => {
+    existingFaceDescriptors.clear();
+
+    for (const employee of props.employees) {
+        if (!employee.profile_url) continue;
+
+        try {
+            const image = await faceapi.fetchImage(employee.profile_url);
+            const detection = await faceapi
+                .detectSingleFace(image, detectorOptions.value)
+                .withFaceLandmarks()
+                .withFaceDescriptor();
+
+            if (!detection) continue;
+
+            existingFaceDescriptors.set(employee.employee_id, detection.descriptor);
+        } catch (error) {
+            console.error(`Unable to read registered face for ${employee.employee_id}`, error);
+        }
+    }
 };
 
 const startCamera = async () => {
@@ -176,7 +199,36 @@ const captureBlob = (): Blob | null => {
     return new Blob([buffer], {type: 'image/jpeg'});
 };
 
-const saveRegistration = () => {
+const findDuplicateFace = async (): Promise<FaceEmployee | null> => {
+    if (!videoRef.value || !selectedEmployee.value) return null;
+
+    const detection = await faceapi
+        .detectSingleFace(videoRef.value, detectorOptions.value)
+        .withFaceLandmarks()
+        .withFaceDescriptor();
+
+    if (!detection) return null;
+
+    let duplicate: FaceEmployee | null = null;
+    let bestDistance = Number.POSITIVE_INFINITY;
+
+    for (const employee of props.employees) {
+        if (employee.employee_id === selectedEmployee.value.employee_id) continue;
+
+        const descriptor = existingFaceDescriptors.get(employee.employee_id);
+        if (!descriptor) continue;
+
+        const distance = faceapi.euclideanDistance(descriptor, detection.descriptor);
+        if (distance > 0.52 || distance >= bestDistance) continue;
+
+        duplicate = employee;
+        bestDistance = distance;
+    }
+
+    return duplicate;
+};
+
+const saveRegistration = async () => {
     if (!selectedEmployee.value) {
         toast.add({
             severity: 'warn',
@@ -194,6 +246,18 @@ const saveRegistration = () => {
             detail: 'Keep exactly one face in the camera before saving.',
             life: 5000,
         });
+        return;
+    }
+
+    const duplicate = await findDuplicateFace();
+    if (duplicate) {
+        toast.add({
+            severity: 'error',
+            summary: 'Face Registration',
+            detail: `This face is already registered to ${employeeName(duplicate)}.`,
+            life: 6000,
+        });
+        statusText.value = 'Duplicate registered face detected.';
         return;
     }
 
@@ -251,6 +315,7 @@ watch(selectedEmployeeId, () => {
 onMounted(async () => {
     try {
         await loadModels();
+        await loadExistingFaceDescriptors();
         await nextTick();
         await startCamera();
         startScanLoop();
