@@ -50,6 +50,8 @@ Route::controller(EmployeeWebAuthnController::class)
 Route::controller(FaceController::class)
     ->group(function () {
         Route::post('/face/register', 'storeRegistration')->name('face.register.store');
+        Route::get('/face/register', [FaceController::class, 'register'])->name('face.register');
+        Route::post('/face/register', [FaceController::class, 'storeRegistration'])->name('face.register.store');
         Route::post('/admin/employees/{employee}/face', 'storeEmployeeRegistration')->middleware('auth')->name('admin.employees.face.register');
     });
 

@@ -58,10 +58,14 @@ const props = defineProps<{
 
 <style>
 /* Video Styling */
-video {
+.home-camera-video {
     transition: opacity 0.5s ease-in-out;
     opacity: 0;
     transform: scaleX(-1);
+}
+
+.home-camera-video.loaded {
+    opacity: 1;
 }
 
 /* Smooth Animations */
