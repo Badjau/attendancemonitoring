@@ -20,6 +20,14 @@ const props = defineProps<{
     <Toast />
 
     <div class="min-h-screen p-4 md:p-8 flex flex-col antialiased">
+        <header class="fixed left-3 top-3 z-20 md:left-5 md:top-5">
+            <img
+                src="/images/mcasia-logo.png"
+                alt="TimeClock logo"
+                class="h-11 w-11 rounded-xl border-2 border-brand-stroke bg-brand-card object-contain p-1.5 shadow-[3px_3px_0px_0px_#001e1d] md:h-12 md:w-12"
+            />
+        </header>
+
         <!-- Toast Notification Container -->
         <main
             class="max-w-450 w-full mx-auto grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-8 grow items-stretch"
@@ -49,42 +57,11 @@ const props = defineProps<{
 </template>
 
 <style>
-/* Custom High-Contrast Text */
-.text-headline {
-    color: #fffffe;
-}
-
-.text-main {
-    color: #001e1d;
-}
-
 /* Video Styling */
 video {
     transition: opacity 0.5s ease-in-out;
     opacity: 0;
     transform: scaleX(-1);
-}
-
-video.loaded {
-    opacity: 1;
-}
-
-/* Custom Scrollbar for Happy Hues Theme */
-.custom-scrollbar::-webkit-scrollbar {
-    width: 6px;
-}
-
-.custom-scrollbar::-webkit-scrollbar-track {
-    background: rgba(0, 30, 29, 0.1);
-}
-
-.custom-scrollbar::-webkit-scrollbar-thumb {
-    background: #abd1c6;
-    border-radius: 10px;
-}
-
-.custom-scrollbar::-webkit-scrollbar-thumb:hover {
-    background: #f9bc60;
 }
 
 /* Smooth Animations */

@@ -121,12 +121,12 @@ onUnmounted(() => {
             </div>
 
             <div class="min-w-0">
-                <p id="greeting-text" class="text-lg font-bold leading-tight text-brand-stroke break-words">
+                <p id="greeting-text" class="text-lg font-bold leading-tight text-brand-stroke wrap-break-word">
                     {{ getDayGreeting() ?? title }}
                 </p>
                 <p
                     id="greeting-subtext"
-                    class="text-xs font-semibold leading-snug text-brand-bg opacity-70 break-words"
+                    class="text-xs font-semibold leading-snug text-brand-bg opacity-70 wrap-break-word"
                 >
                     {{ subtitle }}
                 </p>

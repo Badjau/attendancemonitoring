@@ -34,6 +34,18 @@ class AttendancesRelationManager extends RelationManager
                     ->dateTime('h:i A')
                     ->sortable(),
 
+                TextColumn::make('attendance_type')
+                    ->label('Type')
+                    ->badge()
+                    ->formatStateUsing(fn (?string $state): string => str($state ?? '-')->headline()->toString())
+                    ->searchable(),
+
+                TextColumn::make('attendance_method')
+                    ->label('Method')
+                    ->badge()
+                    ->formatStateUsing(fn (?string $state): string => str($state ?? '-')->headline()->toString())
+                    ->searchable(),
+
                 TextColumn::make('total_hours')
                     ->numeric()
                     ->sortable(),
@@ -94,7 +106,7 @@ class AttendancesRelationManager extends RelationManager
                 DateRangeFilter::make('attendance_date')
                     ->autoApply()
                     ->linkedCalendars()
-                    ->withIndicator()
+                    ->withIndicator(),
             ])
             ->headerActions([
                 CreateAction::make(),

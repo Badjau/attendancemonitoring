@@ -2,7 +2,6 @@
 
 namespace App\Filament\Admin\Resources\Attendances\Widgets;
 
-use App\Enums\Attendance\Status;
 use App\Models\Attendance;
 use App\Models\Employee;
 use Filament\Support\Icons\Heroicon;

@@ -7,7 +7,6 @@ use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
 use Filament\Actions\ViewAction;
-use Filament\Forms\Components\Select;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
@@ -24,7 +23,7 @@ class AttendancesTable
             ->columns([
                 TextColumn::make('employee.first_name')
                     ->label('Employee')
-                    ->formatStateUsing(fn($record) => "{$record->employee->first_name} {$record->employee->last_name}")
+                    ->formatStateUsing(fn ($record) => "{$record->employee->first_name} {$record->employee->last_name}")
                     ->searchable(query: function (Builder $query, string $search) {
                         $query->whereHas('employee', function (Builder $query) use ($search) {
                             $query->where('first_name', 'like', "%{$search}%")
@@ -34,6 +33,18 @@ class AttendancesTable
 
                 TextColumn::make('rfid_uid')
                     ->label('RFID')
+                    ->searchable(),
+
+                TextColumn::make('attendance_type')
+                    ->label('Type')
+                    ->badge()
+                    ->formatStateUsing(fn (?string $state): string => str($state ?? '-')->headline()->toString())
+                    ->searchable(),
+
+                TextColumn::make('attendance_method')
+                    ->label('Method')
+                    ->badge()
+                    ->formatStateUsing(fn (?string $state): string => str($state ?? '-')->headline()->toString())
                     ->searchable(),
 
                 TextColumn::make('attendance_date')
@@ -104,21 +115,36 @@ class AttendancesTable
                 SelectFilter::make('status')
                     ->options(Status::class),
 
+                SelectFilter::make('attendance_type')
+                    ->label('Type')
+                    ->options([
+                        'time-in' => 'Time In',
+                        'time-out' => 'Time Out',
+                    ]),
+
+                SelectFilter::make('attendance_method')
+                    ->label('Method')
+                    ->options([
+                        'rfid' => 'RFID',
+                        'fingerprint' => 'Fingerprint',
+                        'keypad' => 'Keypad',
+                    ]),
+
                 SelectFilter::make('employee_id')
                     ->label('Employee')
                     ->relationship(
                         'employee',
                         'first_name',
-                        fn($query) => $query->orderBy('first_name')->orderBy('last_name')
+                        fn ($query) => $query->orderBy('first_name')->orderBy('last_name')
                     )
-                    ->getOptionLabelFromRecordUsing(fn($record) => "{$record->first_name} {$record->last_name}")
+                    ->getOptionLabelFromRecordUsing(fn ($record) => "{$record->first_name} {$record->last_name}")
                     ->preload()
                     ->searchable(),
 
                 DateRangeFilter::make('attendance_date')
                     ->autoApply()
                     ->linkedCalendars()
-                    ->withIndicator()
+                    ->withIndicator(),
             ])
             ->recordActions([
                 ViewAction::make(),
@@ -128,7 +154,7 @@ class AttendancesTable
                 BulkActionGroup::make([
                     DeleteBulkAction::make(),
 
-                    ExportBulkAction::make()
+                    ExportBulkAction::make(),
                 ]),
             ]);
     }

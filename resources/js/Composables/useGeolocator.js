@@ -1,7 +1,7 @@
 import {ref} from 'vue';
 
 export function useGeolocator() {
-    const coords = ref(null);
+    const coords = ref({});
     const error = ref('');
     const loading = ref(false);
     const accuracyWarning = ref(false);
@@ -43,7 +43,7 @@ export function useGeolocator() {
     };
 
     const resetLocation = () => {
-        coords.value = null;
+        coords.value = {};
         error.value = '';
         loading.value = false;
         accuracyWarning.value = false;

@@ -32,7 +32,7 @@ class Announcement extends Model implements HasMedia
         'expires_at' => 'timestamp',
         'is_pinned' => 'boolean',
         'type' => Type::class,
-        'status' => Status::class
+        'status' => Status::class,
     ];
 
     public function registerMediaCollections(): void
@@ -42,7 +42,7 @@ class Announcement extends Model implements HasMedia
 
     public function scopePublished(Builder $query): Builder
     {
-        if (!$query) {
+        if (! $query) {
             return $query;
         }
 
@@ -51,7 +51,7 @@ class Announcement extends Model implements HasMedia
 
     public function scopeIsPinned(Builder $query): Builder
     {
-        if (!$query) {
+        if (! $query) {
             return $query;
         }
 

@@ -33,7 +33,7 @@ return new class extends Migration
             $table->boolean('is_late')->default(false);
             $table->integer('late_minutes')->default(0);     // minutes late from shift start
             $table->boolean('is_undertime')->default(false);
-            $table->integer('undertime_minutes')->default(0);// minutes short from shift end
+            $table->integer('undertime_minutes')->default(0); // minutes short from shift end
 
             // Overtime
             $table->boolean('is_overtime')->default(false);

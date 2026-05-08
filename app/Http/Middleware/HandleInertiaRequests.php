@@ -32,7 +32,7 @@ class HandleInertiaRequests extends Middleware
                 'success' => fn (): mixed => $request->session()->get('success'),
                 'error' => fn (): mixed => $request->session()->get('error'),
                 'greeting' => fn (): mixed => $request->session()->get('greeting'),
-            ]
+            ],
         ]);
     }
 }

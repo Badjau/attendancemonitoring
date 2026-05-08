@@ -1,9 +1,5 @@
 <script setup lang="ts">
-import {LogIn, LogOut} from '@lucide/vue'
-import {useToast} from "@/Composables/useToast";
 import {Toast} from "primevue";
-
-const {toasts} = useToast()
 </script>
 
 <template>

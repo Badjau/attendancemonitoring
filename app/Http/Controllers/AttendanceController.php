@@ -2,24 +2,17 @@
 
 namespace App\Http\Controllers;
 
-use App\Enums\Attendance\Status;
-use App\Enums\Attendance\Type;
-use App\Models\Attendance;
 use App\Models\Employee;
 use App\Services\AttendanceService;
-use Carbon\Carbon;
-use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
 
 class AttendanceController extends Controller
 {
-    public function __construct(protected AttendanceService $attendanceService)
-    {
-    }
+    public function __construct(protected AttendanceService $attendanceService) {}
 
     public function verifyEmployee(Request $request): JsonResponse
     {
@@ -29,7 +22,7 @@ class AttendanceController extends Controller
 
         $employee = Employee::where('employee_id', $validated['employee_id'])->first();
 
-        if (!$employee) {
+        if (! $employee) {
             return response()->json([
                 'message' => 'Employee ID is not existing.',
             ], 404);
@@ -72,7 +65,7 @@ class AttendanceController extends Controller
         } catch (ValidationException $e) {
             return redirect()->back()->withErrors($e->errors());
         } catch (\Exception $e) {
-            Log::info('error in recording the attendance: ' . $e->getMessage());
+            Log::info('error in recording the attendance: '.$e->getMessage());
 
             return redirect()->back()->with('error', $e->getMessage());
         }

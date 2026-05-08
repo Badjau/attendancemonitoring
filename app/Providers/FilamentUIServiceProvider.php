@@ -2,14 +2,17 @@
 
 namespace App\Providers;
 
+use Filament\Actions\Action;
 use Filament\Actions\CreateAction;
 use Filament\Forms\Components\Field;
+use Filament\Forms\Components\Select;
 use Filament\Infolists\Components\Entry;
+use Filament\Schemas\Components\Component;
+use Filament\Schemas\Schema;
 use Filament\Support\Enums\Width;
 use Filament\Tables\Columns\Column;
 use Filament\Tables\Table;
 use Illuminate\Support\ServiceProvider;
-use Filament\Schemas\Components\Component;
 
 class FilamentUIServiceProvider extends ServiceProvider
 {
@@ -69,20 +72,20 @@ class FilamentUIServiceProvider extends ServiceProvider
             return $entry;
         });
 
-        \Filament\Forms\Components\Select::configureUsing(function (\Filament\Forms\Components\Select $field) {
+        Select::configureUsing(function (Select $field) {
             return $field
                 ->searchable()
                 ->preload();
         });
 
         // capitalize the model name in a create action label
-        \Filament\Actions\CreateAction::configureUsing(function (CreateAction $action) {
+        CreateAction::configureUsing(function (CreateAction $action) {
             $action
-                ->label(fn(): string => __('filament-actions::create.single.label', ['label' => ucwords($action->getModelLabel())]));
+                ->label(fn (): string => __('filament-actions::create.single.label', ['label' => ucwords($action->getModelLabel())]));
         });
 
         // Set the date display
-        \Filament\Schemas\Schema::configureUsing(function (\Filament\Schemas\Schema $schema) {
+        Schema::configureUsing(function (Schema $schema) {
             return $schema
                 ->defaultDateDisplayFormat('m/d/Y')
                 ->defaultDateTimeDisplayFormat('h:i A')
@@ -90,7 +93,7 @@ class FilamentUIServiceProvider extends ServiceProvider
         });
 
         // if an action is a modal, do not close by clicking away and default to slideover
-        \Filament\Actions\Action::configureUsing(function (\Filament\Actions\Action $action) {
+        Action::configureUsing(function (Action $action) {
             $action
                 ->closeModalByClickingAway(false)
                 ->modalWidth(Width::Medium);

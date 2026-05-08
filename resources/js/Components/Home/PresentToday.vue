@@ -42,7 +42,7 @@ const props = defineProps<{
                         v-if="attendance?.employee?.media.length > 0"
                         :src="attendance?.employee?.media[0].original_url"
                         alt="Employee Profile"
-                        class="w-12 h-12 rounded-full border-2 border-brand-stroke"
+                        class="w-12 h-12 rounded-full border-2 border-brand-stroke object-cover"
                     />
                     <CircleUser
                         v-else
@@ -53,7 +53,7 @@ const props = defineProps<{
                         <p class="font-bold text-brand-stroke text-sm">
                             {{ attendance.employee.first_name }} {{ attendance.employee.last_name }}
                         </p>
-                        <p class="text-[10px] text-brand-bg font-medium">
+                        <p class="text-xs text-brand-bg font-medium">
                             {{ attendance.employee.position }}
                         </p>
                     </div>

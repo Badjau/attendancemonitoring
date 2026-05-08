@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Employee;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -16,7 +17,7 @@ class FaceController extends Controller
             ->orderBy('last_name')
             ->orderBy('first_name')
             ->get()
-            ->map(fn(Employee $employee): array => [
+            ->map(fn (Employee $employee): array => [
                 'id' => $employee->id,
                 'employee_id' => $employee->employee_id,
                 'first_name' => $employee->first_name,
@@ -24,7 +25,7 @@ class FaceController extends Controller
                 'position' => $employee->position,
                 'profile_url' => $employee->getFirstMediaUrl('employee-profile'),
             ])
-            ->filter(fn(array $employee): bool => filled($employee['profile_url']))
+            ->filter(fn (array $employee): bool => filled($employee['profile_url']))
             ->values();
 
         return Inertia::render('Face/Index', [
@@ -38,7 +39,7 @@ class FaceController extends Controller
             ->orderBy('last_name')
             ->orderBy('first_name')
             ->get()
-            ->map(fn(Employee $employee): array => [
+            ->map(fn (Employee $employee): array => [
                 'id' => $employee->id,
                 'employee_id' => $employee->employee_id,
                 'first_name' => $employee->first_name,
@@ -64,9 +65,26 @@ class FaceController extends Controller
 
         $employee->addMediaFromRequest('face-image')
             ->usingName("{$employee->employee_id} face registration")
-            ->usingFileName("face_{$employee->employee_id}_" . now()->format('YmdHis') . '.jpg')
+            ->usingFileName("face_{$employee->employee_id}_".now()->format('YmdHis').'.jpg')
             ->toMediaCollection('employee-profile');
 
         return redirect()->back()->with('success', 'Face registered successfully.');
+    }
+
+    public function storeEmployeeRegistration(Request $request, Employee $employee): JsonResponse
+    {
+        $request->validate([
+            'face-image' => ['required', 'image', 'max:5120'],
+        ]);
+
+        $employee->addMediaFromRequest('face-image')
+            ->usingName("{$employee->employee_id} face registration")
+            ->usingFileName("face_{$employee->employee_id}_".now()->format('YmdHis').'.jpg')
+            ->toMediaCollection('employee-profile');
+
+        return response()->json([
+            'message' => 'Face registered successfully.',
+            'profile_url' => $employee->fresh()->getFirstMediaUrl('employee-profile'),
+        ]);
     }
 }

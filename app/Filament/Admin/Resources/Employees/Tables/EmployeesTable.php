@@ -62,7 +62,7 @@ class EmployeesTable
                     ->searchable()
                     ->preload(),
 
-                SelectFilter::make('position')
+                SelectFilter::make('position'),
             ])
             ->recordActions([
                 ViewAction::make(),
