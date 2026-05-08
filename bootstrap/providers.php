@@ -1,7 +1,13 @@
 <?php
 
+use App\Providers\AppServiceProvider;
+use App\Providers\Filament\AdminPanelProvider;
+use App\Providers\FilamentUIServiceProvider;
+use Laragear\WebAuthn\WebAuthnServiceProvider;
+
 return [
-    App\Providers\AppServiceProvider::class,
-    App\Providers\FilamentUIServiceProvider::class,
-    App\Providers\Filament\AdminPanelProvider::class,
+    AppServiceProvider::class,
+    FilamentUIServiceProvider::class,
+    AdminPanelProvider::class,
+    WebAuthnServiceProvider::class,
 ];

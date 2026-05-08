@@ -6,12 +6,16 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Laragear\WebAuthn\Contracts\WebAuthnAuthenticatable;
+use Laragear\WebAuthn\WebAuthnAuthentication;
+use Laragear\WebAuthn\WebAuthnData;
 use Spatie\MediaLibrary\HasMedia;
 use Spatie\MediaLibrary\InteractsWithMedia;
 
-class Employee extends Model implements HasMedia
+class Employee extends Model implements HasMedia, WebAuthnAuthenticatable
 {
     use InteractsWithMedia;
+    use WebAuthnAuthentication;
 
     protected $fillable = [
         'department_id',
@@ -37,6 +41,11 @@ class Employee extends Model implements HasMedia
     public function getNameAttribute(): string
     {
         return "{$this->first_name} {$this->last_name}";
+    }
+
+    public function webAuthnData(): WebAuthnData
+    {
+        return WebAuthnData::make($this->employee_id, $this->name);
     }
 
     public function zones(): BelongsToMany

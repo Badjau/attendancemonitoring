@@ -1,7 +1,8 @@
 <?php
 
-use App\Http\Controllers\AttendanceController;
 use App\Http\Controllers\AnnouncementController;
+use App\Http\Controllers\AttendanceController;
+use App\Http\Controllers\EmployeeWebAuthnController;
 use App\Http\Controllers\FaceController;
 use App\Http\Controllers\HomeController;
 use Illuminate\Support\Facades\Route;
@@ -19,10 +20,27 @@ Route::controller(AnnouncementController::class)
     });
 
 Route::controller(AttendanceController::class)
-->prefix('attendance')
-->as('attendance.')
-->group(function () {
-    Route::get('/', 'index')->name('index');
-    Route::post('/verify-employee', 'verifyEmployee')->name('verify-employee');
-    Route::post('/record-time-in', 'recordTimeIn')->name('record-time-in');
-});
+    ->prefix('attendance')
+    ->as('attendance.')
+    ->group(function () {
+        Route::get('/', 'index')->name('index');
+        Route::post('/verify-employee', 'verifyEmployee')->name('verify-employee');
+        Route::post('/record-time-in', 'recordTimeIn')->name('record-time-in');
+    });
+
+Route::controller(EmployeeWebAuthnController::class)
+    ->prefix('attendance/fingerprint')
+    ->as('attendance.fingerprint.')
+    ->group(function () {
+        Route::post('/options', 'assertionOptions')->name('options');
+        Route::post('/record', 'recordAttendance')->name('record');
+    });
+
+Route::controller(EmployeeWebAuthnController::class)
+    ->middleware('auth')
+    ->prefix('admin/employees/{employee}/fingerprint')
+    ->as('admin.employees.fingerprint.')
+    ->group(function () {
+        Route::post('/options', 'registrationOptions')->name('options');
+        Route::post('/', 'register')->name('register');
+    });

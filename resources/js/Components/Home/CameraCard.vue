@@ -268,6 +268,78 @@ const ensureAttendanceTypeSelected = (actionLabel: string): boolean => {
     return true
 }
 
+const csrfToken = (): string => document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || ''
+
+const decodeWebAuthn = (input: string): Uint8Array => {
+    input = input.replace(/-/g, '+').replace(/_/g, '/')
+    const pad = input.length % 4
+    if (pad) input += '='.repeat(4 - pad)
+
+    return Uint8Array.from(atob(input), char => char.charCodeAt(0))
+}
+
+const encodeWebAuthn = (buffer: ArrayBuffer): string => btoa(String.fromCharCode(...new Uint8Array(buffer)))
+
+const parseWebAuthnOptions = (publicKey: any): PublicKeyCredentialRequestOptions | PublicKeyCredentialCreationOptions => {
+    publicKey.challenge = decodeWebAuthn(publicKey.challenge)
+
+    if (publicKey.user?.id) {
+        publicKey.user.id = decodeWebAuthn(publicKey.user.id)
+    }
+
+    for (const key of ['excludeCredentials', 'allowCredentials']) {
+        if (!publicKey[key]) continue
+
+        publicKey[key] = publicKey[key].map((credential: any) => ({
+            ...credential,
+            id: decodeWebAuthn(credential.id),
+        }))
+    }
+
+    return publicKey
+}
+
+const parseWebAuthnCredential = (credential: any): any => {
+    const response: Record<string, string> = {}
+
+    for (const key of ['clientDataJSON', 'attestationObject', 'authenticatorData', 'signature', 'userHandle']) {
+        if (credential.response[key]) {
+            response[key] = encodeWebAuthn(credential.response[key])
+        }
+    }
+
+    return {
+        id: credential.id,
+        rawId: encodeWebAuthn(credential.rawId),
+        type: credential.type,
+        authenticatorAttachment: credential.authenticatorAttachment,
+        clientExtensionResults: credential.getClientExtensionResults(),
+        response,
+    }
+}
+
+const postWebAuthnJson = async (url: string, data: Record<string, any> = {}): Promise<any> => {
+    const response = await fetch(url, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: {
+            Accept: 'application/json',
+            'Content-Type': 'application/json',
+            'X-CSRF-TOKEN': csrfToken(),
+            'X-Requested-With': 'XMLHttpRequest',
+        },
+        body: JSON.stringify(data),
+    })
+
+    const payload = await response.json().catch(() => ({}))
+
+    if (!response.ok) {
+        throw new Error(payload.message || Object.values(payload.errors ?? {})?.[0]?.[0] || 'Fingerprint verification failed.')
+    }
+
+    return payload
+}
+
 const captureAttendanceImage = (): string | null => {
     const image = captureImage()
 
@@ -492,12 +564,60 @@ const submitManualAttendance = async () => {
 const submitFingerprintAttendance = async () => {
     if (!ensureAttendanceTypeSelected('fingerprint scanning')) return
 
-    toast.add({
-        severity: 'info',
-        summary: 'Fingerprint',
-        detail: 'Fingerprint attendance is not configured yet.',
-        life: 5000,
-    })
+    if (typeof PublicKeyCredential === 'undefined') {
+        toast.add({
+            severity: 'error',
+            summary: 'Fingerprint',
+            detail: 'This browser does not support fingerprint authentication.',
+            life: 5000,
+        })
+        return
+    }
+
+    if (locationLoading.value || locationError.value || !isLocationReady.value) {
+        toast.add({
+            severity: 'error',
+            summary: 'Location',
+            detail: locationError.value || 'Waiting for GPS location.',
+            life: 5000,
+        })
+        return
+    }
+
+    try {
+        isLoading.value = true
+        faceStatusText.value = 'Waiting for fingerprint verification...'
+
+        const options = await postWebAuthnJson('/attendance/fingerprint/options')
+        const credential = await navigator.credentials.get({
+            publicKey: parseWebAuthnOptions(options) as PublicKeyCredentialRequestOptions,
+        })
+
+        const payload = await postWebAuthnJson('/attendance/fingerprint/record', {
+            ...parseWebAuthnCredential(credential),
+            attendance_type: attendanceType.value,
+            latitude: coords.value.latitude,
+            longitude: coords.value.longitude,
+        })
+
+        toast.add({
+            severity: 'success',
+            summary: 'Success',
+            detail: payload.message ?? 'Attendance recorded successfully.',
+            life: 5000,
+        })
+
+        announceAttendanceGreeting(payload.greeting)
+        resetAttendanceSelection()
+    } catch (error) {
+        toast.add({
+            severity: 'error',
+            summary: 'Fingerprint',
+            detail: error instanceof Error ? error.message : 'Fingerprint attendance failed.',
+            life: 5000,
+        })
+        resetAttendanceSelection()
+    }
 }
 
 const submitAttendance = (employeeIdentifier: string, image: string, method: AttendanceMethod): Promise<void> => {
