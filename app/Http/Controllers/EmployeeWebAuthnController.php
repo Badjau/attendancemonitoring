@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Enums\Attendance\Type;
+use App\Http\Requests\EmployeeWebAuthn\RecordAttendanceRequest;
 use App\Models\Employee;
 use App\Services\AttendanceService;
 use Illuminate\Http\JsonResponse;
@@ -47,25 +48,12 @@ class EmployeeWebAuthnController extends Controller
 
     public function register(Request $request, Employee $employee): JsonResponse
     {
-        // TODO: Transfer this into request class
-        $validated = $request->validate([
-            'id' => ['required', 'string'],
-            'rawId' => ['required', 'string'],
-            'response' => ['required', 'array'],
-            'response.clientDataJSON' => ['required', 'string'],
-            'response.attestationObject' => ['required', 'string'],
-            'type' => ['required', 'string'],
-            'clientExtensionResults' => ['sometimes', 'array'],
-            'authenticatorAttachment' => ['sometimes', 'nullable', 'string'],
-            'alias' => ['sometimes', 'nullable', 'string', 'max:255'],
-        ]);
-
         $validation = app(AttestationValidator::class)
-            ->send(new AttestationValidation($employee, new JsonTransport($validated)))
+            ->send(new AttestationValidation($employee, new JsonTransport($request->array())))
             ->thenReturn();
 
         $validation->credential
-            ->forceFill(['alias' => $validated['alias'] ?? 'Fingerprint'])
+            ->forceFill(['alias' => $request->alias ?? 'Fingerprint'])
             ->save();
 
         return response()->json([
@@ -88,27 +76,10 @@ class EmployeeWebAuthnController extends Controller
         return response()->json($json);
     }
 
-    public function recordAttendance(Request $request): JsonResponse
+    public function recordAttendance(RecordAttendanceRequest $request): JsonResponse
     {
-        $validated = $request->validate([
-            'id' => ['required', 'string'],
-            'rawId' => ['required', 'string'],
-            'response' => ['required', 'array'],
-            'response.authenticatorData' => ['required', 'string'],
-            'response.clientDataJSON' => ['required', 'string'],
-            'response.signature' => ['required', 'string'],
-            'response.userHandle' => ['sometimes', 'nullable'],
-            'type' => ['required', 'string'],
-            'clientExtensionResults' => ['sometimes', 'array'],
-            'authenticatorAttachment' => ['sometimes', 'nullable', 'string'],
-            'attendance_type' => ['sometimes', 'nullable', Rule::in([Type::TimeIn->value, Type::TimeOut->value])],
-            'attendance_image' => ['sometimes', 'nullable', 'string'],
-            'latitude' => ['required', 'numeric', 'between:-90,90'],
-            'longitude' => ['required', 'numeric', 'between:-180,180'],
-        ]);
-
         try {
-            $credentialPayload = Arr::only($validated, [
+            $credentialPayload = Arr::only($request->array(), [
                 'id',
                 'rawId',
                 'response',

@@ -1,25 +1,14 @@
 <script setup lang="ts">
 import * as faceapi from 'face-api.js';
 import axios from 'axios';
-import {Camera, Fingerprint, LoaderCircle, LogIn, LogOut, MapPin, TriangleAlert} from "@lucide/vue";
+import {Camera, Fingerprint, LoaderCircle, LogIn, LogOut, MapPin, ScanFace, TriangleAlert} from "@lucide/vue";
 import {computed, nextTick, onMounted, onUnmounted, ref, watch} from "vue";
 import {router, usePage} from '@inertiajs/vue3'
 import {useToast} from "primevue";
 import {useGeolocator} from '@/Composables/useGeolocator.js';
 
-const page = usePage();
-const toast = useToast();
-const {
-    coords,
-    error: locationError,
-    loading: locationLoading,
-    accuracyWarning,
-    getLocation,
-} = useGeolocator();
-
-
 type AttendanceAction = "time-in" | "time-out"
-type AttendanceMethod = "rfid" | "keypad" | "fingerprint"
+type AttendanceMethod = "rfid" | "keypad" | "fingerprint" | "face"
 type AttendanceGreeting = {
     first_name: string
     is_birthday: boolean
@@ -33,6 +22,21 @@ type VerifiedEmployee = {
     position: string
     profile_url: string
 }
+
+const props = defineProps<{
+    employees: VerifiedEmployee[]
+}>();
+
+const page = usePage();
+const toast = useToast();
+const {
+    coords,
+    error: locationError,
+    loading: locationLoading,
+    accuracyWarning,
+    address,
+    getLocation,
+} = useGeolocator();
 
 const attendanceType = ref<AttendanceAction | ''>('')
 const videoRef = ref<HTMLVideoElement | null>(null)
@@ -52,7 +56,8 @@ const showEmployeeIdInputField = ref(false);
 const rfidInput = ref<HTMLInputElement | null>(null)
 const empIdInput = ref<HTMLInputElement | null>(null)
 const rfidBuffer = ref('')
-const manualEmployeeId = ref('')
+const employeePassword = ref('')
+const hasTypedEmployeePassword = ref(false)
 
 let stream: MediaStream | null = null
 let interval: ReturnType<typeof setInterval>
@@ -78,6 +83,12 @@ const showCamera = computed(() => showEmployeeIdInputField.value)
 const employeeFullName = (employee: VerifiedEmployee): string => (
     `${employee.first_name} ${employee.last_name}`.trim()
 )
+
+const locationLabel = (): string => {
+    const currentCoords = coords.value as any
+
+    return address.value || currentCoords.address || ''
+}
 
 const loadFaceModels = async () => {
     if (isFaceModelReady.value) return
@@ -254,12 +265,15 @@ const ensureAttendanceFlowReady = async (actionName?: AttendanceAction) => {
 
 const handleTimeAction = async (actionName: AttendanceAction) => {
     await ensureAttendanceFlowReady(actionName)
+    employeePassword.value = ''
+    hasTypedEmployeePassword.value = false
 }
 
 const resetAttendanceSelection = () => {
     attendanceType.value = ''
     showEmployeeIdInputField.value = false
-    manualEmployeeId.value = ''
+    employeePassword.value = ''
+    hasTypedEmployeePassword.value = false
     isLoading.value = false
     faceStatusText.value = 'Face verification ready.'
     stopCamera()
@@ -332,6 +346,10 @@ const onRFIDKeydown = (e: KeyboardEvent) => {
 const onEmpIdFocus = (e: FocusEvent) => {
     const el = e.target as HTMLInputElement | null
     el?.select?.()
+}
+
+const onEmpIdInput = () => {
+    hasTypedEmployeePassword.value = true
 }
 
 const onEmpIdKeydown = (e: KeyboardEvent) => {
@@ -431,19 +449,23 @@ const captureAttendanceImage = (): string | null => {
     return image
 }
 
-const verifyEmployeeIdentifier = async (employeeIdentifier: string): Promise<VerifiedEmployee | null> => {
+const verifyEmployeeIdentifier = async (
+    employeeIdentifier: string,
+    method: AttendanceMethod,
+): Promise<VerifiedEmployee | null> => {
     try {
-        faceStatusText.value = 'Checking employee ID...'
+        faceStatusText.value = 'Checking employee...'
 
         const response = await axios.post('/attendance/verify-employee', {
             employee_id: employeeIdentifier,
+            attendance_method: method,
         })
 
         return response.data.employee as VerifiedEmployee
     } catch (error: any) {
         const message = error?.response?.data?.message
             ?? Object.values(error?.response?.data?.errors ?? {})?.[0]?.[0]
-            ?? 'Employee ID is not existing.'
+            ?? 'Employee is not existing.'
 
         toast.add({
             severity: 'error',
@@ -552,8 +574,82 @@ const verifyLiveFaceMatchesEmployee = async (employee: VerifiedEmployee): Promis
     }
 }
 
+const recognizeLiveFaceEmployee = async (): Promise<VerifiedEmployee | null> => {
+    if (!videoRef.value || !isVideoReady.value) {
+        toast.add({
+            severity: 'error',
+            summary: 'Camera',
+            detail: 'Camera not ready. Please allow camera access.',
+            life: 5000,
+        })
+        return null
+    }
+
+    if (!props.employees.length) {
+        toast.add({
+            severity: 'warn',
+            summary: 'Face Recognition',
+            detail: 'No registered employee faces are available.',
+            life: 5000,
+        })
+        faceStatusText.value = 'No registered faces available.'
+        return null
+    }
+
+    await loadFaceModels()
+    faceStatusText.value = 'Recognizing face...'
+
+    const detections = await faceapi
+        .detectAllFaces(videoRef.value, faceDetectorOptions)
+        .withFaceLandmarks()
+        .withFaceDescriptors()
+
+    if (!detections.length) {
+        toast.add({
+            severity: 'warn',
+            summary: 'Face Recognition',
+            detail: 'No face detected. Look straight at the camera.',
+            life: 5000,
+        })
+        faceStatusText.value = 'No face detected.'
+        return null
+    }
+
+    let bestMatch: { employee: VerifiedEmployee; distance: number } | null = null
+
+    for (const employee of props.employees) {
+        const registeredDescriptor = await getRegisteredFaceDescriptor(employee)
+        if (!registeredDescriptor) continue
+
+        for (const detection of detections) {
+            const distance = faceapi.euclideanDistance(registeredDescriptor, detection.descriptor)
+
+            if (!bestMatch || distance < bestMatch.distance) {
+                bestMatch = {employee, distance}
+            }
+        }
+    }
+
+    if (!bestMatch || bestMatch.distance > FACE_MATCH_THRESHOLD) {
+        toast.add({
+            severity: 'error',
+            summary: 'Face Recognition',
+            detail: 'Face not recognized.',
+            life: 5000,
+        })
+        faceStatusText.value = bestMatch
+            ? `Face not recognized. Distance: ${bestMatch.distance.toFixed(2)}.`
+            : 'Face not recognized.'
+        return null
+    }
+
+    faceStatusText.value = `Recognized ${employeeFullName(bestMatch.employee)}.`
+
+    return bestMatch.employee
+}
+
 const verifyEmployeeFaceAndSubmit = async (employeeIdentifier: string, method: AttendanceMethod): Promise<void> => {
-    const employee = await verifyEmployeeIdentifier(employeeIdentifier)
+    const employee = await verifyEmployeeIdentifier(employeeIdentifier, method)
     if (!employee) return
 
     const isFaceMatch = await verifyLiveFaceMatchesEmployee(employee)
@@ -607,13 +703,18 @@ const submitRFIDAttendance = async (rfid: any) => {
 }
 
 const submitManualAttendance = async () => {
-    const employeeId = manualEmployeeId.value.trim()
+    const password = employeePassword.value.trim()
 
-    if (!employeeId) {
+    if (!hasTypedEmployeePassword.value) {
+        employeePassword.value = ''
+        return
+    }
+
+    if (!password) {
         toast.add({
             severity: 'warn',
             summary: 'Warning',
-            detail: 'Enter employee ID first.',
+            detail: 'Enter password first.',
             life: 5000,
         })
         return
@@ -624,12 +725,57 @@ const submitManualAttendance = async () => {
     try {
         isLoading.value = true
         console.log('Verifying keypad attendance...');
-        await verifyEmployeeFaceAndSubmit(employeeId, 'keypad')
-        manualEmployeeId.value = ''
+        await verifyEmployeeFaceAndSubmit(password, 'keypad')
+        employeePassword.value = ''
+        hasTypedEmployeePassword.value = false
         setTimeout(() => forceRFIDFocus(), 50)
     } catch (e) {
         console.error('Error submitting keypad attendance:', e);
         isLoading.value = false
+    }
+}
+
+const submitFaceAttendance = async () => {
+    const attendanceAction = attendanceType.value || inferredAttendanceType()
+    attendanceType.value = attendanceAction
+
+    await ensureAttendanceFlowReady(attendanceAction)
+
+    if (locationLoading.value || locationError.value || !isLocationReady.value) {
+        toast.add({
+            severity: 'error',
+            summary: 'Location',
+            detail: locationError.value || 'Waiting for GPS location.',
+            life: 5000,
+        })
+        return
+    }
+
+    try {
+        isLoading.value = true
+
+        const employee = await recognizeLiveFaceEmployee()
+        if (!employee) {
+            isLoading.value = false
+            return
+        }
+
+        const image = captureAttendanceImage()
+        if (!image) {
+            isLoading.value = false
+            return
+        }
+
+        await submitAttendance(employee.employee_id, image, 'face')
+    } catch (error) {
+        console.error('Error submitting face attendance:', error)
+        toast.add({
+            severity: 'error',
+            summary: 'Face Recognition',
+            detail: error instanceof Error ? error.message : 'Facial recognition attendance failed.',
+            life: 5000,
+        })
+        resetAttendanceSelection()
     }
 }
 
@@ -679,6 +825,7 @@ const submitFingerprintAttendance = async () => {
             attendance_image: image,
             latitude: coords.value.latitude,
             longitude: coords.value.longitude,
+            location: locationLabel(),
         })
 
         toast.add({
@@ -727,6 +874,7 @@ const submitAttendance = (employeeIdentifier: string, image: string, method: Att
         formData.append('attendance_type', attendanceAction)
         formData.append('latitude', String(coords.value.latitude))
         formData.append('longitude', String(coords.value.longitude))
+        formData.append('location', locationLabel())
 
         const blob = base64ToBlob(image, 'image/jpeg')
         formData.append('attendance-image', blob, `attendance_${Date.now()}.jpg`)
@@ -931,7 +1079,7 @@ onUnmounted(() => {
                 <div class="grid grid-cols-2 gap-4">
                     <button
                         @click="handleTimeAction('time-in')"
-                        class="group relative bg-brand-accent hover:bg-[#ffcf81] text-brand-stroke border-2 border-brand-stroke rounded-2xl py-4 px-3 transition-all font-bold shadow-[4px_4px_0px_0px_#001e1d] active:translate-x-1 active:translate-y-1 active:shadow-none flex flex-col items-center gap-2"
+                        class="group relative bg-brand-accent hover:bg-[#ffcf81] text-brand-stroke border-2 border-brand-stroke rounded-2xl py-4 px-3 transition-all duration-200 ease-out font-bold shadow-[4px_4px_0px_0px_#001e1d] hover:-translate-y-1 hover:shadow-[6px_6px_0px_0px_#001e1d] active:translate-x-1 active:translate-y-1 active:shadow-none flex flex-col items-center gap-2"
                     >
                         <LogIn class="w-5 h-5"/>
                         <span class="text-sm">Time In</span>
@@ -939,22 +1087,34 @@ onUnmounted(() => {
 
                     <button
                         @click="handleTimeAction('time-out')"
-                        class="group relative bg-brand-tertiary hover:bg-[#f07a7b] text-brand-headline border-2 border-brand-stroke rounded-2xl py-4 px-3 transition-all font-bold shadow-[4px_4px_0px_0px_#001e1d] active:translate-x-1 active:translate-y-1 active:shadow-none flex flex-col items-center gap-2"
+                        class="group relative bg-brand-tertiary hover:bg-[#f07a7b] text-brand-headline border-2 border-brand-stroke rounded-2xl py-4 px-3 transition-all duration-200 ease-out font-bold shadow-[4px_4px_0px_0px_#001e1d] hover:-translate-y-1 hover:shadow-[6px_6px_0px_0px_#001e1d] active:translate-x-1 active:translate-y-1 active:shadow-none flex flex-col items-center gap-2"
                     >
                         <LogOut class="w-5 h-5"/>
                         <span class="text-sm">Time Out</span>
                     </button>
                 </div>
 
-                <button
-                    type="button"
-                    class="mt-4 inline-flex w-full items-center justify-center gap-2 bg-brand-card text-brand-stroke border-2 border-brand-stroke rounded-2xl py-4 px-3 transition-all font-bold shadow-[4px_4px_0px_0px_#001e1d] active:translate-x-1 active:translate-y-1 active:shadow-none"
-                    title="Fingerprint"
-                    @click="submitFingerprintAttendance"
-                >
-                    <Fingerprint class="w-5 h-5"/>
-                    <span class="text-sm">Fingerprint</span>
-                </button>
+                <div class="mt-4 grid grid-cols-2 gap-4">
+                    <button
+                        type="button"
+                        class="inline-flex w-full items-center justify-center gap-2 bg-brand-card hover:bg-white text-brand-stroke border-2 border-brand-stroke rounded-2xl py-4 px-3 transition-all duration-200 ease-out font-bold shadow-[4px_4px_0px_0px_#001e1d] hover:-translate-y-1 hover:shadow-[6px_6px_0px_0px_#001e1d] active:translate-x-1 active:translate-y-1 active:shadow-none"
+                        title="Fingerprint"
+                        @click="submitFingerprintAttendance"
+                    >
+                        <Fingerprint class="w-5 h-5"/>
+                        <span class="text-sm">Fingerprint</span>
+                    </button>
+
+                    <button
+                        type="button"
+                        class="inline-flex w-full items-center justify-center gap-2 bg-brand-card hover:bg-white text-brand-stroke border-2 border-brand-stroke rounded-2xl py-4 px-3 transition-all duration-200 ease-out font-bold shadow-[4px_4px_0px_0px_#001e1d] hover:-translate-y-1 hover:shadow-[6px_6px_0px_0px_#001e1d] active:translate-x-1 active:translate-y-1 active:shadow-none"
+                        title="Facial Recognition"
+                        @click="submitFaceAttendance"
+                    >
+                        <ScanFace class="w-5 h-5"/>
+                        <span class="text-sm">Face</span>
+                    </button>
+                </div>
 
                 <div v-if="isLoading" class="mt-5">
                     <p class="text-brand-bg font-bold tracking-wider uppercase text-xs">
@@ -978,11 +1138,16 @@ onUnmounted(() => {
                             <input
                                 v-if="showEmployeeIdInputField"
                                 ref="empIdInput"
-                                v-model="manualEmployeeId"
-                                type="text"
-                                placeholder="Employee ID"
+                                v-model="employeePassword"
+                                type="password"
+                                name="keypad-attendance-password"
+                                autocomplete="new-password"
+                                autocapitalize="off"
+                                spellcheck="false"
+                                placeholder="Password"
                                 class="text-brand-stroke border-2 border-brand-stroke rounded-xl py-3 px-3 text-sm w-full mt-4"
                                 @focus="onEmpIdFocus"
+                                @input="onEmpIdInput"
                                 @keydown="onEmpIdKeydown"
                             />
 
@@ -992,7 +1157,7 @@ onUnmounted(() => {
                             >
                                 <button
                                     type="button"
-                                    class="w-full bg-brand-stroke text-brand-headline border-2 border-brand-stroke rounded-xl py-3 px-4 text-sm font-bold shadow-[3px_3px_0px_0px_#abd1c6] active:translate-x-1 active:translate-y-1 active:shadow-none"
+                                    class="w-full bg-brand-stroke hover:bg-brand-bg text-brand-headline border-2 border-brand-stroke rounded-xl py-3 px-4 text-sm font-bold transition-all duration-200 ease-out shadow-[3px_3px_0px_0px_#abd1c6] hover:-translate-y-0.5 hover:shadow-[5px_5px_0px_0px_#abd1c6] active:translate-x-1 active:translate-y-1 active:shadow-none"
                                     @click="submitManualAttendance"
                                 >
                                     Submit

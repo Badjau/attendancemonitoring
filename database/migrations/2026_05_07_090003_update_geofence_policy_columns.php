@@ -3,6 +3,7 @@
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
+use App\Enums\Zones\Policy;
 
 return new class extends Migration
 {
@@ -10,7 +11,7 @@ return new class extends Migration
     {
         Schema::table('zones', function (Blueprint $table) {
             if (! Schema::hasColumn('zones', 'policy')) {
-                $table->enum('policy', ['strict', 'relaxed'])->default('relaxed')->after('radius_meters');
+                $table->enum('policy', ['strict', 'relaxed'])->default(Policy::RELAXED->value)->after('radius_meters');
             }
 
             if (! Schema::hasColumn('zones', 'is_active')) {

@@ -2,6 +2,8 @@
 
 namespace App\Models;
 
+use App\Enums\Zones\Policy;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -26,7 +28,7 @@ class Zone extends Model
         'latitude' => 'float',
         'longitude' => 'float',
         'radius_meters' => 'float',
-        'policy' => 'string',
+        'policy' => Policy::class,
         'is_active' => 'boolean',
     ];
 
@@ -62,5 +64,10 @@ class Zone extends Model
 
         $this->attributes['latitude'] = $location['lat'] ?? $location['latitude'] ?? null;
         $this->attributes['longitude'] = $location['lng'] ?? $location['longitude'] ?? null;
+    }
+
+    public function scopeIsActive(Builder $query): Builder
+    {
+        return $query->where('is_active', true);
     }
 }

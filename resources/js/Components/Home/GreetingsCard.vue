@@ -74,7 +74,7 @@ const buildGreetingMessage = (greeting: AttendanceGreeting) => {
 
     if (!greeting.is_birthday || greeting.attendance_type === "time-out") return attendanceMessage
 
-    return `${attendanceMessage} Happy birthday, ${greeting.first_name}!`
+    return `${dayGreeting}, ${greeting.first_name}. Happy birthday! Time in recorded. Have a productive day.`
 }
 
 const onAttendanceGreeting = (event: Event) => {
@@ -86,7 +86,7 @@ const onAttendanceGreeting = (event: Event) => {
     icon.value = greeting.is_birthday ? "🎂" : "👋"
     title.value = `${dayGreeting}, ${greeting.first_name}`
     subtitle.value = greeting.is_birthday
-        ? `Happy birthday, ${greeting.first_name}! Attendance recorded.`
+        ? "Happy birthday! Attendance recorded."
         : greeting.attendance_type === "time-out"
             ? "Time out recorded. Take care."
             : "Time in recorded. Have a productive day."
@@ -122,7 +122,7 @@ onUnmounted(() => {
 
             <div class="min-w-0">
                 <p id="greeting-text" class="text-lg font-bold leading-tight text-brand-stroke wrap-break-word">
-                    {{ getDayGreeting() ?? title }}
+                    {{ title ?? getDayGreeting() }}
                 </p>
                 <p
                     id="greeting-subtext"

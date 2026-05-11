@@ -3,10 +3,11 @@
 namespace App\Enums\Announcement;
 
 use Filament\Support\Contracts\HasColor;
+use Filament\Support\Contracts\HasIcon;
 use Filament\Support\Contracts\HasLabel;
 use Illuminate\Contracts\Support\Htmlable;
 
-enum Type: string implements HasColor, HasLabel
+enum Type: string implements HasColor, HasLabel, HasIcon
 {
     case GENERAL = 'general';
     case URGENT = 'urgent';
@@ -29,10 +30,21 @@ enum Type: string implements HasColor, HasLabel
     {
         return match ($this) {
             self::GENERAL => 'primary',
-            self::URGENT => 'secondary',
+            self::URGENT => 'warning',
             self::EVENT => 'success',
             self::HOLIDAY => 'danger',
-            self::POLICY => 'warning',
+            self::POLICY => 'info',
+        };
+    }
+
+    public function getIcon(): string
+    {
+        return match ($this) {
+            self::GENERAL => 'heroicon-o-cog-6-tooth',
+            self::URGENT => 'heroicon-o-clock',
+            self::EVENT => 'heroicon-o-calendar',
+            self::HOLIDAY => 'heroicon-o-calendar-days',
+            self::POLICY => 'heroicon-o-clipboard-document-list',
         };
     }
 }

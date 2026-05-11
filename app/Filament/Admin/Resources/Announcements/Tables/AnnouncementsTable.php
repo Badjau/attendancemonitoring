@@ -18,29 +18,31 @@ class AnnouncementsTable
             ->columns([
                 TextColumn::make('title')
                     ->searchable(),
+
                 TextColumn::make('type')
                     ->badge(),
+
                 TextColumn::make('status')
                     ->badge(),
-                TextColumn::make('created_by')
-                    ->numeric()
+
+                TextColumn::make('createdBy.name')
+                    ->label('Created By')
+                    ->searchable()
                     ->sortable(),
-                TextColumn::make('published_at')
-                    ->dateTime()
-                    ->sortable(),
-                TextColumn::make('expires_at')
-                    ->dateTime()
-                    ->sortable(),
+
                 IconColumn::make('is_pinned')
                     ->boolean(),
+
                 TextColumn::make('created_at')
                     ->dateTime()
                     ->sortable()
                     ->toggleable(isToggledHiddenByDefault: true),
+
                 TextColumn::make('updated_at')
                     ->dateTime()
                     ->sortable()
                     ->toggleable(isToggledHiddenByDefault: true),
+
                 TextColumn::make('deleted_at')
                     ->dateTime()
                     ->sortable()

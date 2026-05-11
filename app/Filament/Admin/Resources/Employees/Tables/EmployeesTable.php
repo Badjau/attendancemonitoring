@@ -21,6 +21,12 @@ class EmployeesTable
                     ->searchable()
                     ->sortable(),
 
+                TextColumn::make('rfid_uid')
+                    ->label('RFID UID')
+                    ->searchable()
+                    ->placeholder('-')
+                    ->toggleable(),
+
                 TextColumn::make('first_name')
                     ->searchable()
                     ->sortable(),

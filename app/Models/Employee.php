@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Laragear\WebAuthn\Contracts\WebAuthnAuthenticatable;
 use Laragear\WebAuthn\WebAuthnAuthentication;
 use Laragear\WebAuthn\WebAuthnData;
@@ -20,6 +21,8 @@ class Employee extends Model implements HasMedia, WebAuthnAuthenticatable
     protected $fillable = [
         'department_id',
         'employee_id',
+        'rfid_uid',
+        'password',
         'first_name',
         'last_name',
         'middle_name',
@@ -29,7 +32,10 @@ class Employee extends Model implements HasMedia, WebAuthnAuthenticatable
 
     protected $casts = [
         'date_of_birth' => 'date',
+        'password' => 'hashed',
     ];
+
+    protected $hidden = ['password'];
 
     protected $appends = ['name'];
 
@@ -77,5 +83,10 @@ class Employee extends Model implements HasMedia, WebAuthnAuthenticatable
     public function attendances(): HasMany
     {
         return $this->hasMany(Attendance::class);
+    }
+
+    public function timeclockAuthorization(): HasOne
+    {
+        return $this->hasOne(TimeclockAuthorizedUser::class);
     }
 }
