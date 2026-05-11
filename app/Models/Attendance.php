@@ -2,8 +2,10 @@
 
 namespace App\Models;
 
+use App\Enums\Attendance\AttendanceMethod;
 use App\Enums\Attendance\OvertimeStatus;
 use App\Enums\Attendance\Status;
+use App\Enums\Attendance\Type;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -42,6 +44,7 @@ class Attendance extends Model implements HasMedia
 
     protected $casts = [
         'attendance_date' => 'date',
+        'attendance_type' => Type::class,
         'time_in' => 'timestamp',
         'time_out' => 'timestamp',
         'total_hours' => 'decimal:5',
@@ -55,6 +58,7 @@ class Attendance extends Model implements HasMedia
         'overtime_status' => OvertimeStatus::class,
         'latitude' => 'float',
         'longitude' => 'float',
+        'attendance_method' => AttendanceMethod::class,
     ];
 
     public function registerMediaCollections(): void
@@ -66,28 +70,16 @@ class Attendance extends Model implements HasMedia
 
     public function scopeIsLate(Builder $query)
     {
-        if (! $query) {
-            return $query;
-        }
-
         return $query->where('is_late', true);
     }
 
     public function scopeIsUndertime(Builder $query)
     {
-        if (! $query) {
-            return $query;
-        }
-
         return $query->where('is_undertime', false);
     }
 
     public function scopeIsOvertime(Builder $query)
     {
-        if (! $query) {
-            return $query;
-        }
-
         return $query->where('is_overtime', true);
     }
 

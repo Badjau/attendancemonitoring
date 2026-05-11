@@ -2,7 +2,10 @@
 
 namespace App\Filament\Admin\Resources\Attendances\Tables;
 
+use App\Enums\Attendance\AttendanceMethod;
 use App\Enums\Attendance\Status;
+use App\Enums\Attendance\Type;
+use App\Models\Employee;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
@@ -12,6 +15,7 @@ use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Model;
 use Malzariey\FilamentDaterangepickerFilter\Filters\DateRangeFilter;
 use pxlrbt\FilamentExcel\Actions\ExportBulkAction;
 
@@ -23,7 +27,7 @@ class AttendancesTable
             ->columns([
                 TextColumn::make('employee.first_name')
                     ->label('Employee')
-                    ->formatStateUsing(fn ($record) => "{$record->employee->first_name} {$record->employee->last_name}")
+                    ->formatStateUsing(fn($record) => "{$record->employee->first_name} {$record->employee->last_name}")
                     ->searchable(query: function (Builder $query, string $search) {
                         $query->whereHas('employee', function (Builder $query) use ($search) {
                             $query->where('first_name', 'like', "%{$search}%")
@@ -38,13 +42,11 @@ class AttendancesTable
                 TextColumn::make('attendance_type')
                     ->label('Type')
                     ->badge()
-                    ->formatStateUsing(fn (?string $state): string => str($state ?? '-')->headline()->toString())
                     ->searchable(),
 
                 TextColumn::make('attendance_method')
                     ->label('Method')
                     ->badge()
-                    ->formatStateUsing(fn (?string $state): string => str($state ?? '-')->headline()->toString())
                     ->searchable(),
 
                 TextColumn::make('attendance_date')
@@ -65,14 +67,17 @@ class AttendancesTable
 
                 TextColumn::make('status')
                     ->badge()
-                    ->searchable(),
+                    ->searchable()
+                    ->toggleable(isToggledHiddenByDefault: true),
 
                 IconColumn::make('is_late')
-                    ->boolean(),
+                    ->boolean()
+                    ->toggleable(isToggledHiddenByDefault: true),
 
                 TextColumn::make('late_minutes')
                     ->numeric()
-                    ->sortable(),
+                    ->sortable()
+                    ->toggleable(isToggledHiddenByDefault: true),
 
                 IconColumn::make('is_undertime')
                     ->boolean()
@@ -117,29 +122,33 @@ class AttendancesTable
 
                 SelectFilter::make('attendance_type')
                     ->label('Type')
-                    ->options([
-                        'time-in' => 'Time In',
-                        'time-out' => 'Time Out',
-                    ]),
+                    ->options(Type::class),
 
                 SelectFilter::make('attendance_method')
                     ->label('Method')
-                    ->options([
-                        'rfid' => 'RFID',
-                        'fingerprint' => 'Fingerprint',
-                        'keypad' => 'Keypad',
-                    ]),
+                    ->options(AttendanceMethod::class),
 
                 SelectFilter::make('employee_id')
                     ->label('Employee')
                     ->relationship(
                         'employee',
                         'first_name',
-                        fn ($query) => $query->orderBy('first_name')->orderBy('last_name')
+                        fn($query) => $query->orderBy('first_name')->orderBy('last_name')
                     )
-                    ->getOptionLabelFromRecordUsing(fn ($record) => "{$record->first_name} {$record->last_name}")
+                    ->getOptionLabelFromRecordUsing(fn($record) => "{$record->first_name} {$record->last_name}")
                     ->preload()
-                    ->searchable(),
+                    ->searchable()
+                    ->getSearchResultsUsing(
+                        fn(string $search) => Employee::query()
+                            ->whereRaw("CONCAT(first_name, ' ', last_name) LIKE ?", ["%{$search}%"])
+                            ->orderBy('first_name')
+                            ->orderBy('last_name')
+                            ->limit(50)
+                            ->get()
+                            ->mapWithKeys(fn($record) => [
+                                $record->id => "{$record->first_name} {$record->last_name}"
+                            ])
+                    ),
 
                 DateRangeFilter::make('attendance_date')
                     ->autoApply()
@@ -148,11 +157,10 @@ class AttendancesTable
             ])
             ->recordActions([
                 ViewAction::make(),
-                EditAction::make(),
             ])
             ->toolbarActions([
                 BulkActionGroup::make([
-                    DeleteBulkAction::make(),
+                    // DeleteBulkAction::make(),
 
                     ExportBulkAction::make(),
                 ]),

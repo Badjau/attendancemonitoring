@@ -2,6 +2,7 @@
 
 namespace App\Filament\Admin\Resources\Zones\Schemas;
 
+use App\Enums\Zones\Policy;
 use App\Models\Employee;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\Repeater;
@@ -62,12 +63,9 @@ class ZoneForm
                             ->live(),
 
                         Select::make('policy')
-                            ->options([
-                                'strict' => 'Strict - must be inside this zone',
-                                'relaxed' => 'Relaxed - log only, never enforced',
-                            ])
+                            ->options(Policy::class)
                             ->required()
-                            ->default('relaxed'),
+                            ->default(Policy::RELAXED->value),
 
                         Toggle::make('is_active')
                             ->label('Active')

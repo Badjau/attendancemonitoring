@@ -2,6 +2,8 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Requests\Face\StoreEmployeeRegistrationRequest;
+use App\Http\Requests\Face\StoreRegistrationRequest;
 use App\Models\Employee;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -54,14 +56,9 @@ class FaceController extends Controller
         ]);
     }
 
-    public function storeRegistration(Request $request): RedirectResponse
+    public function storeRegistration(StoreRegistrationRequest $request): RedirectResponse
     {
-        $validated = $request->validate([
-            'employee_id' => ['required', 'string', 'exists:employees,employee_id'],
-            'face-image' => ['required', 'image', 'max:5120'],
-        ]);
-
-        $employee = Employee::where('employee_id', $validated['employee_id'])->firstOrFail();
+        $employee = Employee::where('employee_id', $request->employee_id)->firstOrFail();
 
         $employee->addMediaFromRequest('face-image')
             ->usingName("{$employee->employee_id} face registration")
@@ -71,12 +68,8 @@ class FaceController extends Controller
         return redirect()->back()->with('success', 'Face registered successfully.');
     }
 
-    public function storeEmployeeRegistration(Request $request, Employee $employee): JsonResponse
+    public function storeEmployeeRegistration(StoreEmployeeRegistrationRequest $request, Employee $employee): JsonResponse
     {
-        $request->validate([
-            'face-image' => ['required', 'image', 'max:5120'],
-        ]);
-
         $employee->addMediaFromRequest('face-image')
             ->usingName("{$employee->employee_id} face registration")
             ->usingFileName("face_{$employee->employee_id}_".now()->format('YmdHis').'.jpg')

@@ -52,10 +52,12 @@ class AttendanceService
 
     private function findEmployee(string $employeeId): Employee
     {
-        $employee = Employee::where('employee_id', $employeeId)->first();
+        $employee = Employee::where('employee_id', $employeeId)
+            ->orWhere('rfid_uid', $employeeId)
+            ->first();
 
         if (! $employee) {
-            throw new \Exception('Employee ID is not existing.');
+            throw new \Exception('Employee is not existing.');
         }
 
         return $employee;
@@ -168,6 +170,7 @@ class AttendanceService
         $validated = $request->validate([
             'latitude' => ['required', 'numeric', 'between:-90,90'],
             'longitude' => ['required', 'numeric', 'between:-180,180'],
+            'location' => ['sometimes', 'nullable', 'string', 'max:1000'],
         ]);
 
         $latitude = (float) $validated['latitude'];
@@ -185,6 +188,7 @@ class AttendanceService
             }
 
             return [
+                'location' => $validated['location'] ?? $matchingStrictZone->name,
                 'latitude' => $latitude,
                 'longitude' => $longitude,
                 'location_status' => 'inside',
@@ -195,6 +199,7 @@ class AttendanceService
         $matchingZone = $this->geofenceService->findMatchingZone($latitude, $longitude, $zones);
 
         return [
+            'location' => $validated['location'] ?? $matchingZone?->name,
             'latitude' => $latitude,
             'longitude' => $longitude,
             'location_status' => $matchingZone ? 'inside' : 'outside',

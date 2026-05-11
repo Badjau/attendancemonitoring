@@ -37,17 +37,11 @@ class AttendanceInfolist
 
                         TextEntry::make('attendance_type')
                             ->label('Type')
-                            ->badge()
-                            ->formatStateUsing(fn (?string $state): string => str($state ?? '-')->headline()->toString()),
+                            ->badge(),
 
                         TextEntry::make('attendance_method')
                             ->label('Method')
                             ->badge()
-                            ->formatStateUsing(fn (?string $state): string => str($state ?? '-')->headline()->toString())
-                            ->placeholder('-'),
-
-                        TextEntry::make('recordedBy.name')
-                            ->label('Recorded By')
                             ->placeholder('-'),
                     ])
                     ->columns(2)
@@ -79,14 +73,7 @@ class AttendanceInfolist
                 Section::make('Status')
                     ->schema([
                         TextEntry::make('status')
-                            ->badge()
-                            ->formatStateUsing(fn (Status|string|null $state): string => $state instanceof Status ? str($state->value)->headline()->toString() : str($state ?? '-')->headline()->toString())
-                            ->color(fn (Status|string|null $state): string => match ($state instanceof Status ? $state : Status::tryFrom((string) $state)) {
-                                Status::Present => 'success',
-                                Status::Late => 'warning',
-                                Status::Absent => 'danger',
-                                default => 'gray',
-                            }),
+                            ->badge(),
 
                         IconEntry::make('is_late')
                             ->label('Late')
@@ -115,13 +102,6 @@ class AttendanceInfolist
                         TextEntry::make('overtime_status')
                             ->label('Overtime Status')
                             ->badge()
-                            ->formatStateUsing(fn (OvertimeStatus|string|null $state): string => $state instanceof OvertimeStatus ? str($state->value)->headline()->toString() : str($state ?? '-')->headline()->toString())
-                            ->color(fn (OvertimeStatus|string|null $state): string => match ($state instanceof OvertimeStatus ? $state : OvertimeStatus::tryFrom((string) $state)) {
-                                OvertimeStatus::Approved => 'success',
-                                OvertimeStatus::Rejected => 'danger',
-                                OvertimeStatus::Pending => 'warning',
-                                default => 'gray',
-                            })
                             ->placeholder('-'),
                     ])
                     ->columns(4)
@@ -132,22 +112,22 @@ class AttendanceInfolist
                         SpatieMediaLibraryImageEntry::make('time_in_photo')
                             ->label('Time In Photo')
                             ->collection('time-in-image')
-                            ->height(220)
-                            ->width('100%')
+                            ->imageHeight(220)
+                            ->imageWidth('100%')
                             ->extraImgAttributes(['class' => 'rounded-lg object-cover']),
 
                         SpatieMediaLibraryImageEntry::make('time_out_photo')
                             ->label('Time Out Photo')
                             ->collection('time-out-image')
-                            ->height(220)
-                            ->width('100%')
+                            ->imageHeight(220)
+                            ->imageWidth('100%')
                             ->extraImgAttributes(['class' => 'rounded-lg object-cover']),
 
                         SpatieMediaLibraryImageEntry::make('legacy_attendance_photo')
                             ->label('Legacy Attendance Photo')
                             ->collection('attendance-image')
-                            ->height(220)
-                            ->width('100%')
+                            ->imageHeight(220)
+                            ->imageWidth('100%')
                             ->extraImgAttributes(['class' => 'rounded-lg object-cover'])
                             ->visible(fn (Attendance $record): bool => $record->hasMedia('attendance-image')),
                     ])

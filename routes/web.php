@@ -5,9 +5,21 @@ use App\Http\Controllers\AttendanceController;
 use App\Http\Controllers\EmployeeWebAuthnController;
 use App\Http\Controllers\FaceController;
 use App\Http\Controllers\HomeController;
+use App\Http\Controllers\TimeclockUnlockController;
 use Illuminate\Support\Facades\Route;
 
-Route::get('/', [HomeController::class, 'home'])->name('home');
+Route::controller(TimeclockUnlockController::class)
+    ->prefix('unlock')
+    ->as('timeclock.')
+    ->group(function () {
+        Route::get('/', 'create')->name('unlock');
+        Route::post('/', 'store')->name('unlock.store');
+        Route::post('/lock', 'destroy')->name('lock');
+    });
+
+Route::get('/', [HomeController::class, 'home'])
+    ->middleware('timeclock.unlocked')
+    ->name('home');
 
 // ROUTE FOR ANNOUNCEMENT
 Route::controller(AnnouncementController::class)
@@ -19,6 +31,7 @@ Route::controller(AnnouncementController::class)
 
 // ROUTE FOR ATTENDANCE
 Route::controller(AttendanceController::class)
+    ->middleware('timeclock.unlocked')
     ->prefix('attendance')
     ->as('attendance.')
     ->group(function () {
@@ -29,6 +42,7 @@ Route::controller(AttendanceController::class)
 
 // ROUTE FOR EMPLOYEE WEB AUTHN (FINGERPRINT)
 Route::controller(EmployeeWebAuthnController::class)
+    ->middleware('timeclock.unlocked')
     ->prefix('attendance/fingerprint')
     ->as('attendance.fingerprint.')
     ->group(function () {
@@ -54,4 +68,3 @@ Route::controller(FaceController::class)
         Route::post('/face/register', [FaceController::class, 'storeRegistration'])->name('face.register.store');
         Route::post('/admin/employees/{employee}/face', 'storeEmployeeRegistration')->middleware('auth')->name('admin.employees.face.register');
     });
-

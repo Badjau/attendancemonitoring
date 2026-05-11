@@ -39,7 +39,6 @@ class ZonesTable
 
                 TextColumn::make('policy')
                     ->badge()
-                    ->color(fn (string $state): string => $state === 'strict' ? 'danger' : 'success')
                     ->sortable(),
 
                 TextColumn::make('is_active')
@@ -53,16 +52,6 @@ class ZonesTable
                     ->label('Assigned Employees')
                     ->getStateUsing(fn (Zone $record): int => $record->employees()->count())
                     ->sortable(false),
-
-                TextColumn::make('created_at')
-                    ->dateTime()
-                    ->sortable()
-                    ->toggleable(isToggledHiddenByDefault: true),
-
-                TextColumn::make('updated_at')
-                    ->dateTime()
-                    ->sortable()
-                    ->toggleable(isToggledHiddenByDefault: true),
             ])
             ->recordActions([
                 EditAction::make(),

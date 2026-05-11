@@ -5,6 +5,35 @@ export function useGeolocator() {
     const error = ref('');
     const loading = ref(false);
     const accuracyWarning = ref(false);
+    const address = ref('');
+
+    const resolveAddress = async (latitude, longitude) => {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 2500);
+
+        try {
+            const params = new URLSearchParams({
+                format: 'jsonv2',
+                lat: String(latitude),
+                lon: String(longitude),
+            });
+            const response = await fetch(`https://nominatim.openstreetmap.org/reverse?${params.toString()}`, {
+                headers: {
+                    Accept: 'application/json',
+                },
+                signal: controller.signal,
+            });
+
+            if (!response.ok) return '';
+
+            const payload = await response.json();
+            return payload.display_name || '';
+        } catch {
+            return '';
+        } finally {
+            clearTimeout(timeout);
+        }
+    };
 
     const getLocation = () => {
         error.value = '';
@@ -18,12 +47,18 @@ export function useGeolocator() {
 
         return new Promise((resolve, reject) => {
             navigator.geolocation.getCurrentPosition(
-                (position) => {
+                async (position) => {
+                    const latitude = position.coords.latitude;
+                    const longitude = position.coords.longitude;
+                    const resolvedAddress = await resolveAddress(latitude, longitude);
+
                     coords.value = {
-                        latitude: position.coords.latitude,
-                        longitude: position.coords.longitude,
+                        latitude,
+                        longitude,
                         accuracy: position.coords.accuracy,
+                        address: resolvedAddress,
                     };
+                    address.value = resolvedAddress;
                     accuracyWarning.value = position.coords.accuracy > 100;
                     loading.value = false;
                     resolve(coords.value);
@@ -47,6 +82,7 @@ export function useGeolocator() {
         error.value = '';
         loading.value = false;
         accuracyWarning.value = false;
+        address.value = '';
     };
 
     return {
@@ -54,6 +90,7 @@ export function useGeolocator() {
         error,
         loading,
         accuracyWarning,
+        address,
         getLocation,
         resetLocation,
     };

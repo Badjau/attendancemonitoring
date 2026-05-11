@@ -118,6 +118,7 @@ const closeAnnouncement = () => {
 
         <!-- Birthdays Card -->
         <div
+            v-if="props.todayBirthdayCelebrants.length > 0"
             class="bg-brand-card rounded-4xl p-8 shadow-[8px_8px_0px_0px_#001e1d] border-2 border-brand-stroke grow flex flex-col animate-fade-up"
             style="animation-delay: 0.1s"
         >
@@ -150,7 +151,6 @@ const closeAnnouncement = () => {
                     />
                     <div>
                         <p class="font-bold text-sm">{{ celebrant.first_name }} {{ celebrant.last_name }}</p>
-                        <p class="text-xs text-brand-bg font-medium">{{ formatDate(celebrant.date_of_birth) }}</p>
                         <p class="text-xs text-brand-bg font-medium">{{ celebrant.department?.name ?? null }}</p>
                     </div>
                 </div>

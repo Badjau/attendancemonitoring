@@ -42,19 +42,11 @@ class Announcement extends Model implements HasMedia
 
     public function scopePublished(Builder $query): Builder
     {
-        if (! $query) {
-            return $query;
-        }
-
         return $query->where('status', Status::PUBLISHED->value);
     }
 
     public function scopeIsPinned(Builder $query): Builder
     {
-        if (! $query) {
-            return $query;
-        }
-
         return $query->where('is_pinned', true);
     }
 

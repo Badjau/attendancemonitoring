@@ -10,6 +10,7 @@ const props = defineProps<{
     attendanceToday: any
     todayBirthdayCelebrants: any
     announcements: any
+    employeesWithFaces: any
 }>();
 
 </script>
@@ -44,7 +45,7 @@ const props = defineProps<{
                 style="animation-delay: 0.2s"
             >
                 <!-- Camera Card -->
-                <CameraCard/>
+                <CameraCard :employees="props.employeesWithFaces"/>
 
                 <!-- Greetings -->
                 <GreetingsCard/>

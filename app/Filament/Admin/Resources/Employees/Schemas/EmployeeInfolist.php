@@ -24,6 +24,10 @@ class EmployeeInfolist
                 TextEntry::make('employee_id')
                     ->label('Employee ID'),
 
+                TextEntry::make('rfid_uid')
+                    ->label('RFID UID')
+                    ->placeholder('-'),
+
                 TextEntry::make('first_name')
                     ->label('First Name'),
 

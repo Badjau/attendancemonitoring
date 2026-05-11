@@ -32,6 +32,20 @@ class EmployeeForm
 
                 TextInput::make('position')
                     ->required(),
+
+                TextInput::make('rfid_uid')
+                    ->label('RFID UID')
+                    ->maxLength(255)
+                    ->unique(ignoreRecord: true)
+                    ->helperText('Used for RFID attendance and timeclock unlock.'),
+
+                TextInput::make('password')
+                    ->label('Keypad Password')
+                    ->password()
+                    ->revealable()
+                    ->maxLength(255)
+                    ->dehydrated(fn (?string $state): bool => filled($state))
+                    ->helperText('Used for manual keypad attendance. Leave blank to keep the current password.'),
             ]);
     }
 }

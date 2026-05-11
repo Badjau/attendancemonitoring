@@ -2,11 +2,13 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Requests\Attendance\VerifyEmployeeRequest;
 use App\Models\Employee;
 use App\Services\AttendanceService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
 
@@ -14,17 +16,17 @@ class AttendanceController extends Controller
 {
     public function __construct(protected AttendanceService $attendanceService) {}
 
-    public function verifyEmployee(Request $request): JsonResponse
+    public function verifyEmployee(VerifyEmployeeRequest $request): JsonResponse
     {
-        $validated = $request->validate([
-            'employee_id' => ['required', 'string'],
-        ]);
-
-        $employee = Employee::where('employee_id', $validated['employee_id'])->first();
+        $employee = $request->attendance_method === 'keypad'
+            ? $this->findEmployeeByPassword($request->employee_id)
+            : Employee::where('employee_id', $request->employee_id)
+                ->orWhere('rfid_uid', $request->employee_id)
+                ->first();
 
         if (! $employee) {
             return response()->json([
-                'message' => 'Employee ID is not existing.',
+                'message' => 'Employee is not existing.',
             ], 404);
         }
 
@@ -46,6 +48,18 @@ class AttendanceController extends Controller
                 'profile_url' => $profileUrl,
             ],
         ]);
+    }
+
+    private function findEmployeeByPassword(string $password): ?Employee
+    {
+        return Employee::query()
+            ->whereNotNull('password')
+            ->get()
+            ->first(function (Employee $employee) use ($password): bool {
+                return Hash::isHashed($employee->password)
+                    ? Hash::check($password, $employee->password)
+                    : hash_equals($employee->password, $password);
+            });
     }
 
     public function recordTimeIn(Request $request): RedirectResponse
