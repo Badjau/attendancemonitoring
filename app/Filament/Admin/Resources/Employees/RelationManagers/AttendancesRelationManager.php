@@ -37,13 +37,11 @@ class AttendancesRelationManager extends RelationManager
                 TextColumn::make('attendance_type')
                     ->label('Type')
                     ->badge()
-                    ->formatStateUsing(fn (?string $state): string => str($state ?? '-')->headline()->toString())
                     ->searchable(),
 
                 TextColumn::make('attendance_method')
                     ->label('Method')
                     ->badge()
-                    ->formatStateUsing(fn (?string $state): string => str($state ?? '-')->headline()->toString())
                     ->searchable(),
 
                 TextColumn::make('total_hours')

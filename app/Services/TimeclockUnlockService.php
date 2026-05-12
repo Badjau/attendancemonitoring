@@ -13,6 +13,7 @@ class TimeclockUnlockService
 {
     public function store(Request $request)
     {
+        info($request->all());
         $authorizedUser = $request['method'] === AttendanceMethod::RFID->value
             ? TimeclockAuthorizedUser::query()
                 ->whereHas('employee', fn($query) => $query->where('rfid_uid', $request->credential))

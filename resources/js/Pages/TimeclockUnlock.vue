@@ -4,14 +4,14 @@ import {Camera, IdCard, KeyRound, LoaderCircle, LockKeyhole, ShieldCheck, Triang
 import {computed, nextTick, onMounted, onUnmounted, ref} from 'vue';
 import axios from 'axios';
 
-type UnlockMethod = 'password' | 'rfid'
+type UnlockMethod = 'keypad' | 'rfid'
 
 const videoRef = ref<HTMLVideoElement | null>(null);
 const canvasRef = ref<HTMLCanvasElement | null>(null);
 const rfidInput = ref<HTMLInputElement | null>(null);
 const password = ref('');
 const rfidBuffer = ref('');
-const method = ref<UnlockMethod>('password');
+const method = ref<UnlockMethod>('keypad');
 const isCameraReady = ref(false);
 const isSubmitting = ref(false);
 const errorText = ref('');
@@ -20,7 +20,7 @@ const statusText = ref('Camera audit is required to unlock the attendance system
 let stream: MediaStream | null = null;
 let rfidTimeout: ReturnType<typeof setTimeout> | null = null;
 
-const selectedCredential = computed(() => method.value === 'password' ? password.value.trim() : rfidBuffer.value.trim());
+const selectedCredential = computed(() => method.value === 'keypad' ? password.value.trim() : rfidBuffer.value.trim());
 
 const csrfToken = (): string => document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
 
@@ -199,8 +199,8 @@ onUnmounted(() => {
                     <button
                         type="button"
                         class="inline-flex items-center justify-center gap-2 rounded-2xl border-2 border-brand-stroke px-4 py-3 text-sm font-black transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[4px_4px_0px_0px_#001e1d]"
-                        :class="method === 'password' ? 'bg-brand-accent' : 'bg-white'"
-                        @click="switchMethod('password')"
+                        :class="method === 'keypad' ? 'bg-brand-accent' : 'bg-white'"
+                        @click="switchMethod('keypad')"
                     >
                         <KeyRound class="h-4 w-4"/>
                         Password
@@ -216,7 +216,7 @@ onUnmounted(() => {
                     </button>
                 </div>
 
-                <form v-if="method === 'password'" class="space-y-4" @submit.prevent="submitUnlock">
+                <form v-if="method === 'keypad'" class="space-y-4" @submit.prevent="submitUnlock">
                     <input
                         v-model="password"
                         type="password"
