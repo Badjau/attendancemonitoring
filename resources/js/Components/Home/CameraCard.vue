@@ -79,12 +79,6 @@ const isLocationReady = computed(() => Boolean(coords.value)
     && Number.isFinite(coords.value.longitude)
     && !locationError.value)
 const showCamera = computed(() => showEmployeeIdInputField.value)
-const selectedAttendanceLabel = computed(() => {
-    if (attendanceType.value === 'time-in') return 'Time In'
-    if (attendanceType.value === 'time-out') return 'Time Out'
-
-    return ''
-})
 
 const employeeFullName = (employee: VerifiedEmployee): string => (
     `${employee.first_name} ${employee.last_name}`.trim()
@@ -996,12 +990,12 @@ onUnmounted(() => {
 <template>
     <div
         v-if="showCamera"
-        class="bg-brand-card rounded-[2.5rem] p-4 shadow-[12px_12px_0px_0px_#001e1d] border-2 border-brand-stroke relative overflow-hidden flex flex-col h-65 sm:h-80 lg:h-96"
+        class="bg-brand-card rounded-[2.5rem] p-4 shadow-[12px_12px_0px_0px_#001e1d] border-2 border-brand-stroke relative overflow-hidden flex flex-col h-65 sm:h-80 lg:h-80"
     >
         <div
             class="absolute top-8 left-8 z-10 bg-brand-stroke rounded-full px-4 py-2 flex items-center gap-2 shadow-lg"
         >
-            <div class="w-2 h-2 rounded-full bg-brand-tertiary animate-pulse"></div>
+            <div class="w-2 h-2 rounded-full bg-brand-tertiary animate-pulse"/>
             <span class="text-brand-headline text-xs font-bold tracking-widest">
                 LIVE
             </span>
@@ -1026,15 +1020,15 @@ onUnmounted(() => {
         <div
             class="w-full h-full rounded-4xl bg-brand-stroke overflow-hidden relative flex items-center justify-center"
         >
-            <div
-                v-if="isLoading"
-                class="absolute flex flex-col items-center gap-3 text-brand-paragraph"
-            >
-                <Camera class="w-10 h-10 animate-bounce text-brand-accent"/>
-                <p class="text-sm font-bold uppercase tracking-widest">
-                    Waking up lens...
-                </p>
-            </div>
+<!--            <div-->
+<!--                v-if="isLoading"-->
+<!--                class="absolute flex flex-col items-center gap-3 text-brand-paragraph"-->
+<!--            >-->
+<!--                <Camera class="w-10 h-10 animate-bounce text-brand-accent"/>-->
+<!--                <p class="text-sm font-bold uppercase tracking-widest">-->
+<!--                    Waking up lens...-->
+<!--                </p>-->
+<!--            </div>-->
 
             <video
                 ref="videoRef"
@@ -1043,7 +1037,7 @@ onUnmounted(() => {
                 muted
                 class="home-camera-video h-full w-full rounded-2xl border-2 border-brand-stroke object-cover"
                 :class="{ loaded: isVideoReady }"
-            ></video>
+            />
 
             <canvas ref="overlayRef" class="absolute inset-0 h-full w-full rounded-2xl pointer-events-none"/>
             <canvas ref="canvasRef" style="display: none;"/>
@@ -1097,7 +1091,7 @@ onUnmounted(() => {
                             v-if="attendanceType === 'time-in'"
                             class="absolute right-2 top-2 h-3 w-3 rounded-full border-2 border-brand-stroke bg-green-500"
                             aria-hidden="true"
-                        ></span>
+                        />
                     </button>
 
                     <button
@@ -1112,17 +1106,8 @@ onUnmounted(() => {
                             v-if="attendanceType === 'time-out'"
                             class="absolute right-2 top-2 h-3 w-3 rounded-full border-2 border-brand-stroke bg-green-500"
                             aria-hidden="true"
-                        ></span>
+                        />
                     </button>
-                </div>
-
-                <div
-                    v-if="selectedAttendanceLabel"
-                    class="mt-4 flex items-center justify-center rounded-xl border-2 border-brand-stroke bg-brand-bg px-4 py-2 text-brand-headline shadow-[3px_3px_0px_0px_#001e1d]"
-                >
-                    <span class="text-xs font-black uppercase tracking-wider">
-                        Selected: {{ selectedAttendanceLabel }}
-                    </span>
                 </div>
 
                 <div class="mt-4 grid grid-cols-2 gap-4">

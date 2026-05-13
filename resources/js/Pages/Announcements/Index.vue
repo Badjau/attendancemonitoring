@@ -73,7 +73,8 @@ const cleanPaginationLabel = (label: string) => label
                 </div>
             </header>
 
-            <div v-if="!announcements.length" class="rounded-4xl border-2 border-brand-stroke bg-brand-card p-8 text-center shadow-[8px_8px_0px_0px_#001e1d]">
+            <div v-if="!announcements.length"
+                 class="rounded-4xl border-2 border-brand-stroke bg-brand-card p-8 text-center shadow-[8px_8px_0px_0px_#001e1d]">
                 <p class="font-black">No announcements available.</p>
             </div>
 
@@ -89,60 +90,60 @@ const cleanPaginationLabel = (label: string) => label
                     />
 
                     <div class="p-6">
-                    <div class="mb-4 flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
-                        <div class="min-w-0">
-                            <p class="mb-1 text-[10px] font-black uppercase text-brand-bg">
-                                {{ formatAnnouncementDate(announcement.published_at) }}
-                            </p>
-                            <h2 class="text-2xl font-black leading-tight wrap-break-word">
-                                {{ announcement.title }}
-                            </h2>
-                        </div>
+                        <div class="mb-4 flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+                            <div class="min-w-0">
+                                <p class="mb-1 text-[10px] font-black uppercase text-brand-bg">
+                                    {{ formatAnnouncementDate(announcement.published_at) }}
+                                </p>
+                                <h2 class="text-2xl font-black leading-tight wrap-break-word">
+                                    {{ announcement.title }}
+                                </h2>
+                            </div>
 
-                        <span
-                            v-if="announcement.type"
-                            class="w-fit rounded-full border border-brand-stroke bg-white px-3 py-1 text-[10px] font-black uppercase"
-                            :style="{backgroundColor: getAnnouncementStyle(announcement).soft, color: getAnnouncementStyle(announcement).text}"
-                        >
-                            {{ getAnnouncementStyle(announcement).label }}
-                        </span>
-                    </div>
-
-                    <div class="announcement-content text-sm leading-relaxed" v-html="announcement.content"/>
-
-                    <section
-                        v-if="getAnnouncementAttachments(announcement).length"
-                        class="mt-6 border-t-2 border-brand-stroke/15 pt-5"
-                    >
-                        <h3 class="mb-3 inline-flex items-center gap-2 text-sm font-black uppercase">
-                            <Paperclip class="h-4 w-4"/>
-                            Attachments
-                        </h3>
-
-                        <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                            <a
-                                v-for="attachment in getAnnouncementAttachments(announcement)"
-                                :key="attachment.id"
-                                :href="getAttachmentUrl(attachment)"
-                                target="_blank"
-                                rel="noopener"
-                                class="overflow-hidden rounded-2xl border border-brand-stroke bg-white text-brand-stroke transition-transform hover:-translate-y-0.5"
+                            <span
+                                v-if="announcement.type"
+                                class="w-fit rounded-full border border-brand-stroke bg-white px-3 py-1 text-[10px] font-black uppercase"
+                                :style="{backgroundColor: getAnnouncementStyle(announcement).soft, color: getAnnouncementStyle(announcement).text}"
                             >
-                                <img
-                                    v-if="isImageAttachment(attachment)"
-                                    :src="getAttachmentUrl(attachment)"
-                                    :alt="getAttachmentName(attachment)"
-                                    class="h-64 w-full object-cover"
-                                />
-                                <div
-                                    v-else
-                                    class="flex h-24 items-center justify-center bg-brand-paragraph/25"
-                                >
-                                    <Paperclip class="h-7 w-7"/>
-                                </div>
-                            </a>
+                                {{ getAnnouncementStyle(announcement).label }}
+                            </span>
                         </div>
-                    </section>
+
+                        <div class="announcement-content text-sm leading-relaxed" v-html="announcement.content"/>
+
+                        <section
+                            v-if="getAnnouncementAttachments(announcement).length"
+                            class="mt-6 border-t-2 border-brand-stroke/15 pt-5"
+                        >
+                            <h3 class="mb-3 inline-flex items-center gap-2 text-sm font-black uppercase">
+                                <Paperclip class="h-4 w-4"/>
+                                Attachments
+                            </h3>
+
+                            <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                                <a
+                                    v-for="attachment in getAnnouncementAttachments(announcement)"
+                                    :key="attachment.id"
+                                    :href="getAttachmentUrl(attachment)"
+                                    target="_blank"
+                                    rel="noopener"
+                                    class="overflow-hidden rounded-2xl border border-brand-stroke bg-white text-brand-stroke transition-transform hover:-translate-y-0.5"
+                                >
+                                    <img
+                                        v-if="isImageAttachment(attachment)"
+                                        :src="getAttachmentUrl(attachment)"
+                                        :alt="getAttachmentName(attachment)"
+                                        class="h-64 w-full object-cover"
+                                    />
+                                    <div
+                                        v-else
+                                        class="flex h-24 items-center justify-center bg-brand-paragraph/25"
+                                    >
+                                        <Paperclip class="h-7 w-7"/>
+                                    </div>
+                                </a>
+                            </div>
+                        </section>
                     </div>
                 </article>
             </div>
@@ -152,7 +153,9 @@ const cleanPaginationLabel = (label: string) => label
                 class="flex flex-col gap-4 rounded-3xl border-2 border-brand-stroke bg-brand-card p-4 shadow-[6px_6px_0px_0px_#001e1d] md:flex-row md:items-center md:justify-between"
             >
                 <p class="text-xs font-black uppercase text-brand-bg">
-                    Showing {{ props.announcements.from }}-{{ props.announcements.to }} of {{ props.announcements.total }}
+                    Showing {{ props.announcements.from }}-{{ props.announcements.to }} of {{
+                        props.announcements.total
+                    }}
                 </p>
 
                 <div class="flex flex-wrap gap-2">

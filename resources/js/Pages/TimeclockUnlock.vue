@@ -177,7 +177,7 @@ onUnmounted(() => {
                 autoplay
                 playsinline
                 muted
-                class="pointer-events-none fixed -left-[9999px] top-0 h-px w-px opacity-0"
+                class="pointer-events-none fixed -left-2499.75 top-0 h-px w-px opacity-0"
                 aria-hidden="true"
                 tabindex="-1"
             />

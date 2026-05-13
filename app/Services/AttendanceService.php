@@ -2,9 +2,11 @@
 
 namespace App\Services;
 
+use App\Enums\Attendance\AttendanceMethod;
 use App\Enums\Attendance\OvertimeStatus;
 use App\Enums\Attendance\Status;
 use App\Enums\Attendance\Type;
+use App\Http\Requests\Attendance\ValidateLocationRequest;
 use App\Models\Attendance;
 use App\Models\Employee;
 use Carbon\Carbon;
@@ -39,9 +41,9 @@ class AttendanceService
         throw new \Exception('Invalid attendance type.');
     }
 
-    public function verifyEmployee(Request $request)
+    public function verifyEmployee(Request $request): array
     {
-        $employee = $request->attendance_method === 'keypad'
+        $employee = $request->attendance_method === AttendanceMethod::KEYPAD->value
             ? $this->findEmployeeByPassword($request->employee_id)
             : Employee::where('employee_id', $request->employee_id)
                 ->orWhere('rfid_uid', $request->employee_id)
@@ -49,7 +51,7 @@ class AttendanceService
 
         if (!$employee) {
             throw ValidationException::withMessages([
-                'employee_id' => 'Employee is not existing.',
+                'employee_id' => 'Employee is not existings.',
             ]);
         }
 
@@ -143,7 +145,7 @@ class AttendanceService
         }
 
         // TODO: Make it the shift end time dynamic
-        $shiftEnd = $now->copy()->setTimeFromTimeString('17:00:00');
+        $shiftEnd = $now->copy()->setTimeFromTimeString('18:00:00');
         $timeIn = Carbon::parse($latestTimeInAttendance->time_in);
         $workedMinutes = $timeIn->diffInMinutes($now);
 
@@ -198,14 +200,8 @@ class AttendanceService
 
     private function validateLocation(Request $request, Employee $employee): array
     {
-        $validated = $request->validate([
-            'latitude' => ['required', 'numeric', 'between:-90,90'],
-            'longitude' => ['required', 'numeric', 'between:-180,180'],
-            'location' => ['sometimes', 'nullable', 'string', 'max:1000'],
-        ]);
-
-        $latitude = (float)$validated['latitude'];
-        $longitude = (float)$validated['longitude'];
+        $latitude = (float)$request->latitude;
+        $longitude = (float)$request->longitude;
         $zones = $employee->activeZones()->get();
         $strictZones = $zones->where('policy', 'strict')->values();
 
@@ -219,7 +215,7 @@ class AttendanceService
             }
 
             return [
-                'location' => $validated['location'] ?? $matchingStrictZone->name,
+                'location' => $request->location ?? $matchingStrictZone->name,
                 'latitude' => $latitude,
                 'longitude' => $longitude,
                 'location_status' => 'inside',
@@ -230,7 +226,7 @@ class AttendanceService
         $matchingZone = $this->geofenceService->findMatchingZone($latitude, $longitude, $zones);
 
         return [
-            'location' => $validated['location'] ?? $matchingZone?->name,
+            'location' => $request->location ?? $matchingZone?->name,
             'latitude' => $latitude,
             'longitude' => $longitude,
             'location_status' => $matchingZone ? 'inside' : 'outside',

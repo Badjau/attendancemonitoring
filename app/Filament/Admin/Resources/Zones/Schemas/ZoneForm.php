@@ -87,6 +87,7 @@ class ZoneForm
                                     ->multiple()
                                     ->searchable()
                                     ->preload()
+                                    ->columnSpanFull()
                                     ->required(),
 
                                 Toggle::make('is_temporary')
