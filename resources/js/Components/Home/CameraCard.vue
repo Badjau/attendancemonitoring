@@ -20,7 +20,7 @@ type VerifiedEmployee = {
     first_name: string
     last_name: string
     position: string
-    profile_url: string
+    profile_url?: string | null
 }
 
 const props = defineProps<{
@@ -79,6 +79,12 @@ const isLocationReady = computed(() => Boolean(coords.value)
     && Number.isFinite(coords.value.longitude)
     && !locationError.value)
 const showCamera = computed(() => showEmployeeIdInputField.value)
+const selectedAttendanceLabel = computed(() => {
+    if (attendanceType.value === 'time-in') return 'Time In'
+    if (attendanceType.value === 'time-out') return 'Time Out'
+
+    return ''
+})
 
 const employeeFullName = (employee: VerifiedEmployee): string => (
     `${employee.first_name} ${employee.last_name}`.trim()
@@ -484,6 +490,8 @@ const verifyEmployeeIdentifier = async (
 const getRegisteredFaceDescriptor = async (employee: VerifiedEmployee): Promise<Float32Array | null> => {
     const cachedDescriptor = registeredFaceDescriptors.get(employee.employee_id)
     if (cachedDescriptor) return cachedDescriptor
+
+    if (!employee.profile_url) return null
 
     const image = await faceapi.fetchImage(employee.profile_url)
     const detection = await faceapi
@@ -1080,18 +1088,41 @@ onUnmounted(() => {
                     <button
                         @click="handleTimeAction('time-in')"
                         class="group relative bg-brand-accent hover:bg-[#ffcf81] text-brand-stroke border-2 border-brand-stroke rounded-2xl py-4 px-3 transition-all duration-200 ease-out font-bold shadow-[4px_4px_0px_0px_#001e1d] hover:-translate-y-1 hover:shadow-[6px_6px_0px_0px_#001e1d] active:translate-x-1 active:translate-y-1 active:shadow-none flex flex-col items-center gap-2"
+                        :class="{'ring-4 ring-brand-stroke ring-offset-2 ring-offset-brand-card shadow-none translate-x-1 translate-y-1': attendanceType === 'time-in'}"
+                        :aria-pressed="attendanceType === 'time-in'"
                     >
                         <LogIn class="w-5 h-5"/>
                         <span class="text-sm">Time In</span>
+                        <span
+                            v-if="attendanceType === 'time-in'"
+                            class="absolute right-2 top-2 h-3 w-3 rounded-full border-2 border-brand-stroke bg-green-500"
+                            aria-hidden="true"
+                        ></span>
                     </button>
 
                     <button
                         @click="handleTimeAction('time-out')"
                         class="group relative bg-brand-tertiary hover:bg-[#f07a7b] text-brand-headline border-2 border-brand-stroke rounded-2xl py-4 px-3 transition-all duration-200 ease-out font-bold shadow-[4px_4px_0px_0px_#001e1d] hover:-translate-y-1 hover:shadow-[6px_6px_0px_0px_#001e1d] active:translate-x-1 active:translate-y-1 active:shadow-none flex flex-col items-center gap-2"
+                        :class="{'ring-4 ring-brand-stroke ring-offset-2 ring-offset-brand-card shadow-none translate-x-1 translate-y-1': attendanceType === 'time-out'}"
+                        :aria-pressed="attendanceType === 'time-out'"
                     >
                         <LogOut class="w-5 h-5"/>
                         <span class="text-sm">Time Out</span>
+                        <span
+                            v-if="attendanceType === 'time-out'"
+                            class="absolute right-2 top-2 h-3 w-3 rounded-full border-2 border-brand-stroke bg-green-500"
+                            aria-hidden="true"
+                        ></span>
                     </button>
+                </div>
+
+                <div
+                    v-if="selectedAttendanceLabel"
+                    class="mt-4 flex items-center justify-center rounded-xl border-2 border-brand-stroke bg-brand-bg px-4 py-2 text-brand-headline shadow-[3px_3px_0px_0px_#001e1d]"
+                >
+                    <span class="text-xs font-black uppercase tracking-wider">
+                        Selected: {{ selectedAttendanceLabel }}
+                    </span>
                 </div>
 
                 <div class="mt-4 grid grid-cols-2 gap-4">
