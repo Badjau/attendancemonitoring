@@ -107,9 +107,6 @@ class AttendancesRelationManager extends RelationManager
                     ->autoApply()
                     ->linkedCalendars()
                     ->withIndicator(),
-            ])
-            ->headerActions([
-                CreateAction::make(),
             ]);
     }
 }

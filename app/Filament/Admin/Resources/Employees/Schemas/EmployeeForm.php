@@ -67,11 +67,19 @@ class EmployeeForm
                         ->schema([
                             TextInput::make('password')
                                 ->label('Keypad Password')
+                                ->password()
+                                ->revealable()
                                 ->numeric()
                                 ->maxLength(255)
                                 ->autofocus()
                                 ->dehydrated(fn (?string $state): bool => filled($state))
                                 ->helperText('Used for manual keypad attendance. Leave blank to keep the current password.'),
+
+                            Html::make(fn (): HtmlString => new HtmlString(
+                                view('filament.admin.employees.keypad-input', [
+                                    'statePath' => 'data.password',
+                                ])->render(),
+                            )),
                         ]),
 
                     Wizard\Step::make('Fingerprint')
