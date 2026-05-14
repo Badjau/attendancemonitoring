@@ -18,6 +18,7 @@ use Illuminate\Foundation\Http\Middleware\VerifyCsrfToken;
 use Illuminate\Routing\Middleware\SubstituteBindings;
 use Illuminate\Session\Middleware\StartSession;
 use Illuminate\Support\Facades\Blade;
+use Illuminate\Support\HtmlString;
 use Illuminate\View\Middleware\ShareErrorsFromSession;
 
 class AdminPanelProvider extends PanelProvider
@@ -30,6 +31,16 @@ class AdminPanelProvider extends PanelProvider
             ->path('admin')
             ->login()
             ->brandName('TimeClock')
+            ->brandLogo(new HtmlString(<<<'HTML'
+                <div class="hr-brand-mark hr-brand-mark-logo-only" aria-label="TimeClock admin">
+                    <img
+                        src="/images/mcasia-logo.png"
+                        alt="TimeClock"
+                        class="hr-brand-logo"
+                    />
+                </div>
+            HTML))
+            ->brandLogoHeight('2.75rem')
             ->sidebarCollapsibleOnDesktop()
             ->sidebarWidth('17rem')
             ->maxContentWidth(Width::Full)
