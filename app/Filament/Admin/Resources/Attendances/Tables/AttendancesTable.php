@@ -18,6 +18,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Malzariey\FilamentDaterangepickerFilter\Filters\DateRangeFilter;
 use pxlrbt\FilamentExcel\Actions\ExportBulkAction;
+use pxlrbt\FilamentExcel\Exports\ExcelExport;
 
 class AttendancesTable
 {
@@ -162,7 +163,12 @@ class AttendancesTable
                 BulkActionGroup::make([
                     // DeleteBulkAction::make(),
 
-                    ExportBulkAction::make(),
+                    ExportBulkAction::make()
+                        ->exports([
+                            ExcelExport::make()
+                                ->askForFilename()
+                                ->fromTable(),
+                        ]),
                 ]),
             ]);
     }

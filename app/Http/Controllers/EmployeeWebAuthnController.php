@@ -26,9 +26,9 @@ use Laragear\WebAuthn\JsonTransport;
 
 class EmployeeWebAuthnController extends Controller
 {
-    public function __construct(
-        protected AttendanceService $attendanceService,
-    ) {}
+    public function __construct(protected AttendanceService $attendanceService)
+    {
+    }
 
     public function registrationOptions(Employee $employee): JsonResponse
     {
@@ -94,7 +94,7 @@ class EmployeeWebAuthnController extends Controller
 
             $employee = $validation->credential->authenticatable;
 
-            if (! $employee instanceof Employee) {
+            if (!$employee instanceof Employee) {
                 throw ValidationException::withMessages([
                     'fingerprint' => 'Fingerprint credential is not assigned to an employee.',
                 ]);
@@ -125,7 +125,7 @@ class EmployeeWebAuthnController extends Controller
         } catch (ValidationException $exception) {
             throw $exception;
         } catch (\Throwable $exception) {
-            Log::info('Fingerprint attendance failed: '.$exception->getMessage());
+            Log::info('Fingerprint attendance failed: ' . $exception->getMessage());
 
             return response()->json([
                 'message' => $exception->getMessage(),
