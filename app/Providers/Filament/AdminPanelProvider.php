@@ -20,6 +20,7 @@ use Illuminate\Session\Middleware\StartSession;
 use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\HtmlString;
 use Illuminate\View\Middleware\ShareErrorsFromSession;
+use Joaopaulolndev\FilamentGeneralSettings\FilamentGeneralSettingsPlugin;
 
 class AdminPanelProvider extends PanelProvider
 {
@@ -69,7 +70,16 @@ class AdminPanelProvider extends PanelProvider
             ])
             ->discoverWidgets(in: app_path('Filament/Admin/Widgets'), for: 'App\Filament\Admin\Widgets')
             ->widgets([
-                //
+
+            ])
+            ->plugins([
+                FilamentGeneralSettingsPlugin::make()
+                    // ->canAccess(fn() => auth()->user()->id === 1)
+                    ->setSort(3)
+                    ->setIcon('heroicon-o-cog')
+                    ->setNavigationGroup('Settings')
+                    ->setTitle('General Settings')
+                    ->setNavigationLabel('General Settings'),
             ])
             ->middleware([
                 EncryptCookies::class,

@@ -19,6 +19,7 @@ class AttendanceService
     public function __construct(
         public Attendance $model,
         protected GeofenceService $geofenceService,
+        protected AttendanceScheduleSettings $attendanceScheduleSettings,
     ) {}
 
     public function recordAttendance(Request $request): Attendance
@@ -68,11 +69,7 @@ class AttendanceService
 
     private function inferAttendanceType(Carbon $now): string
     {
-        $minutesFromMidnight = ($now->hour * 60) + $now->minute;
-
-        return $minutesFromMidnight <= (16 * 60)
-            ? Type::TimeIn->value
-            : Type::TimeOut->value;
+        return $this->attendanceScheduleSettings->inferAttendanceType($now);
     }
 
     private function attendanceMethod(Request $request): ?string

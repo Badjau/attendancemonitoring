@@ -22,9 +22,16 @@ type VerifiedEmployee = {
     position: string
     profile_url?: string | null
 }
+type AttendanceSchedule = {
+    time_in_start: string
+    time_in_end: string
+    time_out_start: string
+    time_out_end: string
+}
 
 const props = defineProps<{
     employees: VerifiedEmployee[]
+    attendanceSchedule: AttendanceSchedule
 }>();
 
 const page = usePage();
@@ -247,7 +254,29 @@ const inferredAttendanceType = (): AttendanceAction => {
     const now = new Date()
     const minutesFromMidnight = now.getHours() * 60 + now.getMinutes()
 
-    return minutesFromMidnight <= 16 * 60 ? 'time-in' : 'time-out'
+    if (isMinuteWithinRange(minutesFromMidnight, timeToMinutes(props.attendanceSchedule.time_in_start), timeToMinutes(props.attendanceSchedule.time_in_end))) {
+        return 'time-in'
+    }
+
+    if (isMinuteWithinRange(minutesFromMidnight, timeToMinutes(props.attendanceSchedule.time_out_start), timeToMinutes(props.attendanceSchedule.time_out_end))) {
+        return 'time-out'
+    }
+
+    return minutesFromMidnight <= timeToMinutes(props.attendanceSchedule.time_in_end) ? 'time-in' : 'time-out'
+}
+
+const timeToMinutes = (time: string): number => {
+    const [hours = '0', minutes = '0'] = time.split(':')
+
+    return Number(hours) * 60 + Number(minutes)
+}
+
+const isMinuteWithinRange = (minute: number, start: number, end: number): boolean => {
+    if (start <= end) {
+        return minute >= start && minute <= end
+    }
+
+    return minute >= start || minute <= end
 }
 
 const ensureAttendanceFlowReady = async (actionName?: AttendanceAction) => {
