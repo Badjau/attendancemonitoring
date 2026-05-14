@@ -43,6 +43,7 @@ class AdminPanelProvider extends PanelProvider
             ->brandLogoHeight('2.75rem')
             ->sidebarCollapsibleOnDesktop()
             ->sidebarWidth('17rem')
+            ->unsavedChangesAlerts()
             ->maxContentWidth(Width::Full)
             ->viteTheme('resources/css/filament/admin/theme.css')
             ->renderHook(

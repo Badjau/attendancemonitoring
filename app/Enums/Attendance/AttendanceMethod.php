@@ -6,7 +6,7 @@ use Filament\Support\Contracts\HasIcon;
 use Filament\Support\Contracts\HasLabel;
 use Illuminate\Contracts\Support\Htmlable;
 
-enum AttendanceMethod: string implements HasLabel, HasIcon
+enum AttendanceMethod: string implements HasIcon, HasLabel
 {
     case RFID = 'rfid';
     case KEYPAD = 'keypad';

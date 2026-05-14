@@ -16,26 +16,26 @@ class ViewEmployee extends ViewRecord
     protected function getHeaderActions(): array
     {
         return [
-            Action::make('registerFace')
-                ->label('Register face')
-                ->icon(Heroicon::OutlinedCamera)
-                ->modalHeading(fn (): string => 'Register face for '.$this->record->name)
-                ->modalSubmitAction(false)
-                ->modalCancelActionLabel('Close')
-                ->modalWidth('5xl')
-                ->modalContent(fn () => view('filament.admin.employees.face-registration', [
-                    'employee' => $this->record,
-                ])),
-
-            Action::make('enrollFingerprint')
-                ->label('Enroll fingerprint')
-                ->icon(Heroicon::OutlinedFingerPrint)
-                ->modalHeading(fn (): string => 'Enroll fingerprint for '.$this->record->name)
-                ->modalSubmitAction(false)
-                ->modalCancelActionLabel('Close')
-                ->modalContent(fn () => view('filament.admin.employees.fingerprint-enrollment', [
-                    'employee' => $this->record,
-                ])),
+            //            Action::make('registerFace')
+            //                ->label('Register face')
+            //                ->icon(Heroicon::OutlinedCamera)
+            //                ->modalHeading(fn (): string => 'Register face for '.$this->record->name)
+            //                ->modalSubmitAction(false)
+            //                ->modalCancelActionLabel('Close')
+            //                ->modalWidth('5xl')
+            //                ->modalContent(fn () => view('filament.admin.employees.face-registration', [
+            //                    'employee' => $this->record,
+            //                ])),
+            //
+            //            Action::make('enrollFingerprint')
+            //                ->label('Enroll fingerprint')
+            //                ->icon(Heroicon::OutlinedFingerPrint)
+            //                ->modalHeading(fn (): string => 'Enroll fingerprint for '.$this->record->name)
+            //                ->modalSubmitAction(false)
+            //                ->modalCancelActionLabel('Close')
+            //                ->modalContent(fn () => view('filament.admin.employees.fingerprint-enrollment', [
+            //                    'employee' => $this->record,
+            //                ])),
 
             EditAction::make(),
         ];

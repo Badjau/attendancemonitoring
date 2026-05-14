@@ -19,6 +19,7 @@ class TimeclockUnlockLogResource extends Resource
     protected static ?string $model = TimeclockUnlockLog::class;
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedLockOpen;
+
     protected static string|UnitEnum|null $navigationGroup = 'Administrator';
 
     protected static ?string $navigationLabel = 'Unlock Logs';

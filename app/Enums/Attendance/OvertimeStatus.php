@@ -6,7 +6,7 @@ use Filament\Support\Contracts\HasColor;
 use Filament\Support\Contracts\HasLabel;
 use Illuminate\Contracts\Support\Htmlable;
 
-enum OvertimeStatus: string implements HasLabel, HasColor
+enum OvertimeStatus: string implements HasColor, HasLabel
 {
     case Pending = 'pending';
     case Approved = 'approved';

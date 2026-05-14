@@ -20,7 +20,9 @@ class TimeclockAuthorizedUserResource extends Resource
     protected static ?string $model = TimeclockAuthorizedUser::class;
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedLockClosed;
+
     protected static string|UnitEnum|null $navigationGroup = 'Administrator';
+
     protected static ?string $navigationLabel = 'Timeclock Unlockers';
 
     protected static ?string $modelLabel = 'Timeclock Unlocker';

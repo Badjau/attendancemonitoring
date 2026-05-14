@@ -2,18 +2,12 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\Announcement;
-use App\Models\Attendance;
-use App\Models\Employee;
 use App\Services\HomeService;
-use Carbon\Carbon;
 use Inertia\Inertia;
 
 class HomeController extends Controller
 {
-    public function __construct(protected HomeService $homeService)
-    {
-    }
+    public function __construct(protected HomeService $homeService) {}
 
     public function home()
     {

@@ -2,8 +2,6 @@
 
 namespace App\Filament\Admin\Resources\Attendances\Schemas;
 
-use App\Enums\Attendance\OvertimeStatus;
-use App\Enums\Attendance\Status;
 use App\Models\Attendance;
 use Filament\Infolists\Components\IconEntry;
 use Filament\Infolists\Components\SpatieMediaLibraryImageEntry;
@@ -66,7 +64,11 @@ class AttendanceInfolist
 
                         TextEntry::make('total_hours')
                             ->label('Total Hours')
-                            ->state(fn (Attendance $record): string => $record->total_hours === null ? '-' : number_format((float) $record->total_hours, 2).' hrs'),
+                            ->state(function (Attendance $record): string {
+                                $totalHours = $record->dailyTotalHours();
+
+                                return $totalHours === null ? '-' : number_format($totalHours, 2).' hrs';
+                            }),
                     ])
                     ->columns(4)
                     ->columnSpanFull(),

@@ -15,12 +15,12 @@ class TimeclockUnlockService
     {
         $authorizedUser = $request['method'] === AttendanceMethod::RFID->value
             ? TimeclockAuthorizedUser::query()
-                ->whereHas('employee', fn($query) => $query->where('rfid_uid', $request->credential))
+                ->whereHas('employee', fn ($query) => $query->where('rfid_uid', $request->credential))
                 ->where('is_active', true)
                 ->first()
             : $this->findByPassword($request->credential);
 
-        if (!$authorizedUser) {
+        if (! $authorizedUser) {
             throw ValidationException::withMessages([
                 'credential' => 'You are not authorized to unlock this timeclock.',
             ]);
@@ -56,7 +56,7 @@ class TimeclockUnlockService
             ->first(function (TimeclockAuthorizedUser $user) use ($password): bool {
                 $employeePassword = $user->employee?->password;
 
-                if (!$employeePassword) {
+                if (! $employeePassword) {
                     return false;
                 }
 
@@ -65,5 +65,4 @@ class TimeclockUnlockService
                     : hash_equals($employeePassword, $password);
             });
     }
-
 }

@@ -23,7 +23,7 @@ class StoreEmployeeRegistrationRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'face-image' => ['required', 'image', 'max:5120']
+            'face-image' => ['required', 'image', 'max:5120'],
         ];
     }
 }

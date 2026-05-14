@@ -7,7 +7,7 @@ use Filament\Support\Contracts\HasIcon;
 use Filament\Support\Contracts\HasLabel;
 use Illuminate\Contracts\Support\Htmlable;
 
-enum Status: string implements HasLabel, HasColor, HasIcon
+enum Status: string implements HasColor, HasIcon, HasLabel
 {
     case DRAFT = 'draft';
     case PUBLISHED = 'published';

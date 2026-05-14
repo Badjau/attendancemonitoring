@@ -12,9 +12,7 @@ use Illuminate\Validation\ValidationException;
 
 class AttendanceController extends Controller
 {
-    public function __construct(protected AttendanceService $attendanceService)
-    {
-    }
+    public function __construct(protected AttendanceService $attendanceService) {}
 
     public function verifyEmployee(VerifyEmployeeRequest $request): JsonResponse
     {
@@ -61,7 +59,7 @@ class AttendanceController extends Controller
         } catch (ValidationException $e) {
             return redirect()->back()->withErrors($e->errors());
         } catch (\Exception $e) {
-            Log::info('error in recording the attendance: ' . $e->getMessage());
+            Log::info('error in recording the attendance: '.$e->getMessage());
 
             return redirect()->back()->with('error', $e->getMessage());
         }

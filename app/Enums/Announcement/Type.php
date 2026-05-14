@@ -7,7 +7,7 @@ use Filament\Support\Contracts\HasIcon;
 use Filament\Support\Contracts\HasLabel;
 use Illuminate\Contracts\Support\Htmlable;
 
-enum Type: string implements HasColor, HasLabel, HasIcon
+enum Type: string implements HasColor, HasIcon, HasLabel
 {
     case GENERAL = 'general';
     case URGENT = 'urgent';

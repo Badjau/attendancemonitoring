@@ -3,7 +3,6 @@
 namespace App\Filament\Admin\Resources\Attendances\Pages;
 
 use App\Filament\Admin\Resources\Attendances\AttendanceResource;
-use Filament\Actions\CreateAction;
 use Filament\Resources\Pages\ListRecords;
 
 class ListAttendances extends ListRecords
