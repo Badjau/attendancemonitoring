@@ -63,7 +63,7 @@ class AttendancesTable
 
                 TextColumn::make('total_hours')
                     ->state(fn (Attendance $record): ?float => $record->dailyTotalHours())
-                    ->numeric()
+                    ->formatStateUsing(fn (Attendance $record): string => $record->formattedDailyTotalHours())
                     ->sortable(),
 
                 TextColumn::make('status')

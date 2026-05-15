@@ -67,7 +67,9 @@ class AttendanceScheduleSettings
 
     private function setting(string $key): string
     {
-        $value = GeneralSetting::query()->value("more_configs->{$key}");
+        $settings = GeneralSetting::query()->first();
+        $configs = $settings?->more_configs ?? [];
+        $value = is_array($configs) ? ($configs[$key] ?? null) : null;
 
         if (is_string($value) && preg_match('/^\d{2}:\d{2}$/', $value)) {
             return $value;

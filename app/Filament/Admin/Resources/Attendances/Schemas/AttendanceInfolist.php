@@ -64,11 +64,7 @@ class AttendanceInfolist
 
                         TextEntry::make('total_hours')
                             ->label('Total Hours')
-                            ->state(function (Attendance $record): string {
-                                $totalHours = $record->dailyTotalHours();
-
-                                return $totalHours === null ? '-' : number_format($totalHours, 2).' hrs';
-                            }),
+                            ->state(fn (Attendance $record): string => $record->formattedDailyTotalHours()),
                     ])
                     ->columns(4)
                     ->columnSpanFull(),

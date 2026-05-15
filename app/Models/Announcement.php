@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Enums\Announcement\Status;
 use App\Enums\Announcement\Type;
+use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -48,6 +49,11 @@ class Announcement extends Model implements HasMedia
     public function scopeIsPinned(Builder $query): Builder
     {
         return $query->where('is_pinned', true);
+    }
+
+    public function scopeIsNotExpired(Builder $query): Builder
+    {
+        return $query->whereDate('expires_at', '>', Carbon::now());
     }
 
     public function createdBy(): BelongsTo

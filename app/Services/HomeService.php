@@ -38,6 +38,7 @@ class HomeService
         return Announcement::with('media')
             ->isPinned()
             ->published()
+            ->isNotExpired()
             ->latest()
             ->take(2)
             ->get();

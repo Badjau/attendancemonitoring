@@ -91,6 +91,17 @@ class Attendance extends Model implements HasMedia
 
     public function dailyTotalHours(): ?float
     {
+        $minutes = $this->dailyTotalMinutes();
+
+        if ($minutes === null) {
+            return null;
+        }
+
+        return round($minutes / 60, 2);
+    }
+
+    public function dailyTotalMinutes(): ?int
+    {
         if (! $this->employee_id || ! $this->attendance_date) {
             return null;
         }
@@ -111,7 +122,29 @@ class Attendance extends Model implements HasMedia
             return null;
         }
 
-        return round(Carbon::parse($firstTimeIn)->diffInMinutes(Carbon::parse($lastTimeOut)) / 60, 2);
+        return Carbon::parse($firstTimeIn)->diffInMinutes(Carbon::parse($lastTimeOut));
+    }
+
+    public function formattedDailyTotalHours(): string
+    {
+        $minutes = $this->dailyTotalMinutes();
+
+        if ($minutes === null) {
+            return '-';
+        }
+
+        $hours = intdiv($minutes, 60);
+        $remainingMinutes = $minutes % 60;
+
+        if ($hours === 0) {
+            return "{$remainingMinutes} min";
+        }
+
+        if ($remainingMinutes === 0) {
+            return "{$hours}h";
+        }
+
+        return "{$hours}h {$remainingMinutes}m";
     }
 
     public function zone(): BelongsTo
