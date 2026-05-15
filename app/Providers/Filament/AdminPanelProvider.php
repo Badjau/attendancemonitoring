@@ -40,7 +40,8 @@ class AdminPanelProvider extends PanelProvider
                         class="hr-brand-logo"
                     />
                 </div>
-            HTML))
+            HTML
+            ))
             ->brandLogoHeight('2.75rem')
             ->sidebarCollapsibleOnDesktop()
             ->sidebarWidth('17rem')
@@ -49,7 +50,7 @@ class AdminPanelProvider extends PanelProvider
             ->viteTheme('resources/css/filament/admin/theme.css')
             ->renderHook(
                 PanelsRenderHook::SCRIPTS_AFTER,
-                fn (): string => Blade::render("@vite([
+                fn(): string => Blade::render("@vite([
                     'resources/js/filament-face-registration.js',
                     'resources/js/filament-fingerprint-enrollment.js',
                 ])")
@@ -71,6 +72,9 @@ class AdminPanelProvider extends PanelProvider
             ->discoverWidgets(in: app_path('Filament/Admin/Widgets'), for: 'App\Filament\Admin\Widgets')
             ->widgets([
 
+            ])
+            ->resources([
+                config('filament-logger.activity_resource'),
             ])
             ->plugins([
                 FilamentGeneralSettingsPlugin::make()

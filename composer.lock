@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "756cebdb29454e59b3dba2dc0920c9fc",
+    "content-hash": "b481a65c13af4d9e48ebf217d1f89765",
     "packages": [
         {
             "name": "anourvalar/eloquent-serialize",
@@ -4367,6 +4367,97 @@
             "time": "2026-01-02T08:56:05+00:00"
         },
         {
+            "name": "mradder/filament-logger",
+            "version": "v1.2.3",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/MrAdder/filament-logger.git",
+                "reference": "0cfb544dac51008351ebc09c8f26c29fc3bed7fe"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/MrAdder/filament-logger/zipball/0cfb544dac51008351ebc09c8f26c29fc3bed7fe",
+                "reference": "0cfb544dac51008351ebc09c8f26c29fc3bed7fe",
+                "shasum": ""
+            },
+            "require": {
+                "filament/filament": "^3.0 || ^4.3.1 || ^5.0",
+                "illuminate/contracts": "^11.0 | ^12.0 | ^13.0",
+                "php": "^8.2",
+                "spatie/laravel-activitylog": "^4.5",
+                "spatie/laravel-package-tools": "^1.13.5"
+            },
+            "require-dev": {
+                "larastan/larastan": "^3.9",
+                "nunomaduro/collision": "^8.0 | ^9.0 | ^10.0",
+                "orchestra/testbench": "^9.0 | ^10.0 | ^11.0",
+                "pestphp/pest": "^3.7 | ^4.0",
+                "pestphp/pest-plugin-laravel": "^3.1 | ^4.0",
+                "phpstan/extension-installer": "^1.1",
+                "phpstan/phpstan-deprecation-rules": "^2.0",
+                "phpstan/phpstan-phpunit": "^2.0",
+                "phpunit/phpunit": "^11.5 | ^12.5.22",
+                "spatie/laravel-ray": "^1.26"
+            },
+            "type": "library",
+            "extra": {
+                "laravel": {
+                    "aliases": {
+                        "FilamentLogger": "MrAdder\\FilamentLogger\\Facades\\FilamentLogger"
+                    },
+                    "providers": [
+                        "MrAdder\\FilamentLogger\\FilamentLoggerServiceProvider"
+                    ]
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "MrAdder\\FilamentLogger\\": "src",
+                    "MrAdder\\FilamentLogger\\Database\\Factories\\": "database/factories"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "authors": [
+                {
+                    "name": "Ziyaan Hassan",
+                    "email": "ziyaan2010@gmail.com",
+                    "role": "Developer"
+                },
+                {
+                    "name": "Daniel Green",
+                    "email": "dgreen03@gmail.com",
+                    "role": "Developer"
+                }
+            ],
+            "description": "Audit logging, activity tracking, exports, alerts, and dashboards for Filament admin panels.",
+            "homepage": "https://mradder.github.io/filament-logger/",
+            "keywords": [
+                "activity-log",
+                "activity-tracking",
+                "admin-panel",
+                "alerts",
+                "audit-log",
+                "compliance",
+                "exports",
+                "filament",
+                "filament-logger",
+                "filamentphp",
+                "laravel",
+                "laravel-activitylog",
+                "security",
+                "spatie-activitylog"
+            ],
+            "support": {
+                "docs": "https://mradder.github.io/filament-logger/",
+                "issues": "https://github.com/MrAdder/filament-logger/issues",
+                "source": "https://github.com/MrAdder/filament-logger"
+            },
+            "time": "2026-05-06T11:51:26+00:00"
+        },
+        {
             "name": "nesbot/carbon",
             "version": "3.11.4",
             "source": {
@@ -6069,6 +6160,83 @@
             "time": "2025-12-14T04:43:48+00:00"
         },
         {
+            "name": "rawand201/filament-connection-badge",
+            "version": "v1.0.0",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/RawanD201/filament-connection-badge.git",
+                "reference": "ec5014ac4b579b7b965e2a5946cf74c08658e962"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/RawanD201/filament-connection-badge/zipball/ec5014ac4b579b7b965e2a5946cf74c08658e962",
+                "reference": "ec5014ac4b579b7b965e2a5946cf74c08658e962",
+                "shasum": ""
+            },
+            "require": {
+                "filament/filament": "^4.0|^5.0",
+                "illuminate/contracts": "^10.0|^11.0|^12.0|^13.0",
+                "php": "^8.2",
+                "spatie/laravel-package-tools": "^1.15.0"
+            },
+            "require-dev": {
+                "larastan/larastan": "^3",
+                "laravel/pint": "^1.0",
+                "nunomaduro/collision": "^7.9|^8.0",
+                "orchestra/testbench": "^8.0|^9.0|^10.0",
+                "pestphp/pest": "^2.1|^3.0",
+                "pestphp/pest-plugin-arch": "^2.0|^3.0",
+                "pestphp/pest-plugin-laravel": "^2.0|^3.0",
+                "phpstan/phpstan": "^2"
+            },
+            "type": "library",
+            "extra": {
+                "laravel": {
+                    "providers": [
+                        "Rawand\\FilamentConnectionBadge\\FilamentConnectionBadgeServiceProvider"
+                    ]
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "Rawand\\FilamentConnectionBadge\\": "src/"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "authors": [
+                {
+                    "name": "RawanD201",
+                    "email": "rawandrasool@proton.me",
+                    "role": "Developer"
+                }
+            ],
+            "description": "A Filament topbar badge that shows real-time network quality (full/medium/low/offline) with a live ping graph tooltip and a full-screen offline overlay. Works with Filament v4 and v5, supports RTL and multi-language.",
+            "homepage": "https://github.com/RawanD201/filament-connection-badge",
+            "keywords": [
+                "Connection",
+                "badge",
+                "filament",
+                "filamentphp",
+                "indicator",
+                "laravel",
+                "latency",
+                "network",
+                "offline",
+                "online",
+                "ping",
+                "rtl",
+                "status"
+            ],
+            "support": {
+                "issues": "https://github.com/RawanD201/filament-connection-badge/issues",
+                "source": "https://github.com/RawanD201/filament-connection-badge"
+            },
+            "time": "2026-04-14T18:19:00+00:00"
+        },
+        {
             "name": "ryangjchandler/blade-capture-directive",
             "version": "v1.1.1",
             "source": {
@@ -6410,6 +6578,97 @@
                 }
             ],
             "time": "2024-05-17T09:06:10+00:00"
+        },
+        {
+            "name": "spatie/laravel-activitylog",
+            "version": "4.12.3",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/spatie/laravel-activitylog.git",
+                "reference": "2a2024fcac05628b0d1bfdbb1b94dda8b0661dc0"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/spatie/laravel-activitylog/zipball/2a2024fcac05628b0d1bfdbb1b94dda8b0661dc0",
+                "reference": "2a2024fcac05628b0d1bfdbb1b94dda8b0661dc0",
+                "shasum": ""
+            },
+            "require": {
+                "illuminate/config": "^8.0 || ^9.0 || ^10.0 || ^11.0 || ^12.0 || ^13.0",
+                "illuminate/database": "^8.69 || ^9.27 || ^10.0 || ^11.0 || ^12.0 || ^13.0",
+                "illuminate/support": "^8.0 || ^9.0 || ^10.0 || ^11.0 || ^12.0 || ^13.0",
+                "php": "^8.1",
+                "spatie/laravel-package-tools": "^1.6.3"
+            },
+            "require-dev": {
+                "ext-json": "*",
+                "orchestra/testbench": "^6.23 || ^7.0 || ^8.0 || ^9.6 || ^10.0 || ^11.0",
+                "pestphp/pest": "^1.20 || ^2.0 || ^3.0 || ^4.0"
+            },
+            "type": "library",
+            "extra": {
+                "laravel": {
+                    "providers": [
+                        "Spatie\\Activitylog\\ActivitylogServiceProvider"
+                    ]
+                }
+            },
+            "autoload": {
+                "files": [
+                    "src/helpers.php"
+                ],
+                "psr-4": {
+                    "Spatie\\Activitylog\\": "src"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "authors": [
+                {
+                    "name": "Freek Van der Herten",
+                    "email": "freek@spatie.be",
+                    "homepage": "https://spatie.be",
+                    "role": "Developer"
+                },
+                {
+                    "name": "Sebastian De Deyne",
+                    "email": "sebastian@spatie.be",
+                    "homepage": "https://spatie.be",
+                    "role": "Developer"
+                },
+                {
+                    "name": "Tom Witkowski",
+                    "email": "dev.gummibeer@gmail.com",
+                    "homepage": "https://gummibeer.de",
+                    "role": "Developer"
+                }
+            ],
+            "description": "A very simple activity logger to monitor the users of your website or application",
+            "homepage": "https://github.com/spatie/activitylog",
+            "keywords": [
+                "activity",
+                "laravel",
+                "log",
+                "spatie",
+                "user"
+            ],
+            "support": {
+                "issues": "https://github.com/spatie/laravel-activitylog/issues",
+                "source": "https://github.com/spatie/laravel-activitylog/tree/4.12.3"
+            },
+            "funding": [
+                {
+                    "url": "https://spatie.be/open-source/support-us",
+                    "type": "custom"
+                },
+                {
+                    "url": "https://github.com/spatie",
+                    "type": "github"
+                }
+            ],
+            "time": "2026-03-24T12:33:53+00:00"
         },
         {
             "name": "spatie/laravel-medialibrary",
