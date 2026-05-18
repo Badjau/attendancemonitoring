@@ -5,6 +5,7 @@ namespace App\Filament\Admin\Resources\Announcements\Schemas;
 use App\Enums\Announcement\Status;
 use App\Enums\Announcement\Type;
 use Carbon\Carbon;
+use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\Hidden;
 use Filament\Forms\Components\RichEditor;
 use Filament\Forms\Components\Select;
@@ -40,6 +41,10 @@ class AnnouncementForm
                     ->required(),
 
                 Hidden::make('published_at'),
+
+                DatePicker::make('expires_at')
+                    ->required()
+                    ->date('F, d Y'),
 
                 Toggle::make('is_pinned')
                     ->default(true),

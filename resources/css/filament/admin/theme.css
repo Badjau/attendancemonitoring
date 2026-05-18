@@ -41,21 +41,36 @@ html,
 }
 
 .fi-topbar {
-    min-height: 4.5rem;
-    border-bottom: 1px solid var(--admin-border);
+    min-height: 4.75rem;
+    border-bottom: 1px solid rgb(0 70 67 / 0.12);
     background:
-        linear-gradient(90deg, #ffffff 0, #ffffff 17rem, rgb(255 255 255 / 0.9) 17rem),
-        rgb(255 255 255 / 0.94) !important;
-    box-shadow: 0 1px 2px rgb(0 30 29 / 0.07), 0 14px 38px rgb(0 30 29 / 0.05);
-    backdrop-filter: blur(14px);
-    padding-inline: 1.25rem 2rem;
+        linear-gradient(90deg, #ffffff 0, #ffffff 17rem, rgb(255 255 255 / 0.88) 17rem),
+        linear-gradient(180deg, rgb(255 255 255 / 0.97), rgb(248 250 249 / 0.93)) !important;
+    box-shadow: 0 1px 2px rgb(0 30 29 / 0.06), 0 18px 42px rgb(0 30 29 / 0.07);
+    backdrop-filter: blur(18px);
+    padding-inline: 1rem 1.5rem;
+}
+
+.fi-topbar::after {
+    content: "";
+    position: absolute;
+    inset-inline: 17rem 0;
+    bottom: -1px;
+    height: 3px;
+    background: linear-gradient(90deg, var(--brand-accent), rgb(171 209 198 / 0.2), transparent);
+    pointer-events: none;
 }
 
 .fi-topbar-start {
     display: flex !important;
     align-items: center;
-    width: 15.75rem;
+    width: 16rem;
     margin-inline-end: 1rem;
+}
+
+.fi-topbar .fi-logo,
+.fi-sidebar .fi-logo {
+    height: auto !important;
 }
 
 .fi-topbar-open-sidebar-btn,
@@ -80,7 +95,7 @@ html,
 }
 
 .fi-global-search-field {
-    min-width: min(22rem, 30vw);
+    min-width: min(24rem, 32vw);
     border: 1px solid var(--admin-border) !important;
     border-radius: 0.65rem !important;
     background: #ffffff !important;
@@ -110,7 +125,7 @@ html,
 }
 
 .fi-sidebar-header {
-    height: 4.5rem;
+    height: 4.75rem;
     justify-content: flex-start !important;
     border-bottom: 1px solid rgb(255 255 254 / 0.1);
     background: transparent !important;
@@ -126,20 +141,24 @@ html,
     display: flex;
     align-items: center;
     gap: 0.75rem;
-    min-width: 12rem;
+    min-width: 12.5rem;
 }
 
-.hr-brand-icon {
-    display: grid;
-    width: 2.25rem;
-    height: 2.25rem;
-    place-items: center;
-    border: 1px solid rgb(249 188 96 / 0.32);
-    border-radius: 0.5rem;
-    background: rgb(249 188 96 / 0.14);
-    color: var(--brand-accent);
-    font-size: 0.76rem;
-    font-weight: 800;
+.hr-brand-mark-logo-only {
+    justify-content: center;
+    min-width: auto;
+}
+
+.hr-brand-logo {
+    width: 3.65rem;
+    height: 3.65rem;
+    flex: none;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    object-fit: contain;
+    padding: 0;
+    box-shadow: none;
 }
 
 .hr-brand-copy {
@@ -150,15 +169,29 @@ html,
 
 .hr-brand-name {
     color: var(--brand-headline);
-    font-size: 0.95rem;
-    font-weight: 780;
+    font-size: 1rem;
+    font-weight: 820;
 }
 
 .hr-brand-context {
     color: var(--brand-paragraph);
-    font-size: 0.68rem;
-    font-weight: 650;
+    font-size: 0.66rem;
+    font-weight: 760;
+    letter-spacing: 0.06em;
     text-transform: uppercase;
+}
+
+.fi-topbar .hr-brand-logo {
+    background: transparent;
+    box-shadow: none;
+}
+
+.fi-topbar .hr-brand-name {
+    color: var(--brand-stroke);
+}
+
+.fi-topbar .hr-brand-context {
+    color: var(--admin-muted);
 }
 
 .fi-sidebar-nav {
@@ -232,10 +265,27 @@ html,
 }
 
 .fi-header {
-    align-items: flex-start;
+    position: relative;
+    align-items: center;
     gap: 1rem;
-    margin-bottom: 0.25rem;
-    padding-top: 1.75rem;
+    margin: 1.25rem 0 0.5rem;
+    padding: 1.25rem 1.35rem;
+    border: 1px solid var(--admin-border);
+    border-radius: 0.85rem;
+    background:
+        linear-gradient(135deg, rgb(255 255 255 / 0.96), rgb(248 250 249 / 0.94)),
+        var(--admin-surface);
+    box-shadow: 0 1px 2px rgb(0 30 29 / 0.05), 0 16px 34px rgb(0 30 29 / 0.05);
+}
+
+.fi-header::before {
+    content: "";
+    position: absolute;
+    inset-block: 1rem;
+    inset-inline-start: 0;
+    width: 4px;
+    border-radius: 999px;
+    background: var(--brand-accent);
 }
 
 .fi-header .fi-breadcrumbs {
@@ -252,22 +302,24 @@ html,
 
 .fi-header-heading {
     color: var(--brand-stroke);
-    font-size: clamp(1.6rem, 2.1vw, 2.1rem);
+    font-size: clamp(1.45rem, 1.9vw, 2rem);
     font-weight: 820;
     letter-spacing: 0;
+    line-height: 1.1;
 }
 
 .fi-header-actions-ctn {
-    margin-top: 2rem;
+    margin-top: 0;
 }
 
 .fi-header-actions-ctn .fi-btn {
-    min-height: 2.7rem;
+    min-height: 2.5rem;
     padding-inline: 1rem;
 }
 
 .fi-page-content {
     gap: 1rem;
+    padding-top: 0.5rem;
 }
 
 .fi-section,
@@ -382,9 +434,33 @@ html,
 @media (max-width: 1023px) {
     .fi-topbar {
         min-height: 4rem;
+        padding-inline: 0.75rem 1rem;
+    }
+
+    .fi-topbar::after {
+        inset-inline: 0;
+    }
+
+    .fi-topbar-start {
+        width: auto;
+        min-width: 0;
+    }
+
+    .hr-brand-mark {
+        min-width: 0;
     }
 
     .hr-brand-context {
         display: none;
+    }
+
+    .fi-header {
+        align-items: flex-start;
+        margin-top: 1rem;
+        padding: 1rem;
+    }
+
+    .fi-header-actions-ctn {
+        width: 100%;
     }
 }

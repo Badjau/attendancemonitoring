@@ -4,7 +4,7 @@ namespace App\Filament\Admin\Resources\Employees\RelationManagers;
 
 use App\Enums\Attendance\Status;
 use App\Filament\Admin\Resources\Attendances\AttendanceResource;
-use Filament\Actions\CreateAction;
+use App\Models\Attendance;
 use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
@@ -45,7 +45,8 @@ class AttendancesRelationManager extends RelationManager
                     ->searchable(),
 
                 TextColumn::make('total_hours')
-                    ->numeric()
+                    ->state(fn (Attendance $record): ?float => $record->dailyTotalHours())
+                    ->formatStateUsing(fn (Attendance $record): string => $record->formattedDailyTotalHours())
                     ->sortable(),
 
                 TextColumn::make('status')
@@ -105,9 +106,6 @@ class AttendancesRelationManager extends RelationManager
                     ->autoApply()
                     ->linkedCalendars()
                     ->withIndicator(),
-            ])
-            ->headerActions([
-                CreateAction::make(),
             ]);
     }
 }

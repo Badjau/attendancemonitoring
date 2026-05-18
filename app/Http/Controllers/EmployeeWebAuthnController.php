@@ -2,7 +2,6 @@
 
 namespace App\Http\Controllers;
 
-use App\Enums\Attendance\Type;
 use App\Http\Requests\EmployeeWebAuthn\RecordAttendanceRequest;
 use App\Models\Employee;
 use App\Services\AttendanceService;
@@ -26,9 +25,7 @@ use Laragear\WebAuthn\JsonTransport;
 
 class EmployeeWebAuthnController extends Controller
 {
-    public function __construct(protected AttendanceService $attendanceService)
-    {
-    }
+    public function __construct(protected AttendanceService $attendanceService) {}
 
     public function registrationOptions(Employee $employee): JsonResponse
     {
@@ -36,6 +33,7 @@ class EmployeeWebAuthnController extends Controller
             user: $employee,
             residentKey: ResidentKey::Required,
             userVerification: UserVerification::Required,
+            uniqueCredentials: false,
         );
 
         $json = app(AttestationCreator::class)
@@ -48,17 +46,51 @@ class EmployeeWebAuthnController extends Controller
 
     public function register(Request $request, Employee $employee): JsonResponse
     {
+        $validated = $request->validate([
+            'alias' => ['sometimes', 'nullable', 'string', 'max:255'],
+        ]);
+
+        $fingerLabel = $this->fingerLabelFromAlias($validated['alias'] ?? null);
+
+        if (
+            $fingerLabel &&
+            str_ends_with($validated['alias'] ?? '', ' - scan 1') &&
+            $this->hasRegisteredFinger($employee, $fingerLabel)
+        ) {
+            throw ValidationException::withMessages([
+                'finger' => "{$fingerLabel} is already registered. Remove it before registering again.",
+            ]);
+        }
+
         $validation = app(AttestationValidator::class)
             ->send(new AttestationValidation($employee, new JsonTransport($request->array())))
             ->thenReturn();
 
         $validation->credential
-            ->forceFill(['alias' => $request->alias ?? 'Fingerprint'])
+            ->forceFill(['alias' => $validated['alias'] ?? 'Fingerprint'])
             ->save();
 
         return response()->json([
             'message' => 'Fingerprint enrolled successfully.',
             'credential_id' => $validation->credential->getKey(),
+        ]);
+    }
+
+    public function destroyFinger(Request $request, Employee $employee): JsonResponse
+    {
+        $validated = $request->validate([
+            'finger' => ['required', 'string', Rule::in($this->fingerLabels())],
+        ]);
+
+        $deleted = $employee
+            ->webAuthnCredentials()
+            ->where('alias', 'like', "{$validated['finger']} fingerprint - scan %")
+            ->delete();
+
+        return response()->json([
+            'message' => $deleted
+                ? "{$validated['finger']} registration removed."
+                : "{$validated['finger']} was not registered.",
         ]);
     }
 
@@ -94,7 +126,7 @@ class EmployeeWebAuthnController extends Controller
 
             $employee = $validation->credential->authenticatable;
 
-            if (!$employee instanceof Employee) {
+            if (! $employee instanceof Employee) {
                 throw ValidationException::withMessages([
                     'fingerprint' => 'Fingerprint credential is not assigned to an employee.',
                 ]);
@@ -125,11 +157,53 @@ class EmployeeWebAuthnController extends Controller
         } catch (ValidationException $exception) {
             throw $exception;
         } catch (\Throwable $exception) {
-            Log::info('Fingerprint attendance failed: ' . $exception->getMessage());
+            Log::info('Fingerprint attendance failed: '.$exception->getMessage());
 
             return response()->json([
                 'message' => $exception->getMessage(),
             ], 422);
         }
+    }
+
+    private function hasRegisteredFinger(Employee $employee, string $fingerLabel): bool
+    {
+        return $employee
+            ->webAuthnCredentials()
+            ->where('alias', 'like', "{$fingerLabel} fingerprint - scan %")
+            ->exists();
+    }
+
+    private function fingerLabelFromAlias(?string $alias): ?string
+    {
+        if (! $alias) {
+            return null;
+        }
+
+        foreach ($this->fingerLabels() as $fingerLabel) {
+            if (str_starts_with($alias, "{$fingerLabel} fingerprint - scan ")) {
+                return $fingerLabel;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function fingerLabels(): array
+    {
+        return [
+            'Left thumb',
+            'Left index',
+            'Left middle',
+            'Left ring',
+            'Left little',
+            'Right thumb',
+            'Right index',
+            'Right middle',
+            'Right ring',
+            'Right little',
+        ];
     }
 }

@@ -22,9 +22,16 @@ type VerifiedEmployee = {
     position: string
     profile_url?: string | null
 }
+type AttendanceSchedule = {
+    time_in_start: string
+    time_in_end: string
+    time_out_start: string
+    time_out_end: string
+}
 
 const props = defineProps<{
     employees: VerifiedEmployee[]
+    attendanceSchedule: AttendanceSchedule
 }>();
 
 const page = usePage();
@@ -45,6 +52,7 @@ const canvasRef = ref<HTMLCanvasElement | null>(null)
 const isLoading = ref(false)
 const isError = ref(false)
 const isVideoReady = ref(false)
+const isCameraActive = ref(false)
 const isFaceModelReady = ref(false)
 const faceStatusText = ref('Face verification ready.')
 
@@ -78,7 +86,7 @@ const isLocationReady = computed(() => Boolean(coords.value)
     && Number.isFinite(coords.value.latitude)
     && Number.isFinite(coords.value.longitude)
     && !locationError.value)
-const showCamera = computed(() => showEmployeeIdInputField.value)
+const showCamera = computed(() => isCameraActive.value)
 
 const employeeFullName = (employee: VerifiedEmployee): string => (
     `${employee.first_name} ${employee.last_name}`.trim()
@@ -149,6 +157,7 @@ const stopCamera = (): any => {
     if (videoRef.value) videoRef.value.srcObject = null
     clearFaceDetectorOverlay()
     isVideoReady.value = false
+    isCameraActive.value = false
 }
 
 const clearFaceDetectorOverlay = () => {
@@ -247,12 +256,44 @@ const inferredAttendanceType = (): AttendanceAction => {
     const now = new Date()
     const minutesFromMidnight = now.getHours() * 60 + now.getMinutes()
 
-    return minutesFromMidnight <= 16 * 60 ? 'time-in' : 'time-out'
+    if (isMinuteWithinRange(minutesFromMidnight, timeToMinutes(props.attendanceSchedule.time_in_start), timeToMinutes(props.attendanceSchedule.time_in_end))) {
+        return 'time-in'
+    }
+
+    if (isMinuteWithinRange(minutesFromMidnight, timeToMinutes(props.attendanceSchedule.time_out_start), timeToMinutes(props.attendanceSchedule.time_out_end))) {
+        return 'time-out'
+    }
+
+    return minutesFromMidnight <= timeToMinutes(props.attendanceSchedule.time_in_end) ? 'time-in' : 'time-out'
+}
+
+const timeToMinutes = (time: string): number => {
+    const [hours = '0', minutes = '0'] = time.split(':')
+
+    return Number(hours) * 60 + Number(minutes)
+}
+
+const isMinuteWithinRange = (minute: number, start: number, end: number): boolean => {
+    if (start <= end) {
+        return minute >= start && minute <= end
+    }
+
+    return minute >= start || minute <= end
 }
 
 const ensureAttendanceFlowReady = async (actionName?: AttendanceAction) => {
-    attendanceType.value = actionName || attendanceType.value || inferredAttendanceType()
+    if (actionName) {
+        attendanceType.value = actionName
+    }
+
     showEmployeeIdInputField.value = true
+    await nextTick()
+    forceRFIDFocus()
+}
+
+const openCameraForCapture = async () => {
+    showEmployeeIdInputField.value = true
+    isCameraActive.value = true
     await nextTick()
     await initializeCamera()
     await loadFaceModels().catch((error) => {
@@ -260,7 +301,6 @@ const ensureAttendanceFlowReady = async (actionName?: AttendanceAction) => {
         faceStatusText.value = 'Face verification failed to load.'
     })
     if (isFaceModelReady.value) startFaceDetectorOverlay()
-    forceRFIDFocus()
 }
 
 const handleTimeAction = async (actionName: AttendanceAction) => {
@@ -654,6 +694,8 @@ const verifyEmployeeFaceAndSubmit = async (employeeIdentifier: string, method: A
     const employee = await verifyEmployeeIdentifier(employeeIdentifier, method)
     if (!employee) return
 
+    await openCameraForCapture()
+
     const isFaceMatch = await verifyLiveFaceMatchesEmployee(employee)
     if (!isFaceMatch) {
         isLoading.value = false
@@ -738,10 +780,10 @@ const submitManualAttendance = async () => {
 }
 
 const submitFaceAttendance = async () => {
-    const attendanceAction = attendanceType.value || inferredAttendanceType()
-    attendanceType.value = attendanceAction
+    const attendanceAction = attendanceType.value || undefined
 
     await ensureAttendanceFlowReady(attendanceAction)
+    await openCameraForCapture()
 
     if (locationLoading.value || locationError.value || !isLocationReady.value) {
         toast.add({
@@ -782,8 +824,7 @@ const submitFaceAttendance = async () => {
 }
 
 const submitFingerprintAttendance = async () => {
-    const attendanceAction = attendanceType.value || inferredAttendanceType()
-    attendanceType.value = attendanceAction
+    const attendanceAction = attendanceType.value || undefined
 
     if (typeof PublicKeyCredential === 'undefined') {
         toast.add({
@@ -796,6 +837,7 @@ const submitFingerprintAttendance = async () => {
     }
 
     await ensureAttendanceFlowReady(attendanceAction)
+    await openCameraForCapture()
 
     const image = captureAttendanceImage()
     if (!image) {
@@ -821,14 +863,19 @@ const submitFingerprintAttendance = async () => {
             publicKey: parseWebAuthnOptions(options) as PublicKeyCredentialRequestOptions,
         })
 
-        const payload = await postWebAuthnJson('/attendance/fingerprint/record', {
+        const fingerprintPayload: Record<string, unknown> = {
             ...parseWebAuthnCredential(credential),
-            attendance_type: attendanceAction,
             attendance_image: image,
             latitude: coords.value.latitude,
             longitude: coords.value.longitude,
             location: locationLabel(),
-        })
+        }
+
+        if (attendanceAction) {
+            fingerprintPayload.attendance_type = attendanceAction
+        }
+
+        const payload = await postWebAuthnJson('/attendance/fingerprint/record', fingerprintPayload)
 
         toast.add({
             severity: 'success',
@@ -852,8 +899,7 @@ const submitFingerprintAttendance = async () => {
 
 const submitAttendance = (employeeIdentifier: string, image: string, method: AttendanceMethod): Promise<void> => {
     return new Promise((resolve, reject) => {
-        const attendanceAction = attendanceType.value || inferredAttendanceType()
-        attendanceType.value = attendanceAction
+        const attendanceAction = attendanceType.value
 
         if (locationLoading.value || locationError.value || !isLocationReady.value) {
             toast.add({
@@ -873,7 +919,9 @@ const submitAttendance = (employeeIdentifier: string, image: string, method: Att
         // separates RFID, keypad, and fingerprint submissions for future handling.
         formData.append('rfid', employeeIdentifier)
         formData.append('attendance_method', method)
-        formData.append('attendance_type', attendanceAction)
+        if (attendanceAction) {
+            formData.append('attendance_type', attendanceAction)
+        }
         formData.append('latitude', String(coords.value.latitude))
         formData.append('longitude', String(coords.value.longitude))
         formData.append('location', locationLabel())
@@ -1054,7 +1102,7 @@ onUnmounted(() => {
 
 
         <p
-            v-if="showEmployeeIdInputField"
+            v-if="showCamera"
             class="text-brand-stroke text-sm text-center font-bold italic mt-5"
         >
             Look straight at the camera to record your attendance.

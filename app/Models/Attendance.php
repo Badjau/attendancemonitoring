@@ -6,6 +6,7 @@ use App\Enums\Attendance\AttendanceMethod;
 use App\Enums\Attendance\OvertimeStatus;
 use App\Enums\Attendance\Status;
 use App\Enums\Attendance\Type;
+use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -86,6 +87,64 @@ class Attendance extends Model implements HasMedia
     public function employee(): BelongsTo
     {
         return $this->belongsTo(Employee::class);
+    }
+
+    public function dailyTotalHours(): ?float
+    {
+        $minutes = $this->dailyTotalMinutes();
+
+        if ($minutes === null) {
+            return null;
+        }
+
+        return round($minutes / 60, 2);
+    }
+
+    public function dailyTotalMinutes(): ?int
+    {
+        if (! $this->employee_id || ! $this->attendance_date) {
+            return null;
+        }
+
+        $firstTimeIn = static::query()
+            ->where('employee_id', $this->employee_id)
+            ->whereDate('attendance_date', $this->attendance_date)
+            ->whereNotNull('time_in')
+            ->min('time_in');
+
+        $lastTimeOut = static::query()
+            ->where('employee_id', $this->employee_id)
+            ->whereDate('attendance_date', $this->attendance_date)
+            ->whereNotNull('time_out')
+            ->max('time_out');
+
+        if (! $firstTimeIn || ! $lastTimeOut) {
+            return null;
+        }
+
+        return Carbon::parse($firstTimeIn)->diffInMinutes(Carbon::parse($lastTimeOut));
+    }
+
+    public function formattedDailyTotalHours(): string
+    {
+        $minutes = $this->dailyTotalMinutes();
+
+        if ($minutes === null) {
+            return '-';
+        }
+
+        $hours = intdiv($minutes, 60);
+        $remainingMinutes = $minutes % 60;
+
+        if ($hours === 0) {
+            return "{$remainingMinutes} min";
+        }
+
+        if ($remainingMinutes === 0) {
+            return "{$hours}h";
+        }
+
+        return "{$hours}h {$remainingMinutes}m";
     }
 
     public function zone(): BelongsTo

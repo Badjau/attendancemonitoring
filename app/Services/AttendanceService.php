@@ -6,7 +6,6 @@ use App\Enums\Attendance\AttendanceMethod;
 use App\Enums\Attendance\OvertimeStatus;
 use App\Enums\Attendance\Status;
 use App\Enums\Attendance\Type;
-use App\Http\Requests\Attendance\ValidateLocationRequest;
 use App\Models\Attendance;
 use App\Models\Employee;
 use Carbon\Carbon;
@@ -18,11 +17,10 @@ use Illuminate\Validation\ValidationException;
 class AttendanceService
 {
     public function __construct(
-        public Attendance         $model,
+        public Attendance $model,
         protected GeofenceService $geofenceService,
-    )
-    {
-    }
+        protected AttendanceScheduleSettings $attendanceScheduleSettings,
+    ) {}
 
     public function recordAttendance(Request $request): Attendance
     {
@@ -49,7 +47,7 @@ class AttendanceService
                 ->orWhere('rfid_uid', $request->employee_id)
                 ->first();
 
-        if (!$employee) {
+        if (! $employee) {
             throw ValidationException::withMessages([
                 'employee_id' => 'Employee is not existings.',
             ]);
@@ -71,11 +69,7 @@ class AttendanceService
 
     private function inferAttendanceType(Carbon $now): string
     {
-        $minutesFromMidnight = ($now->hour * 60) + $now->minute;
-
-        return $minutesFromMidnight <= (16 * 60)
-            ? Type::TimeIn->value
-            : Type::TimeOut->value;
+        return $this->attendanceScheduleSettings->inferAttendanceType($now);
     }
 
     private function attendanceMethod(Request $request): ?string
@@ -89,7 +83,7 @@ class AttendanceService
             ->orWhere('rfid_uid', $employeeId)
             ->first();
 
-        if (!$employee) {
+        if (! $employee) {
             throw new \Exception('Employee is not existing.');
         }
 
@@ -122,6 +116,7 @@ class AttendanceService
         ]);
 
         $this->attachAttendanceImage($request, $attendance, 'time-in-image');
+        $this->syncDailyTotalHours($employee, $now);
 
         return $attendance;
     }
@@ -131,22 +126,22 @@ class AttendanceService
         $employee = $this->findEmployee($request->rfid);
         $locationData = $this->validateLocation($request, $employee);
 
-        $latestTimeInAttendance = $this->model
+        $firstTimeInAttendance = $this->model
             ->whereDate('attendance_date', $now->toDateString())
             ->where('employee_id', $employee->id)
             ->whereNotNull('time_in')
             ->where('time_in', '<=', $now)
-            ->orderByDesc('time_in')
-            ->orderByDesc('id')
+            ->orderBy('time_in')
+            ->orderBy('id')
             ->first();
 
-        if (!$latestTimeInAttendance) {
+        if (! $firstTimeInAttendance) {
             throw new \Exception('Please time in first.');
         }
 
         // TODO: Make it the shift end time dynamic
         $shiftEnd = $now->copy()->setTimeFromTimeString('18:00:00');
-        $timeIn = Carbon::parse($latestTimeInAttendance->time_in);
+        $timeIn = Carbon::parse($firstTimeInAttendance->time_in);
         $workedMinutes = $timeIn->diffInMinutes($now);
 
         $isUndertime = $now->lt($shiftEnd);
@@ -174,8 +169,32 @@ class AttendanceService
         ]);
 
         $this->attachAttendanceImage($request, $attendance, 'time-out-image');
+        $attendance->total_hours = $this->syncDailyTotalHours($employee, $now);
 
         return $attendance;
+    }
+
+    private function syncDailyTotalHours(Employee $employee, Carbon $date): ?float
+    {
+        $query = $this->model
+            ->whereDate('attendance_date', $date->toDateString())
+            ->where('employee_id', $employee->id);
+
+        $firstTimeIn = (clone $query)
+            ->whereNotNull('time_in')
+            ->min('time_in');
+
+        $lastTimeOut = (clone $query)
+            ->whereNotNull('time_out')
+            ->max('time_out');
+
+        $totalHours = ($firstTimeIn && $lastTimeOut)
+            ? round(Carbon::parse($firstTimeIn)->diffInMinutes(Carbon::parse($lastTimeOut)) / 60, 2)
+            : null;
+
+        (clone $query)->update(['total_hours' => $totalHours]);
+
+        return $totalHours;
     }
 
     private function attachAttendanceImage(Request $request, Attendance $attendance, string $collection): void
@@ -188,7 +207,7 @@ class AttendanceService
             return;
         }
 
-        if (!$request->filled('attendance_image')) {
+        if (! $request->filled('attendance_image')) {
             return;
         }
 
@@ -200,15 +219,15 @@ class AttendanceService
 
     private function validateLocation(Request $request, Employee $employee): array
     {
-        $latitude = (float)$request->latitude;
-        $longitude = (float)$request->longitude;
+        $latitude = (float) $request->latitude;
+        $longitude = (float) $request->longitude;
         $zones = $employee->activeZones()->get();
         $strictZones = $zones->where('policy', 'strict')->values();
 
         if ($this->geofenceService->hasStrictZone($zones)) {
             $matchingStrictZone = $this->geofenceService->findMatchingZone($latitude, $longitude, $strictZones);
 
-            if (!$matchingStrictZone) {
+            if (! $matchingStrictZone) {
                 throw ValidationException::withMessages([
                     'location' => 'You are outside your assigned field.',
                 ]);
@@ -233,7 +252,6 @@ class AttendanceService
             'zone_id' => $matchingZone?->id,
         ];
     }
-
 
     private function findEmployeeByPassword(string $password): ?Employee
     {

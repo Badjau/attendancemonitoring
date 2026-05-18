@@ -52,7 +52,7 @@ const closeAnnouncement = () => {
     <aside class="order-3 xl:order-1 flex flex-col gap-8">
         <!-- Announcements -->
         <div
-            class="bg-brand-card rounded-4xl p-8 shadow-[8px_8px_0px_0px_#001e1d] border-2 border-brand-stroke grow flex flex-col animate-fade-up h-24"
+            class="bg-brand-card rounded-4xl p-8 shadow-[8px_8px_0px_0px_#001e1d] border-2 border-brand-stroke grow flex flex-col animate-fade-up"
             style="animation-delay: 0.3s"
         >
             <div class="flex items-center justify-between gap-3 mb-6">
@@ -72,7 +72,7 @@ const closeAnnouncement = () => {
 <!--                </Link>-->
             </div>
 
-            <div class="space-y-5 h-24 grow custom-scrollbar overflow-y-auto pr-2 text-brand-stroke">
+            <div class="space-y-5 grow custom-scrollbar overflow-y-auto pr-2 text-brand-stroke">
                 <div v-if="!latestAnnouncements.length" class="rounded-2xl border border-brand-stroke/10 bg-white/45 p-4">
                     <p class="text-sm font-bold">No announcements yet.</p>
                 </div>

@@ -2,12 +2,11 @@
 
 namespace App\Filament\Admin\Resources\Attendances\Schemas;
 
-use App\Enums\Attendance\OvertimeStatus;
-use App\Enums\Attendance\Status;
 use App\Models\Attendance;
 use Filament\Infolists\Components\IconEntry;
 use Filament\Infolists\Components\SpatieMediaLibraryImageEntry;
 use Filament\Infolists\Components\TextEntry;
+use Filament\Infolists\Components\ViewEntry;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
 
@@ -65,7 +64,7 @@ class AttendanceInfolist
 
                         TextEntry::make('total_hours')
                             ->label('Total Hours')
-                            ->state(fn (Attendance $record): string => $record->total_hours === null ? '-' : number_format((float) $record->total_hours, 2).' hrs'),
+                            ->state(fn (Attendance $record): string => $record->formattedDailyTotalHours()),
                     ])
                     ->columns(4)
                     ->columnSpanFull(),
@@ -146,6 +145,18 @@ class AttendanceInfolist
                         TextEntry::make('longitude')
                             ->numeric()
                             ->placeholder('-'),
+
+                        ViewEntry::make('location_map')
+                            ->label('Map')
+                            ->state(fn (Attendance $record): array => [
+                                'latitude' => $record->latitude,
+                                'longitude' => $record->longitude,
+                                'location' => $record->location,
+                                'employee' => trim("{$record->employee?->first_name} {$record->employee?->last_name}"),
+                            ])
+                            ->view('filament.admin.resources.attendances.location-map')
+                            ->visible(fn (Attendance $record): bool => filled($record->latitude) && filled($record->longitude))
+                            ->columnSpanFull(),
 
                         TextEntry::make('remarks')
                             ->placeholder('-')

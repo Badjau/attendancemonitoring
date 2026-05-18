@@ -68,11 +68,12 @@ window.timeclockWebAuthn = window.timeclockWebAuthn || {
     /**
      * @param {string} url
      * @param {Record<string, any>} data
+     * @param {string} method
      * @returns {Promise<Record<string, any>>}
      */
-    async postJson(url, data = {}) {
+    async postJson(url, data = {}, method = 'POST') {
         const response = await fetch(url, {
-            method: 'POST',
+            method,
             credentials: 'same-origin',
             headers: {
                 Accept: 'application/json',
@@ -93,19 +94,87 @@ window.timeclockWebAuthn = window.timeclockWebAuthn || {
 };
 
 /**
- * @param {{ optionsUrl: string, registerUrl: string }} config
+ * @param {{ optionsUrl: string, registerUrl: string, deleteUrl: string, registeredFingers?: string[] }} config
  */
-window.fingerprintEnrollment = ({optionsUrl, registerUrl}) => ({
+window.fingerprintEnrollment = ({optionsUrl, registerUrl, deleteUrl, registeredFingers = []}) => ({
     loading: false,
     message: '',
     success: false,
     supported: typeof PublicKeyCredential !== 'undefined',
+    selectedFinger: '',
+    requiredTaps: 3,
+    completedTaps: 0,
+    activeTap: 0,
+    fingers: [
+        {value: 'left-thumb', label: 'Left thumb'},
+        {value: 'left-index', label: 'Left index'},
+        {value: 'left-middle', label: 'Left middle'},
+        {value: 'left-ring', label: 'Left ring'},
+        {value: 'left-little', label: 'Left little'},
+        {value: 'right-thumb', label: 'Right thumb'},
+        {value: 'right-index', label: 'Right index'},
+        {value: 'right-middle', label: 'Right middle'},
+        {value: 'right-ring', label: 'Right ring'},
+        {value: 'right-little', label: 'Right little'},
+    ],
+    registeredFingers,
+
+    get selectedFingerLabel() {
+        return this.fingers.find(finger => finger.value === this.selectedFinger)?.label || '';
+    },
+
+    get selectedFingerRegistered() {
+        return this.registeredFingers.includes(this.selectedFingerLabel);
+    },
+
+    get canEnroll() {
+        return this.supported
+            && !this.loading
+            && Boolean(this.selectedFinger)
+            && !this.selectedFingerRegistered
+            && this.completedTaps < this.requiredTaps;
+    },
+
+    isRegistered(finger) {
+        return this.registeredFingers.includes(finger.label);
+    },
+
+    selectFinger(finger) {
+        if (this.loading) return;
+
+        this.selectedFinger = finger.value;
+        this.completedTaps = 0;
+        this.activeTap = 0;
+        this.message = '';
+        this.success = false;
+
+        if (this.selectedFingerRegistered) {
+            this.message = `${this.selectedFingerLabel} is already registered. Remove it before registering again.`;
+        }
+    },
+
     async enroll() {
+        if (!this.selectedFinger) {
+            this.message = 'Select which finger to enroll first.';
+            this.success = false;
+            return;
+        }
+
+        if (this.selectedFingerRegistered) {
+            this.message = `${this.selectedFingerLabel} is already registered. Remove it before registering again.`;
+            this.success = false;
+            return;
+        }
+
         this.loading = true;
         this.message = '';
         this.success = false;
 
         try {
+            const tap = this.completedTaps + 1;
+            this.activeTap = tap;
+            this.message = `Tap ${tap} of ${this.requiredTaps}: waiting for ${this.selectedFingerLabel}.`;
+
             const options = await window.timeclockWebAuthn.postJson(optionsUrl);
             const credential = await navigator.credentials.create({
                 publicKey: window.timeclockWebAuthn.parseOptions(options),
@@ -113,13 +182,46 @@ window.fingerprintEnrollment = ({optionsUrl, registerUrl}) => ({
 
             await window.timeclockWebAuthn.postJson(registerUrl, {
                 ...window.timeclockWebAuthn.parseCredential(credential),
-                alias: 'Fingerprint',
+                alias: `${this.selectedFingerLabel} fingerprint - scan ${tap}`,
             });
 
+            this.completedTaps = tap;
+
+            if (this.completedTaps < this.requiredTaps) {
+                this.message = `Tap ${tap} read. Continue with tap ${tap + 1}.`;
+                return;
+            }
+
             this.success = true;
-            this.message = 'Fingerprint enrolled successfully.';
+            this.message = `${this.selectedFingerLabel} enrolled successfully.`;
+            this.registeredFingers = [...new Set([...this.registeredFingers, this.selectedFingerLabel])];
         } catch (error) {
             this.message = error instanceof Error ? error.message : 'Fingerprint enrollment failed.';
+        } finally {
+            this.loading = false;
+            this.activeTap = 0;
+        }
+    },
+
+    async removeSelectedFinger() {
+        if (!this.selectedFingerRegistered || this.loading) return;
+
+        this.loading = true;
+        this.message = '';
+        this.success = false;
+
+        try {
+            const payload = await window.timeclockWebAuthn.postJson(deleteUrl, {
+                finger: this.selectedFingerLabel,
+            }, 'DELETE');
+
+            this.registeredFingers = this.registeredFingers.filter(finger => finger !== this.selectedFingerLabel);
+            this.completedTaps = 0;
+            this.activeTap = 0;
+            this.success = true;
+            this.message = payload.message || `${this.selectedFingerLabel} registration removed.`;
+        } catch (error) {
+            this.message = error instanceof Error ? error.message : 'Unable to remove registered finger.';
         } finally {
             this.loading = false;
         }

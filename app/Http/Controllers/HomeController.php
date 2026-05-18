@@ -2,18 +2,16 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\Announcement;
-use App\Models\Attendance;
-use App\Models\Employee;
+use App\Services\AttendanceScheduleSettings;
 use App\Services\HomeService;
-use Carbon\Carbon;
 use Inertia\Inertia;
 
 class HomeController extends Controller
 {
-    public function __construct(protected HomeService $homeService)
-    {
-    }
+    public function __construct(
+        protected HomeService $homeService,
+        protected AttendanceScheduleSettings $attendanceScheduleSettings,
+    ) {}
 
     public function home()
     {
@@ -27,6 +25,7 @@ class HomeController extends Controller
             'todayBirthdayCelebrants' => $todayBirthdayCelebrants,
             'announcements' => $announcements,
             'employeesWithFaces' => $employeesWithFaces,
+            'attendanceSchedule' => $this->attendanceScheduleSettings->toArray(),
         ]);
     }
 }

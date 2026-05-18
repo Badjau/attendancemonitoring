@@ -12,9 +12,7 @@ use Inertia\Response;
 
 class TimeclockUnlockController extends Controller
 {
-    public function __construct(protected TimeclockUnlockService $timeclockUnlockService)
-    {
-    }
+    public function __construct(protected TimeclockUnlockService $timeclockUnlockService) {}
 
     public function create(): Response|RedirectResponse
     {

@@ -7,7 +7,7 @@ use Filament\Support\Contracts\HasIcon;
 use Filament\Support\Contracts\HasLabel;
 use Illuminate\Contracts\Support\Htmlable;
 
-enum Policy: string implements HasLabel, HasColor, HasIcon
+enum Policy: string implements HasColor, HasIcon, HasLabel
 {
     case STRICT = 'strict';
     case RELAXED = 'relaxed';
@@ -15,8 +15,8 @@ enum Policy: string implements HasLabel, HasColor, HasIcon
     public function getLabel(): string|Htmlable|null
     {
         return match ($this) {
-            self::STRICT => "Strict - must be inside this zone",
-            self::RELAXED => "Relaxed - log only, never enforced",
+            self::STRICT => 'Strict - must be inside this zone',
+            self::RELAXED => 'Relaxed - log only, never enforced',
         };
     }
 

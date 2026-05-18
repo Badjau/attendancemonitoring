@@ -38,6 +38,7 @@ class HomeService
         return Announcement::with('media')
             ->isPinned()
             ->published()
+            ->isNotExpired()
             ->latest()
             ->take(2)
             ->get();
@@ -47,7 +48,7 @@ class HomeService
     {
         return Employee::with('media')
             ->get()
-            ->map(fn(Employee $employee): array => [
+            ->map(fn (Employee $employee): array => [
                 'id' => $employee->id,
                 'employee_id' => $employee->employee_id,
                 'first_name' => $employee->first_name,
@@ -55,7 +56,7 @@ class HomeService
                 'position' => $employee->position,
                 'profile_url' => $employee->getFirstMediaUrl('employee-profile'),
             ])
-            ->filter(fn(array $employee): bool => filled($employee['profile_url']))
+            ->filter(fn (array $employee): bool => filled($employee['profile_url']))
             ->values();
     }
 }

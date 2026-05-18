@@ -11,6 +11,12 @@ const props = defineProps<{
     todayBirthdayCelebrants: any
     announcements: any
     employeesWithFaces: any
+    attendanceSchedule: {
+        time_in_start: string
+        time_in_end: string
+        time_out_start: string
+        time_out_end: string
+    }
 }>();
 
 </script>
@@ -45,7 +51,10 @@ const props = defineProps<{
                 style="animation-delay: 0.2s"
             >
                 <!-- Camera Card -->
-                <CameraCard :employees="props.employeesWithFaces"/>
+                <CameraCard
+                    :employees="props.employeesWithFaces"
+                    :attendance-schedule="props.attendanceSchedule"
+                />
 
                 <!-- Greetings -->
                 <GreetingsCard/>

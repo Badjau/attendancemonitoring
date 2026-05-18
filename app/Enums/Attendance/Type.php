@@ -6,7 +6,7 @@ use Filament\Support\Contracts\HasIcon;
 use Filament\Support\Contracts\HasLabel;
 use Illuminate\Contracts\Support\Htmlable;
 
-enum Type: string implements HasLabel, HasIcon
+enum Type: string implements HasIcon, HasLabel
 {
     case TimeIn = 'time-in';
     case TimeOut = 'time-out';
