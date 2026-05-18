@@ -21,7 +21,7 @@ export function useToast() {
         })
 
         setTimeout(() => {
-            toasts.value = toasts.value.filter(t => t.id !== id)
+            toasts.value = toasts.value.filter((t) => t.id !== id)
         }, 3000)
     }
 

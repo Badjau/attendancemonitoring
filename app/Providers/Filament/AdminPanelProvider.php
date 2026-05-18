@@ -50,7 +50,7 @@ class AdminPanelProvider extends PanelProvider
             ->viteTheme('resources/css/filament/admin/theme.css')
             ->renderHook(
                 PanelsRenderHook::SCRIPTS_AFTER,
-                fn(): string => Blade::render("@vite([
+                fn (): string => Blade::render("@vite([
                     'resources/js/filament-face-registration.js',
                     'resources/js/filament-fingerprint-enrollment.js',
                 ])")

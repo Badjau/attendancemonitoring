@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import {Head} from '@inertiajs/vue3';
-import FaceRegistrationCamera from '@/Components/Face/FaceRegistrationCamera.vue';
-import Toast from '@/Components/Toast.vue';
+import { Head } from '@inertiajs/vue3'
+import FaceRegistrationCamera from '@/Components/Face/FaceRegistrationCamera.vue'
+import Toast from '@/Components/Toast.vue'
 
 type FaceEmployee = {
     id: number
@@ -14,15 +14,15 @@ type FaceEmployee = {
 
 defineProps<{
     employees: FaceEmployee[]
-}>();
+}>()
 </script>
 
 <template>
-    <Head title="Register Face"/>
+    <Head title="Register Face" />
 
-    <Toast/>
+    <Toast />
 
     <main class="min-h-screen p-4 md:p-8">
-        <FaceRegistrationCamera :employees="employees"/>
+        <FaceRegistrationCamera :employees="employees" />
     </main>
 </template>

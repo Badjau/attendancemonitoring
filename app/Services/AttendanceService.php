@@ -24,7 +24,19 @@ class AttendanceService
 
     public function recordAttendance(Request $request): Attendance
     {
-        $now = Carbon::now('Asia/Manila');
+        if ($request->filled('offline_id')) {
+            $existingAttendance = $this->model
+                ->where('offline_id', $request->string('offline_id')->toString())
+                ->first();
+
+            if ($existingAttendance) {
+                return $existingAttendance;
+            }
+        }
+
+        $now = $request->filled('occurred_at')
+            ? Carbon::parse($request->string('occurred_at')->toString())->setTimezone('Asia/Manila')
+            : Carbon::now('Asia/Manila');
         $attendanceType = $request->attendance_type ?: $this->inferAttendanceType($now);
         $request->merge(['attendance_type' => $attendanceType]);
 
@@ -106,6 +118,7 @@ class AttendanceService
             'rfid_uid' => $request->rfid,
             'attendance_type' => Type::TimeIn->value,
             'attendance_method' => $this->attendanceMethod($request),
+            'offline_id' => $request->offline_id,
             'attendance_date' => $now->toDateString(),
             'time_in' => $now,
             'status' => $isLate ? Status::Late->value : Status::Present->value,
@@ -155,6 +168,7 @@ class AttendanceService
             'rfid_uid' => $request->rfid,
             'attendance_type' => Type::TimeOut->value,
             'attendance_method' => $this->attendanceMethod($request),
+            'offline_id' => $request->offline_id,
             'attendance_date' => $now->toDateString(),
             'time_out' => $now,
             'total_hours' => round($workedMinutes / 60, 2),
@@ -235,6 +249,7 @@ class AttendanceService
 
             return [
                 'location' => $request->location ?? $matchingStrictZone->name,
+                'location_source' => $request->location_source ?? 'live',
                 'latitude' => $latitude,
                 'longitude' => $longitude,
                 'location_status' => 'inside',
@@ -246,6 +261,7 @@ class AttendanceService
 
         return [
             'location' => $request->location ?? $matchingZone?->name,
+            'location_source' => $request->location_source ?? 'live',
             'latitude' => $latitude,
             'longitude' => $longitude,
             'location_status' => $matchingZone ? 'inside' : 'outside',

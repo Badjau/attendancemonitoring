@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import {CircleUser, Users} from "@lucide/vue";
+import { CircleUser, Users } from '@lucide/vue'
 
 const props = defineProps<{
-    attendanceToday: any;
-}>();
+    attendanceToday: any
+}>()
 </script>
 
 <template>
@@ -15,10 +15,14 @@ const props = defineProps<{
         >
             <div class="flex items-center justify-between mb-6">
                 <div class="flex items-center gap-3">
-                    <div class="p-2 bg-brand-paragraph rounded-xl border border-brand-stroke">
-                        <Users class="w-5 h-5 text-brand-bg"/>
+                    <div
+                        class="p-2 bg-brand-paragraph rounded-xl border border-brand-stroke"
+                    >
+                        <Users class="w-5 h-5 text-brand-bg" />
                     </div>
-                    <h2 class="text-xl font-black text-brand-stroke">Present</h2>
+                    <h2 class="text-xl font-black text-brand-stroke">
+                        Present
+                    </h2>
                 </div>
                 <span
                     class="text-xs font-bold bg-brand-bg text-brand-headline px-3 py-1 rounded-full"
@@ -34,7 +38,9 @@ const props = defineProps<{
                 id="timed-in-list"
             >
                 <div
-                    v-for="(attendance, attendanceIndex) in props.attendanceToday"
+                    v-for="(
+                        attendance, attendanceIndex
+                    ) in props.attendanceToday"
                     :key="attendanceIndex"
                     class="flex items-center gap-3 p-2 rounded-xl hover:bg-brand-paragraph/20 transition-colors"
                 >
@@ -44,14 +50,12 @@ const props = defineProps<{
                         alt="Employee Profile"
                         class="w-12 h-12 rounded-full border-2 border-brand-stroke object-cover"
                     />
-                    <CircleUser
-                        v-else
-                        class="w-8 h-8 text-brand-stroke"
-                    />
+                    <CircleUser v-else class="w-8 h-8 text-brand-stroke" />
 
                     <div>
                         <p class="font-bold text-brand-stroke text-sm">
-                            {{ attendance.employee.first_name }} {{ attendance.employee.last_name }}
+                            {{ attendance.employee.first_name }}
+                            {{ attendance.employee.last_name }}
                         </p>
                         <p class="text-xs text-brand-bg font-medium">
                             {{ attendance.employee.position }}
@@ -63,6 +67,4 @@ const props = defineProps<{
     </aside>
 </template>
 
-<style scoped>
-
-</style>
+<style scoped></style>

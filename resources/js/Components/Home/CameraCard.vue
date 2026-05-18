@@ -1,14 +1,22 @@
 <script setup lang="ts">
-import * as faceapi from 'face-api.js';
-import axios from 'axios';
-import {Camera, Fingerprint, LoaderCircle, LogIn, LogOut, MapPin, ScanFace, TriangleAlert} from "@lucide/vue";
-import {computed, nextTick, onMounted, onUnmounted, ref, watch} from "vue";
-import {router, usePage} from '@inertiajs/vue3'
-import {useToast} from "primevue";
-import {useGeolocator} from '@/Composables/useGeolocator.js';
+import * as faceapi from 'face-api.js'
+import axios from 'axios'
+import {
+    Fingerprint,
+    LoaderCircle,
+    LogIn,
+    LogOut,
+    MapPin,
+    ScanFace,
+    TriangleAlert,
+} from '@lucide/vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { useToast } from 'primevue'
+import { useGeolocator } from '@/Composables/useGeolocator.js'
+import { useSyncStore } from '@/Stores/sync.js'
 
-type AttendanceAction = "time-in" | "time-out"
-type AttendanceMethod = "rfid" | "keypad" | "fingerprint" | "face"
+type AttendanceAction = 'time-in' | 'time-out'
+type AttendanceMethod = 'rfid' | 'keypad' | 'fingerprint' | 'face'
 type AttendanceGreeting = {
     first_name: string
     is_birthday: boolean
@@ -22,6 +30,15 @@ type VerifiedEmployee = {
     position: string
     profile_url?: string | null
 }
+type LiveFaceMatch = {
+    employee: VerifiedEmployee
+    detection: faceapi.WithFaceDescriptor<
+        faceapi.WithFaceLandmarks<{
+            detection: faceapi.FaceDetection
+        }>
+    >
+    detectedFaceCount: number
+}
 type AttendanceSchedule = {
     time_in_start: string
     time_in_end: string
@@ -32,18 +49,20 @@ type AttendanceSchedule = {
 const props = defineProps<{
     employees: VerifiedEmployee[]
     attendanceSchedule: AttendanceSchedule
-}>();
+}>()
 
-const page = usePage();
-const toast = useToast();
+const toast = useToast()
+const syncStore = useSyncStore()
 const {
     coords,
     error: locationError,
     loading: locationLoading,
     accuracyWarning,
     address,
+    usingCachedLocation,
+    locationSource,
     getLocation,
-} = useGeolocator();
+} = useGeolocator()
 
 const attendanceType = ref<AttendanceAction | ''>('')
 const videoRef = ref<HTMLVideoElement | null>(null)
@@ -56,10 +75,10 @@ const isCameraActive = ref(false)
 const isFaceModelReady = ref(false)
 const faceStatusText = ref('Face verification ready.')
 
-const currentTime = ref("")
-const currentDate = ref("")
+const currentTime = ref('')
+const currentDate = ref('')
 
-const showEmployeeIdInputField = ref(false);
+const showEmployeeIdInputField = ref(false)
 
 const rfidInput = ref<HTMLInputElement | null>(null)
 const empIdInput = ref<HTMLInputElement | null>(null)
@@ -82,15 +101,17 @@ const faceDetectorOptions = new faceapi.TinyFaceDetectorOptions({
     inputSize: 416,
     scoreThreshold: 0.5,
 })
-const isLocationReady = computed(() => Boolean(coords.value)
-    && Number.isFinite(coords.value.latitude)
-    && Number.isFinite(coords.value.longitude)
-    && !locationError.value)
+const isLocationReady = computed(
+    () =>
+        Boolean(coords.value) &&
+        Number.isFinite(coords.value.latitude) &&
+        Number.isFinite(coords.value.longitude) &&
+        !locationError.value,
+)
 const showCamera = computed(() => isCameraActive.value)
 
-const employeeFullName = (employee: VerifiedEmployee): string => (
+const employeeFullName = (employee: VerifiedEmployee): string =>
     `${employee.first_name} ${employee.last_name}`.trim()
-)
 
 const locationLabel = (): string => {
     const currentCoords = coords.value as any
@@ -118,7 +139,9 @@ const initializeCamera = async () => {
         if (stream && isVideoReady.value) return
 
         if (!navigator.mediaDevices?.getUserMedia) {
-            throw new Error("getUserMedia is not available in this browser/context.")
+            throw new Error(
+                'getUserMedia is not available in this browser/context.',
+            )
         }
 
         isError.value = false
@@ -126,8 +149,8 @@ const initializeCamera = async () => {
 
         stream = await navigator.mediaDevices.getUserMedia({
             video: {
-                width: {ideal: 1280},
-                height: {ideal: 720},
+                width: { ideal: 1280 },
+                height: { ideal: 720 },
                 facingMode: 'user',
             },
             audio: false,
@@ -145,14 +168,14 @@ const initializeCamera = async () => {
             }
         })
     } catch (error) {
-        console.error("Camera error:", error)
+        console.error('Camera error:', error)
         isLoading.value = false
         isError.value = true
     }
 }
 
 const stopCamera = (): any => {
-    stream?.getTracks().forEach(track => track.stop())
+    stream?.getTracks().forEach((track) => track.stop())
     stream = null
     if (videoRef.value) videoRef.value.srcObject = null
     clearFaceDetectorOverlay()
@@ -172,7 +195,13 @@ const clearFaceDetectorOverlay = () => {
 }
 
 const drawFaceDetectorOverlay = async () => {
-    if (!videoRef.value || !overlayRef.value || !isVideoReady.value || !isFaceModelReady.value) return
+    if (
+        !videoRef.value ||
+        !overlayRef.value ||
+        !isVideoReady.value ||
+        !isFaceModelReady.value
+    )
+        return
     if (videoRef.value.paused || videoRef.value.ended) return
 
     const video = videoRef.value
@@ -196,7 +225,8 @@ const drawFaceDetectorOverlay = async () => {
 
     resizedDetections.forEach((detection, index) => {
         const drawBox = new faceapi.draw.DrawBox(detection.detection.box, {
-            label: detections.length === 1 ? 'Face detected' : `Face ${index + 1}`,
+            label:
+                detections.length === 1 ? 'Face detected' : `Face ${index + 1}`,
             boxColor: '#f9bc60',
             lineWidth: 3,
         })
@@ -234,21 +264,67 @@ const captureImage = (): string | null => {
     return canvas.toDataURL('image/jpeg', 0.8)
 }
 
+const cropFaceFromVideo = (
+    detection: faceapi.FaceDetection,
+    paddingRatio = 0.25,
+): string | null => {
+    if (!videoRef.value || !canvasRef.value || !isVideoReady.value) return null
+
+    const video = videoRef.value
+    const canvas = canvasRef.value
+    const { x, y, width, height } = detection.box
+    const paddingX = width * paddingRatio
+    const paddingY = height * paddingRatio
+
+    const sourceX = Math.max(0, x - paddingX)
+    const sourceY = Math.max(0, y - paddingY)
+    const sourceWidth = Math.min(
+        video.videoWidth - sourceX,
+        width + paddingX * 2,
+    )
+    const sourceHeight = Math.min(
+        video.videoHeight - sourceY,
+        height + paddingY * 2,
+    )
+
+    if (sourceWidth <= 0 || sourceHeight <= 0) return null
+
+    canvas.width = Math.round(sourceWidth)
+    canvas.height = Math.round(sourceHeight)
+
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return null
+
+    ctx.drawImage(
+        video,
+        sourceX,
+        sourceY,
+        sourceWidth,
+        sourceHeight,
+        0,
+        0,
+        canvas.width,
+        canvas.height,
+    )
+
+    return canvas.toDataURL('image/jpeg', 0.8)
+}
+
 const updateTime = () => {
     const now = new Date()
 
-    currentTime.value = now.toLocaleTimeString("en-US", {
-        hour: "numeric",
-        minute: "2-digit",
-        second: "2-digit",
+    currentTime.value = now.toLocaleTimeString('en-US', {
+        hour: 'numeric',
+        minute: '2-digit',
+        second: '2-digit',
         hour12: true,
     })
 
-    currentDate.value = now.toLocaleDateString("en-US", {
-        weekday: "long",
-        year: "numeric",
-        month: "long",
-        day: "numeric",
+    currentDate.value = now.toLocaleDateString('en-US', {
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
     })
 }
 
@@ -256,15 +332,30 @@ const inferredAttendanceType = (): AttendanceAction => {
     const now = new Date()
     const minutesFromMidnight = now.getHours() * 60 + now.getMinutes()
 
-    if (isMinuteWithinRange(minutesFromMidnight, timeToMinutes(props.attendanceSchedule.time_in_start), timeToMinutes(props.attendanceSchedule.time_in_end))) {
+    if (
+        isMinuteWithinRange(
+            minutesFromMidnight,
+            timeToMinutes(props.attendanceSchedule.time_in_start),
+            timeToMinutes(props.attendanceSchedule.time_in_end),
+        )
+    ) {
         return 'time-in'
     }
 
-    if (isMinuteWithinRange(minutesFromMidnight, timeToMinutes(props.attendanceSchedule.time_out_start), timeToMinutes(props.attendanceSchedule.time_out_end))) {
+    if (
+        isMinuteWithinRange(
+            minutesFromMidnight,
+            timeToMinutes(props.attendanceSchedule.time_out_start),
+            timeToMinutes(props.attendanceSchedule.time_out_end),
+        )
+    ) {
         return 'time-out'
     }
 
-    return minutesFromMidnight <= timeToMinutes(props.attendanceSchedule.time_in_end) ? 'time-in' : 'time-out'
+    return minutesFromMidnight <=
+        timeToMinutes(props.attendanceSchedule.time_in_end)
+        ? 'time-in'
+        : 'time-out'
 }
 
 const timeToMinutes = (time: string): number => {
@@ -273,7 +364,11 @@ const timeToMinutes = (time: string): number => {
     return Number(hours) * 60 + Number(minutes)
 }
 
-const isMinuteWithinRange = (minute: number, start: number, end: number): boolean => {
+const isMinuteWithinRange = (
+    minute: number,
+    start: number,
+    end: number,
+): boolean => {
     if (start <= end) {
         return minute >= start && minute <= end
     }
@@ -323,9 +418,11 @@ const resetAttendanceSelection = () => {
 const announceAttendanceGreeting = (greeting?: AttendanceGreeting) => {
     if (!greeting?.first_name) return
 
-    window.dispatchEvent(new CustomEvent('attendance:greeting', {
-        detail: greeting,
-    }))
+    window.dispatchEvent(
+        new CustomEvent('attendance:greeting', {
+            detail: greeting,
+        }),
+    )
 }
 
 const focusRFID = () => {
@@ -399,19 +496,25 @@ const onEmpIdKeydown = (e: KeyboardEvent) => {
     submitManualAttendance()
 }
 
-const csrfToken = (): string => document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || ''
+const csrfToken = (): string =>
+    document
+        .querySelector('meta[name="csrf-token"]')
+        ?.getAttribute('content') || ''
 
 const decodeWebAuthn = (input: string): Uint8Array => {
     input = input.replace(/-/g, '+').replace(/_/g, '/')
     const pad = input.length % 4
     if (pad) input += '='.repeat(4 - pad)
 
-    return Uint8Array.from(atob(input), char => char.charCodeAt(0))
+    return Uint8Array.from(atob(input), (char) => char.charCodeAt(0))
 }
 
-const encodeWebAuthn = (buffer: ArrayBuffer): string => btoa(String.fromCharCode(...new Uint8Array(buffer)))
+const encodeWebAuthn = (buffer: ArrayBuffer): string =>
+    btoa(String.fromCharCode(...new Uint8Array(buffer)))
 
-const parseWebAuthnOptions = (publicKey: any): PublicKeyCredentialRequestOptions | PublicKeyCredentialCreationOptions => {
+const parseWebAuthnOptions = (
+    publicKey: any,
+): PublicKeyCredentialRequestOptions | PublicKeyCredentialCreationOptions => {
     publicKey.challenge = decodeWebAuthn(publicKey.challenge)
 
     if (publicKey.user?.id) {
@@ -433,7 +536,13 @@ const parseWebAuthnOptions = (publicKey: any): PublicKeyCredentialRequestOptions
 const parseWebAuthnCredential = (credential: any): any => {
     const response: Record<string, string> = {}
 
-    for (const key of ['clientDataJSON', 'attestationObject', 'authenticatorData', 'signature', 'userHandle']) {
+    for (const key of [
+        'clientDataJSON',
+        'attestationObject',
+        'authenticatorData',
+        'signature',
+        'userHandle',
+    ]) {
         if (credential.response[key]) {
             response[key] = encodeWebAuthn(credential.response[key])
         }
@@ -449,7 +558,10 @@ const parseWebAuthnCredential = (credential: any): any => {
     }
 }
 
-const postWebAuthnJson = async (url: string, data: Record<string, any> = {}): Promise<any> => {
+const postWebAuthnJson = async (
+    url: string,
+    data: Record<string, any> = {},
+): Promise<any> => {
     const response = await fetch(url, {
         method: 'POST',
         credentials: 'same-origin',
@@ -465,14 +577,25 @@ const postWebAuthnJson = async (url: string, data: Record<string, any> = {}): Pr
     const payload = await response.json().catch(() => ({}))
 
     if (!response.ok) {
-        throw new Error(payload.message || Object.values(payload.errors ?? {})?.[0]?.[0] || 'Fingerprint verification failed.')
+        throw new Error(
+            payload.message ||
+                Object.values(payload.errors ?? {})?.[0]?.[0] ||
+                'Fingerprint verification failed.',
+        )
     }
 
     return payload
 }
 
-const captureAttendanceImage = (): string | null => {
-    const image = captureImage()
+const captureAttendanceImage = (
+    matchedFace?: LiveFaceMatch | null,
+): string | null => {
+    const shouldCropMatchedEmployeeFace = Boolean(
+        matchedFace && matchedFace.detectedFaceCount > 1,
+    )
+    const image = shouldCropMatchedEmployeeFace
+        ? cropFaceFromVideo(matchedFace!.detection.detection)
+        : captureImage()
 
     if (!image) {
         toast.add({
@@ -503,9 +626,10 @@ const verifyEmployeeIdentifier = async (
 
         return response.data.employee as VerifiedEmployee
     } catch (error: any) {
-        const message = error?.response?.data?.message
-            ?? Object.values(error?.response?.data?.errors ?? {})?.[0]?.[0]
-            ?? 'Employee is not existing.'
+        const message =
+            error?.response?.data?.message ??
+            Object.values(error?.response?.data?.errors ?? {})?.[0]?.[0] ??
+            'Employee is not existing.'
 
         toast.add({
             severity: 'error',
@@ -521,7 +645,9 @@ const verifyEmployeeIdentifier = async (
     }
 }
 
-const getRegisteredFaceDescriptor = async (employee: VerifiedEmployee): Promise<Float32Array | null> => {
+const getRegisteredFaceDescriptor = async (
+    employee: VerifiedEmployee,
+): Promise<Float32Array | null> => {
     const cachedDescriptor = registeredFaceDescriptors.get(employee.employee_id)
     if (cachedDescriptor) return cachedDescriptor
 
@@ -540,7 +666,9 @@ const getRegisteredFaceDescriptor = async (employee: VerifiedEmployee): Promise<
     return detection.descriptor
 }
 
-const verifyLiveFaceMatchesEmployee = async (employee: VerifiedEmployee): Promise<boolean> => {
+const verifyLiveFaceMatchesEmployee = async (
+    employee: VerifiedEmployee,
+): Promise<LiveFaceMatch | null> => {
     if (!videoRef.value || !isVideoReady.value) {
         toast.add({
             severity: 'error',
@@ -548,7 +676,7 @@ const verifyLiveFaceMatchesEmployee = async (employee: VerifiedEmployee): Promis
             detail: 'Camera not ready. Please allow camera access.',
             life: 5000,
         })
-        return false
+        return null
     }
 
     try {
@@ -565,7 +693,7 @@ const verifyLiveFaceMatchesEmployee = async (employee: VerifiedEmployee): Promis
                 life: 6000,
             })
             faceStatusText.value = 'Registered face cannot be read.'
-            return false
+            return null
         }
 
         const detections = await faceapi
@@ -582,13 +710,30 @@ const verifyLiveFaceMatchesEmployee = async (employee: VerifiedEmployee): Promis
                 life: 5000,
             })
             faceStatusText.value = detail
-            return false
+            return null
         }
 
-        const distance = Math.min(
-            ...detections.map((detection) => faceapi.euclideanDistance(registeredDescriptor, detection.descriptor)),
+        const bestDetection = detections.reduce(
+            (best, detection) => {
+                const distance = faceapi.euclideanDistance(
+                    registeredDescriptor,
+                    detection.descriptor,
+                )
+
+                return !best || distance < best.distance
+                    ? { detection, distance }
+                    : best
+            },
+            null as {
+                detection: (typeof detections)[number]
+                distance: number
+            } | null,
         )
-        const isMatch = distance <= FACE_MATCH_THRESHOLD
+
+        const distance = bestDetection?.distance ?? Number.POSITIVE_INFINITY
+        const isMatch = Boolean(
+            bestDetection && distance <= FACE_MATCH_THRESHOLD,
+        )
 
         if (!isMatch) {
             toast.add({
@@ -598,11 +743,15 @@ const verifyLiveFaceMatchesEmployee = async (employee: VerifiedEmployee): Promis
                 life: 6000,
             })
             faceStatusText.value = `Face mismatch. Distance: ${distance.toFixed(2)}.`
-            return false
+            return null
         }
 
         faceStatusText.value = `Face matched ${employeeFullName(employee)}.`
-        return true
+        return {
+            employee,
+            detection: bestDetection!.detection,
+            detectedFaceCount: detections.length,
+        }
     } catch (error) {
         console.error('Face verification failed:', error)
         toast.add({
@@ -612,11 +761,11 @@ const verifyLiveFaceMatchesEmployee = async (employee: VerifiedEmployee): Promis
             life: 6000,
         })
         faceStatusText.value = 'Unable to verify face.'
-        return false
+        return null
     }
 }
 
-const recognizeLiveFaceEmployee = async (): Promise<VerifiedEmployee | null> => {
+const recognizeLiveFaceEmployee = async (): Promise<LiveFaceMatch | null> => {
     if (!videoRef.value || !isVideoReady.value) {
         toast.add({
             severity: 'error',
@@ -657,17 +806,24 @@ const recognizeLiveFaceEmployee = async (): Promise<VerifiedEmployee | null> => 
         return null
     }
 
-    let bestMatch: { employee: VerifiedEmployee; distance: number } | null = null
+    let bestMatch: {
+        employee: VerifiedEmployee
+        detection: (typeof detections)[number]
+        distance: number
+    } | null = null
 
     for (const employee of props.employees) {
         const registeredDescriptor = await getRegisteredFaceDescriptor(employee)
         if (!registeredDescriptor) continue
 
         for (const detection of detections) {
-            const distance = faceapi.euclideanDistance(registeredDescriptor, detection.descriptor)
+            const distance = faceapi.euclideanDistance(
+                registeredDescriptor,
+                detection.descriptor,
+            )
 
             if (!bestMatch || distance < bestMatch.distance) {
-                bestMatch = {employee, distance}
+                bestMatch = { employee, detection, distance }
             }
         }
     }
@@ -687,23 +843,30 @@ const recognizeLiveFaceEmployee = async (): Promise<VerifiedEmployee | null> => 
 
     faceStatusText.value = `Recognized ${employeeFullName(bestMatch.employee)}.`
 
-    return bestMatch.employee
+    return {
+        employee: bestMatch.employee,
+        detection: bestMatch.detection,
+        detectedFaceCount: detections.length,
+    }
 }
 
-const verifyEmployeeFaceAndSubmit = async (employeeIdentifier: string, method: AttendanceMethod): Promise<void> => {
+const verifyEmployeeFaceAndSubmit = async (
+    employeeIdentifier: string,
+    method: AttendanceMethod,
+): Promise<void> => {
     const employee = await verifyEmployeeIdentifier(employeeIdentifier, method)
     if (!employee) return
 
     await openCameraForCapture()
 
-    const isFaceMatch = await verifyLiveFaceMatchesEmployee(employee)
-    if (!isFaceMatch) {
+    const matchedFace = await verifyLiveFaceMatchesEmployee(employee)
+    if (!matchedFace) {
         isLoading.value = false
         setTimeout(() => forceRFIDFocus(), 50)
         return
     }
 
-    const image = captureAttendanceImage()
+    const image = captureAttendanceImage(matchedFace)
     if (!image) {
         isLoading.value = false
         return
@@ -768,13 +931,13 @@ const submitManualAttendance = async () => {
 
     try {
         isLoading.value = true
-        console.log('Verifying keypad attendance...');
+        console.log('Verifying keypad attendance...')
         await verifyEmployeeFaceAndSubmit(password, 'keypad')
         employeePassword.value = ''
         hasTypedEmployeePassword.value = false
         setTimeout(() => forceRFIDFocus(), 50)
     } catch (e) {
-        console.error('Error submitting keypad attendance:', e);
+        console.error('Error submitting keypad attendance:', e)
         isLoading.value = false
     }
 }
@@ -785,7 +948,11 @@ const submitFaceAttendance = async () => {
     await ensureAttendanceFlowReady(attendanceAction)
     await openCameraForCapture()
 
-    if (locationLoading.value || locationError.value || !isLocationReady.value) {
+    if (
+        locationLoading.value ||
+        locationError.value ||
+        !isLocationReady.value
+    ) {
         toast.add({
             severity: 'error',
             summary: 'Location',
@@ -798,25 +965,28 @@ const submitFaceAttendance = async () => {
     try {
         isLoading.value = true
 
-        const employee = await recognizeLiveFaceEmployee()
-        if (!employee) {
+        const matchedFace = await recognizeLiveFaceEmployee()
+        if (!matchedFace) {
             isLoading.value = false
             return
         }
 
-        const image = captureAttendanceImage()
+        const image = captureAttendanceImage(matchedFace)
         if (!image) {
             isLoading.value = false
             return
         }
 
-        await submitAttendance(employee.employee_id, image, 'face')
+        await submitAttendance(matchedFace.employee.employee_id, image, 'face')
     } catch (error) {
         console.error('Error submitting face attendance:', error)
         toast.add({
             severity: 'error',
             summary: 'Face Recognition',
-            detail: error instanceof Error ? error.message : 'Facial recognition attendance failed.',
+            detail:
+                error instanceof Error
+                    ? error.message
+                    : 'Facial recognition attendance failed.',
             life: 5000,
         })
         resetAttendanceSelection()
@@ -844,7 +1014,11 @@ const submitFingerprintAttendance = async () => {
         return
     }
 
-    if (locationLoading.value || locationError.value || !isLocationReady.value) {
+    if (
+        locationLoading.value ||
+        locationError.value ||
+        !isLocationReady.value
+    ) {
         toast.add({
             severity: 'error',
             summary: 'Location',
@@ -858,9 +1032,13 @@ const submitFingerprintAttendance = async () => {
         isLoading.value = true
         faceStatusText.value = 'Waiting for fingerprint verification...'
 
-        const options = await postWebAuthnJson('/attendance/fingerprint/options')
+        const options = await postWebAuthnJson(
+            '/attendance/fingerprint/options',
+        )
         const credential = await navigator.credentials.get({
-            publicKey: parseWebAuthnOptions(options) as PublicKeyCredentialRequestOptions,
+            publicKey: parseWebAuthnOptions(
+                options,
+            ) as PublicKeyCredentialRequestOptions,
         })
 
         const fingerprintPayload: Record<string, unknown> = {
@@ -875,7 +1053,10 @@ const submitFingerprintAttendance = async () => {
             fingerprintPayload.attendance_type = attendanceAction
         }
 
-        const payload = await postWebAuthnJson('/attendance/fingerprint/record', fingerprintPayload)
+        const payload = await postWebAuthnJson(
+            '/attendance/fingerprint/record',
+            fingerprintPayload,
+        )
 
         toast.add({
             severity: 'success',
@@ -890,97 +1071,78 @@ const submitFingerprintAttendance = async () => {
         toast.add({
             severity: 'error',
             summary: 'Fingerprint',
-            detail: error instanceof Error ? error.message : 'Fingerprint attendance failed.',
+            detail:
+                error instanceof Error
+                    ? error.message
+                    : 'Fingerprint attendance failed.',
             life: 5000,
         })
         resetAttendanceSelection()
     }
 }
 
-const submitAttendance = (employeeIdentifier: string, image: string, method: AttendanceMethod): Promise<void> => {
-    return new Promise((resolve, reject) => {
-        const attendanceAction = attendanceType.value
+const createOfflineId = (): string =>
+    crypto.randomUUID?.() ??
+    `offline-${Date.now()}-${Math.random().toString(36).slice(2)}`
 
-        if (locationLoading.value || locationError.value || !isLocationReady.value) {
-            toast.add({
-                severity: 'error',
-                summary: 'Location',
-                detail: locationError.value || 'Waiting for GPS location.',
-                life: 5000,
-            })
+const submitAttendance = async (
+    employeeIdentifier: string,
+    image: string,
+    method: AttendanceMethod,
+): Promise<void> => {
+    const attendanceAction = attendanceType.value || inferredAttendanceType()
 
-            reject(new Error('Location is not ready.'))
-            return
-        }
-
-        const formData = new FormData()
-
-        // Keep "rfid" for the existing backend contract. attendance_method
-        // separates RFID, keypad, and fingerprint submissions for future handling.
-        formData.append('rfid', employeeIdentifier)
-        formData.append('attendance_method', method)
-        if (attendanceAction) {
-            formData.append('attendance_type', attendanceAction)
-        }
-        formData.append('latitude', String(coords.value.latitude))
-        formData.append('longitude', String(coords.value.longitude))
-        formData.append('location', locationLabel())
-
-        const blob = base64ToBlob(image, 'image/jpeg')
-        formData.append('attendance-image', blob, `attendance_${Date.now()}.jpg`)
-
-        const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content')
-
-        if (csrfToken) {
-            formData.append('_token', csrfToken)
-        }
-
-        isLoading.value = true
-
-        router.post('/attendance/record-time-in', formData, {
-            preserveState: true,
-            preserveScroll: true,
-            onSuccess: () => {
-                const flash = page.props.flash as any
-
-                if (flash?.error) {
-                    toast.add({
-                        severity: 'error',
-                        summary: 'Error',
-                        detail: flash.error,
-                        life: 5000,
-                    })
-                    resetAttendanceSelection()
-
-                    reject(new Error(flash.error))
-                    return
-                }
-
-                toast.add({
-                    severity: 'success',
-                    summary: 'Success',
-                    detail: flash?.success ?? 'Attendance recorded successfully.',
-                    life: 5000,
-                })
-
-                announceAttendanceGreeting(flash?.greeting)
-                resetAttendanceSelection()
-
-                resolve()
-            },
-            onError: (errors) => {
-                toast.add({
-                    severity: 'error',
-                    summary: 'Error',
-                    detail: Object.values(errors)[0] ?? 'Failed to record attendance.',
-                    life: 5000,
-                })
-                resetAttendanceSelection()
-
-                reject(new Error('Validation error.'))
-            },
+    if (
+        locationLoading.value ||
+        locationError.value ||
+        !isLocationReady.value
+    ) {
+        toast.add({
+            severity: 'error',
+            summary: 'Location',
+            detail: locationError.value || 'Waiting for GPS location.',
+            life: 5000,
         })
+
+        throw new Error('Location is not ready.')
+    }
+
+    isLoading.value = true
+
+    const result = await syncStore.submitOrQueueAttendance({
+        offlineId: createOfflineId(),
+        occurredAt: new Date().toISOString(),
+        employeeIdentifier,
+        attendanceMethod: method,
+        attendanceType: attendanceAction,
+        latitude: coords.value.latitude,
+        longitude: coords.value.longitude,
+        location: locationLabel(),
+        locationSource: locationSource.value || 'live',
+        imageBlob: base64ToBlob(image, 'image/jpeg'),
+        imageFileName: `attendance_${Date.now()}.jpg`,
     })
+
+    if (result.queued) {
+        toast.add({
+            severity: 'info',
+            summary: 'Saved Offline',
+            detail: result.message,
+            life: 10000,
+        })
+        resetAttendanceSelection()
+        return
+    }
+
+    toast.add({
+        severity: 'success',
+        summary: 'Success',
+        detail: result.payload?.message ?? 'Attendance recorded successfully.',
+        life: 5000,
+    })
+
+    announceAttendanceGreeting(result.payload?.greeting)
+    resetAttendanceSelection()
 }
 const base64ToBlob = (base64: string, mimeType: string): Blob => {
     const byteString = atob(base64.split(',')[1])
@@ -990,7 +1152,7 @@ const base64ToBlob = (base64: string, mimeType: string): Blob => {
         buffer[i] = byteString.charCodeAt(i)
     }
 
-    return new Blob([buffer], {type: mimeType})
+    return new Blob([buffer], { type: mimeType })
 }
 
 watch(showEmployeeIdInputField, async (val) => {
@@ -1022,7 +1184,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
     if (stream) {
-        stream.getTracks().forEach(track => track.stop())
+        stream.getTracks().forEach((track) => track.stop())
     }
 
     clearInterval(interval)
@@ -1043,7 +1205,7 @@ onUnmounted(() => {
         <div
             class="absolute top-8 left-8 z-10 bg-brand-stroke rounded-full px-4 py-2 flex items-center gap-2 shadow-lg"
         >
-            <div class="w-2 h-2 rounded-full bg-brand-tertiary animate-pulse"/>
+            <div class="w-2 h-2 rounded-full bg-brand-tertiary animate-pulse" />
             <span class="text-brand-headline text-xs font-bold tracking-widest">
                 LIVE
             </span>
@@ -1052,13 +1214,23 @@ onUnmounted(() => {
         <div
             class="absolute top-8 right-8 z-10 bg-brand-card rounded-full px-4 py-2 flex items-center gap-2 shadow-lg border border-brand-stroke"
         >
-            <LoaderCircle v-if="locationLoading" class="h-4 w-4 animate-spin text-brand-stroke"/>
-            <TriangleAlert v-else-if="locationError" class="h-4 w-4 text-red-600"/>
-            <TriangleAlert v-else-if="accuracyWarning" class="h-4 w-4 text-yellow-600"/>
-            <MapPin v-else class="h-4 w-4 text-green-600"/>
+            <LoaderCircle
+                v-if="locationLoading"
+                class="h-4 w-4 animate-spin text-brand-stroke"
+            />
+            <TriangleAlert
+                v-else-if="locationError"
+                class="h-4 w-4 text-red-600"
+            />
+            <TriangleAlert
+                v-else-if="accuracyWarning || usingCachedLocation"
+                class="h-4 w-4 text-yellow-600"
+            />
+            <MapPin v-else class="h-4 w-4 text-green-600" />
             <span class="text-brand-stroke text-xs font-bold tracking-widest">
                 <template v-if="locationLoading">GPS...</template>
                 <template v-else-if="locationError">GPS blocked</template>
+                <template v-else-if="usingCachedLocation">Cached GPS</template>
                 <template v-else-if="accuracyWarning">Low GPS</template>
                 <template v-else-if="isLocationReady">GPS ready</template>
                 <template v-else>GPS pending</template>
@@ -1068,15 +1240,15 @@ onUnmounted(() => {
         <div
             class="w-full h-full rounded-4xl bg-brand-stroke overflow-hidden relative flex items-center justify-center"
         >
-<!--            <div-->
-<!--                v-if="isLoading"-->
-<!--                class="absolute flex flex-col items-center gap-3 text-brand-paragraph"-->
-<!--            >-->
-<!--                <Camera class="w-10 h-10 animate-bounce text-brand-accent"/>-->
-<!--                <p class="text-sm font-bold uppercase tracking-widest">-->
-<!--                    Waking up lens...-->
-<!--                </p>-->
-<!--            </div>-->
+            <!--            <div-->
+            <!--                v-if="isLoading"-->
+            <!--                class="absolute flex flex-col items-center gap-3 text-brand-paragraph"-->
+            <!--            >-->
+            <!--                <Camera class="w-10 h-10 animate-bounce text-brand-accent"/>-->
+            <!--                <p class="text-sm font-bold uppercase tracking-widest">-->
+            <!--                    Waking up lens...-->
+            <!--                </p>-->
+            <!--            </div>-->
 
             <video
                 ref="videoRef"
@@ -1087,8 +1259,11 @@ onUnmounted(() => {
                 :class="{ loaded: isVideoReady }"
             />
 
-            <canvas ref="overlayRef" class="absolute inset-0 h-full w-full rounded-2xl pointer-events-none"/>
-            <canvas ref="canvasRef" style="display: none;"/>
+            <canvas
+                ref="overlayRef"
+                class="absolute inset-0 h-full w-full rounded-2xl pointer-events-none"
+            />
+            <canvas ref="canvasRef" style="display: none" />
 
             <div
                 v-if="isError"
@@ -1100,7 +1275,6 @@ onUnmounted(() => {
             </div>
         </div>
 
-
         <p
             v-if="showCamera"
             class="text-brand-stroke text-sm text-center font-bold italic mt-5"
@@ -1109,13 +1283,14 @@ onUnmounted(() => {
         </p>
     </div>
 
-
     <div class="flex flex-col gap-8">
         <div
             class="bg-brand-card rounded-4xl p-8 shadow-[8px_8px_0px_0px_#001e1d] border-2 border-brand-stroke shrink-0 animate-fade-up"
         >
             <div class="flex flex-col items-center text-center space-y-1 mb-8">
-                <p class="text-brand-bg font-bold tracking-wider uppercase text-xs">
+                <p
+                    class="text-brand-bg font-bold tracking-wider uppercase text-xs"
+                >
                     {{ currentDate }}
                 </p>
                 <h1
@@ -1130,10 +1305,13 @@ onUnmounted(() => {
                     <button
                         @click="handleTimeAction('time-in')"
                         class="group relative bg-brand-accent hover:bg-[#ffcf81] text-brand-stroke border-2 border-brand-stroke rounded-2xl py-4 px-3 transition-all duration-200 ease-out font-bold shadow-[4px_4px_0px_0px_#001e1d] hover:-translate-y-1 hover:shadow-[6px_6px_0px_0px_#001e1d] active:translate-x-1 active:translate-y-1 active:shadow-none flex flex-col items-center gap-2"
-                        :class="{'ring-4 ring-brand-stroke ring-offset-2 ring-offset-brand-card shadow-none translate-x-1 translate-y-1': attendanceType === 'time-in'}"
+                        :class="{
+                            'ring-4 ring-brand-stroke ring-offset-2 ring-offset-brand-card shadow-none translate-x-1 translate-y-1':
+                                attendanceType === 'time-in',
+                        }"
                         :aria-pressed="attendanceType === 'time-in'"
                     >
-                        <LogIn class="w-5 h-5"/>
+                        <LogIn class="w-5 h-5" />
                         <span class="text-sm">Time In</span>
                         <span
                             v-if="attendanceType === 'time-in'"
@@ -1145,10 +1323,13 @@ onUnmounted(() => {
                     <button
                         @click="handleTimeAction('time-out')"
                         class="group relative bg-brand-tertiary hover:bg-[#f07a7b] text-brand-headline border-2 border-brand-stroke rounded-2xl py-4 px-3 transition-all duration-200 ease-out font-bold shadow-[4px_4px_0px_0px_#001e1d] hover:-translate-y-1 hover:shadow-[6px_6px_0px_0px_#001e1d] active:translate-x-1 active:translate-y-1 active:shadow-none flex flex-col items-center gap-2"
-                        :class="{'ring-4 ring-brand-stroke ring-offset-2 ring-offset-brand-card shadow-none translate-x-1 translate-y-1': attendanceType === 'time-out'}"
+                        :class="{
+                            'ring-4 ring-brand-stroke ring-offset-2 ring-offset-brand-card shadow-none translate-x-1 translate-y-1':
+                                attendanceType === 'time-out',
+                        }"
                         :aria-pressed="attendanceType === 'time-out'"
                     >
-                        <LogOut class="w-5 h-5"/>
+                        <LogOut class="w-5 h-5" />
                         <span class="text-sm">Time Out</span>
                         <span
                             v-if="attendanceType === 'time-out'"
@@ -1165,7 +1346,7 @@ onUnmounted(() => {
                         title="Fingerprint"
                         @click="submitFingerprintAttendance"
                     >
-                        <Fingerprint class="w-5 h-5"/>
+                        <Fingerprint class="w-5 h-5" />
                         <span class="text-sm">Fingerprint</span>
                     </button>
 
@@ -1175,13 +1356,15 @@ onUnmounted(() => {
                         title="Facial Recognition"
                         @click="submitFaceAttendance"
                     >
-                        <ScanFace class="w-5 h-5"/>
+                        <ScanFace class="w-5 h-5" />
                         <span class="text-sm">Face</span>
                     </button>
                 </div>
 
                 <div v-if="isLoading" class="mt-5">
-                    <p class="text-brand-bg font-bold tracking-wider uppercase text-xs">
+                    <p
+                        class="text-brand-bg font-bold tracking-wider uppercase text-xs"
+                    >
                         Processing, please wait...
                     </p>
                 </div>
@@ -1193,7 +1376,7 @@ onUnmounted(() => {
                             type="text"
                             autocomplete="off"
                             class="absolute -top-96"
-                            style="opacity: 0; pointer-events: none;"
+                            style="opacity: 0; pointer-events: none"
                             @input="onRFIDInput"
                             @keydown="onRFIDKeydown"
                         />
@@ -1215,10 +1398,7 @@ onUnmounted(() => {
                                 @keydown="onEmpIdKeydown"
                             />
 
-                            <div
-                                v-if="showEmployeeIdInputField"
-                                class="mt-3"
-                            >
+                            <div v-if="showEmployeeIdInputField" class="mt-3">
                                 <button
                                     type="button"
                                     class="w-full bg-brand-stroke hover:bg-brand-bg text-brand-headline border-2 border-brand-stroke rounded-xl py-3 px-4 text-sm font-bold transition-all duration-200 ease-out shadow-[3px_3px_0px_0px_#abd1c6] hover:-translate-y-0.5 hover:shadow-[5px_5px_0px_0px_#abd1c6] active:translate-x-1 active:translate-y-1 active:shadow-none"
@@ -1231,7 +1411,10 @@ onUnmounted(() => {
                     </div>
 
                     <p
-                        v-if="showEmployeeIdInputField || faceStatusText !== 'Face verification ready.'"
+                        v-if="
+                            showEmployeeIdInputField ||
+                            faceStatusText !== 'Face verification ready.'
+                        "
                         class="text-brand-bg text-xs font-black uppercase tracking-wide"
                     >
                         {{ faceStatusText }}
@@ -1242,6 +1425,4 @@ onUnmounted(() => {
     </div>
 </template>
 
-<style scoped>
-
-</style>
+<style scoped></style>
