@@ -5,12 +5,14 @@ import {
     CheckCircle2,
     Save,
     ScanFace,
+    RotateCcw,
     UserRound,
     UsersRound,
 } from '@lucide/vue'
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { Link, router, usePage } from '@inertiajs/vue3'
 import { useToast } from 'primevue'
+import { mapFaceBoxToObjectCover } from '@/Utils/faceOverlay.js'
 
 type FaceEmployee = {
     id: number
@@ -37,8 +39,11 @@ const statusText = ref('Loading face models...')
 const isCameraReady = ref(false)
 const isModelReady = ref(false)
 const isSubmitting = ref(false)
+const isCapturing = ref(false)
+const isReviewingCapture = ref(false)
 const faceCount = ref(0)
 const capturedPreview = ref('')
+const capturedImage = ref<Blob | null>(null)
 const existingFaceDescriptors = new Map<string, Float32Array>()
 
 let stream: MediaStream | null = null
@@ -62,7 +67,11 @@ const selectedEmployee = computed(
 
 const canSave = computed(() =>
     Boolean(
-        selectedEmployee.value && faceCount.value === 1 && !isSubmitting.value,
+        selectedEmployee.value &&
+        faceCount.value === 1 &&
+        capturedImage.value &&
+        isReviewingCapture.value &&
+        !isSubmitting.value,
     ),
 )
 
@@ -150,7 +159,10 @@ const scanFace = async () => {
         !videoRef.value ||
         !overlayRef.value ||
         !isCameraReady.value ||
-        !isModelReady.value
+        !isModelReady.value ||
+        isReviewingCapture.value ||
+        isCapturing.value ||
+        isSubmitting.value
     )
         return
 
@@ -172,16 +184,18 @@ const scanFace = async () => {
 
     faceCount.value = detections.length
 
-    const resizedDetections = faceapi.resizeResults(detections, displaySize)
     const context = canvas.getContext('2d')
     context?.clearRect(0, 0, canvas.width, canvas.height)
 
-    resizedDetections.forEach((detection, index) => {
-        const drawBox = new faceapi.draw.DrawBox(detection.detection.box, {
-            label: index === 0 ? 'Enrollment face' : 'Extra face',
-            boxColor: detections.length === 1 ? '#f9bc60' : '#e16162',
-            lineWidth: 3,
-        })
+    detections.forEach((detection, index) => {
+        const drawBox = new faceapi.draw.DrawBox(
+            mapFaceBoxToObjectCover(detection.detection.box, video),
+            {
+                label: index === 0 ? 'Enrollment face' : 'Extra face',
+                boxColor: detections.length === 1 ? '#f9bc60' : '#e16162',
+                lineWidth: 3,
+            },
+        )
 
         drawBox.draw(canvas)
     })
@@ -193,8 +207,12 @@ const scanFace = async () => {
 
     statusText.value =
         detections.length === 1
-            ? 'One face detected. Ready to save.'
+            ? 'One face detected. Capturing for review...'
             : 'Keep only one face in frame.'
+
+    if (detections.length === 1) {
+        await captureForReview()
+    }
 }
 
 const startScanLoop = () => {
@@ -287,24 +305,11 @@ const saveRegistration = async () => {
         return
     }
 
-    const duplicate = await findDuplicateFace()
-    if (duplicate) {
-        toast.add({
-            severity: 'error',
-            summary: 'Face Registration',
-            detail: `This face is already registered to ${employeeName(duplicate)}.`,
-            life: 6000,
-        })
-        statusText.value = 'Duplicate registered face detected.'
-        return
-    }
-
-    const image = captureBlob()
-    if (!image) {
+    if (!capturedImage.value) {
         toast.add({
             severity: 'error',
             summary: 'Camera',
-            detail: 'Camera image is not ready.',
+            detail: 'Capture a face image before saving.',
             life: 5000,
         })
         return
@@ -314,7 +319,7 @@ const saveRegistration = async () => {
     formData.append('employee_id', selectedEmployee.value.employee_id)
     formData.append(
         'face-image',
-        image,
+        capturedImage.value,
         `face_registration_${selectedEmployee.value.employee_id}.jpg`,
     )
 
@@ -334,6 +339,9 @@ const saveRegistration = async () => {
             })
 
             statusText.value = 'Face saved. You can register another employee.'
+            capturedImage.value = null
+            capturedPreview.value = ''
+            isReviewingCapture.value = false
         },
         onError: (errors) => {
             toast.add({
@@ -352,8 +360,63 @@ const saveRegistration = async () => {
     })
 }
 
+const captureForReview = async () => {
+    if (isCapturing.value || isReviewingCapture.value || isSubmitting.value)
+        return
+
+    isCapturing.value = true
+
+    const duplicate = await findDuplicateFace()
+    if (duplicate) {
+        toast.add({
+            severity: 'error',
+            summary: 'Face Registration',
+            detail: `This face is already registered to ${employeeName(duplicate)}.`,
+            life: 6000,
+        })
+        statusText.value = 'Duplicate registered face detected.'
+        isCapturing.value = false
+        return
+    }
+
+    const image = captureBlob()
+    if (!image) {
+        toast.add({
+            severity: 'error',
+            summary: 'Camera',
+            detail: 'Camera image is not ready.',
+            life: 5000,
+        })
+        isCapturing.value = false
+        return
+    }
+
+    capturedImage.value = image
+    isReviewingCapture.value = true
+    isCapturing.value = false
+    statusText.value = 'Review the captured face image.'
+
+    if (scanInterval) {
+        clearInterval(scanInterval)
+        scanInterval = null
+    }
+}
+
+const retakeRegistration = () => {
+    capturedImage.value = null
+    capturedPreview.value = ''
+    isReviewingCapture.value = false
+    isCapturing.value = false
+    statusText.value = 'Center one face in the camera.'
+    startScanLoop()
+}
+
 watch(selectedEmployeeId, () => {
     capturedPreview.value = ''
+    capturedImage.value = null
+    isReviewingCapture.value = false
+    isCapturing.value = false
+    startScanLoop()
 })
 
 onMounted(async () => {
@@ -412,18 +475,61 @@ onUnmounted(() => {
                     autoplay
                     muted
                     playsinline
-                    class="h-full w-full scale-x-[-1] object-cover"
+                    class="h-full w-full object-cover"
                     :class="{
-                        'opacity-100': isCameraReady,
-                        'opacity-0': !isCameraReady,
+                        'opacity-100': isCameraReady && !isReviewingCapture,
+                        'opacity-0': !isCameraReady || isReviewingCapture,
                     }"
                 />
 
                 <canvas
+                    v-show="!isReviewingCapture"
                     ref="overlayRef"
-                    class="absolute inset-0 h-full w-full scale-x-[-1]"
+                    class="absolute inset-0 h-full w-full"
                 />
                 <canvas ref="captureCanvasRef" class="hidden" />
+
+                <div
+                    v-if="isReviewingCapture"
+                    class="absolute inset-0 flex flex-col bg-brand-stroke"
+                >
+                    <div
+                        class="flex items-center justify-between border-b border-white/10 px-5 py-4"
+                    >
+                        <div>
+                            <p
+                                class="text-xs font-black uppercase tracking-wide text-brand-accent"
+                            >
+                                Captured
+                            </p>
+                            <p class="text-sm font-bold text-brand-headline">
+                                Review this photo before saving
+                            </p>
+                        </div>
+                        <div
+                            class="rounded-full bg-green-500/20 px-3 py-1 text-xs font-black text-green-200"
+                        >
+                            Clear face
+                        </div>
+                    </div>
+
+                    <div
+                        class="flex min-h-0 flex-1 items-center justify-center p-6"
+                    >
+                        <img
+                            :src="capturedPreview"
+                            alt="Captured face preview"
+                            class="max-h-full max-w-full rounded-2xl border-2 border-brand-headline bg-white object-contain shadow-2xl"
+                        />
+                    </div>
+
+                    <div
+                        class="border-t border-white/10 bg-black/30 px-5 py-3 text-center text-sm font-bold text-brand-headline/80"
+                    >
+                        Save this image if the face is clear, centered, and
+                        unobstructed.
+                    </div>
+                </div>
 
                 <div
                     class="absolute left-4 top-4 flex items-center gap-2 rounded-full border border-brand-stroke bg-brand-card px-4 py-2"
@@ -534,15 +640,41 @@ onUnmounted(() => {
                     </div>
                 </div>
 
-                <button
-                    type="button"
-                    class="mb-4 flex w-full items-center justify-center gap-2 rounded-2xl border-2 border-brand-stroke bg-brand-accent px-4 py-4 text-sm font-black text-brand-stroke shadow-[4px_4px_0px_0px_#001e1d] disabled:cursor-not-allowed disabled:bg-white disabled:opacity-60 active:translate-x-1 active:translate-y-1 active:shadow-none"
-                    :disabled="!canSave"
-                    @click="saveRegistration"
+                <div
+                    v-if="isReviewingCapture"
+                    class="mb-5 rounded-2xl border-2 border-green-700 bg-green-50 p-4 text-green-900"
                 >
-                    <Save class="h-5 w-5" />
-                    {{ isSubmitting ? 'Saving...' : 'Save Face' }}
-                </button>
+                    <p class="text-sm font-black">Ready to save?</p>
+                    <p class="mt-1 text-xs font-bold">
+                        Retake if the photo is blurry, cropped badly, or the
+                        employee is not looking straight.
+                    </p>
+                </div>
+
+                <div
+                    v-if="isReviewingCapture"
+                    class="mb-4 grid grid-cols-2 gap-3"
+                >
+                    <button
+                        type="button"
+                        class="flex w-full items-center justify-center gap-2 rounded-2xl border-2 border-brand-stroke bg-white px-4 py-4 text-sm font-black text-brand-stroke shadow-[4px_4px_0px_0px_#001e1d] disabled:cursor-not-allowed disabled:opacity-60 active:translate-x-1 active:translate-y-1 active:shadow-none"
+                        :disabled="isSubmitting"
+                        @click="retakeRegistration"
+                    >
+                        <RotateCcw class="h-5 w-5" />
+                        Retake Photo
+                    </button>
+
+                    <button
+                        type="button"
+                        class="flex w-full items-center justify-center gap-2 rounded-2xl border-2 border-brand-stroke bg-brand-accent px-4 py-4 text-sm font-black text-brand-stroke shadow-[4px_4px_0px_0px_#001e1d] disabled:cursor-not-allowed disabled:bg-white disabled:opacity-60 active:translate-x-1 active:translate-y-1 active:shadow-none"
+                        :disabled="!canSave"
+                        @click="saveRegistration"
+                    >
+                        <Save class="h-5 w-5" />
+                        {{ isSubmitting ? 'Saving...' : 'Save Photo' }}
+                    </button>
+                </div>
 
                 <Link
                     href="/face"

@@ -55,9 +55,8 @@ class EmployeeForm
                     Wizard\Step::make('RFID')
                         ->schema([
                             TextInput::make('rfid_uid')
-                                ->label('RFID UID')
-                                ->numeric()
-                                ->maxLength(255)
+                                ->label('RFID UIDs')
+                                ->rules(['numeric', 'min:1'])
                                 ->autofocus()
                                 ->unique(ignoreRecord: true)
                                 ->helperText('Used for RFID attendance and timeclock unlock.'),

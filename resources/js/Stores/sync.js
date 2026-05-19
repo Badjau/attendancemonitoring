@@ -326,6 +326,14 @@ const syncApi = {
 
         return flushPromise
     },
+
+    async getQueuedAttendances() {
+        return sortOldestFirst(await getAllRecords())
+    },
+
+    async deleteQueuedAttendance(offlineId) {
+        await deleteRecord(offlineId)
+    },
 }
 
 export const useSyncStore = () => {

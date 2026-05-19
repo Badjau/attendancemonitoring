@@ -17,6 +17,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import { router, usePage } from '@inertiajs/vue3'
 import { useToast } from 'primevue'
 import { useGeolocator } from '@/Composables/useGeolocator.js'
+import { mapFaceBoxToObjectCover } from '@/Utils/faceOverlay.js'
 
 type AttendanceAction = 'time-in' | 'time-out'
 
@@ -360,7 +361,6 @@ const recognizeFace = async () => {
         .withFaceDescriptors()
 
     recognitionCount.value = detections.length
-    const resizedDetections = faceapi.resizeResults(detections, displaySize)
     const context = canvas.getContext('2d')
     context?.clearRect(0, 0, canvas.width, canvas.height)
 
@@ -372,7 +372,7 @@ const recognizeFace = async () => {
 
     let bestEmployee: FaceEmployee | null = null
 
-    resizedDetections.forEach((detection, index) => {
+    detections.forEach((detection, index) => {
         const result = faceMatcher?.findBestMatch(detections[index].descriptor)
         const employee =
             props.employees.find(
@@ -380,11 +380,16 @@ const recognizeFace = async () => {
             ) ?? null
         const label = employee ? employeeName(employee) : 'Unknown'
 
-        const drawBox = new faceapi.draw.DrawBox(detection.detection.box, {
-            label: result ? `${label} (${result.distance.toFixed(2)})` : label,
-            boxColor: employee ? '#f9bc60' : '#e16162',
-            lineWidth: 3,
-        })
+        const drawBox = new faceapi.draw.DrawBox(
+            mapFaceBoxToObjectCover(detection.detection.box, video),
+            {
+                label: result
+                    ? `${label} (${result.distance.toFixed(2)})`
+                    : label,
+                boxColor: employee ? '#f9bc60' : '#e16162',
+                lineWidth: 3,
+            },
+        )
 
         drawBox.draw(canvas)
 
@@ -478,7 +483,7 @@ onUnmounted(() => {
                     autoplay
                     muted
                     playsinline
-                    class="h-full w-full scale-x-[-1] object-cover"
+                    class="h-full w-full object-cover"
                     :class="{
                         'opacity-100': isCameraReady,
                         'opacity-0': !isCameraReady,
@@ -487,7 +492,7 @@ onUnmounted(() => {
 
                 <canvas
                     ref="overlayRef"
-                    class="absolute inset-0 h-full w-full scale-x-[-1]"
+                    class="absolute inset-0 h-full w-full"
                 />
                 <canvas ref="captureCanvasRef" class="hidden" />
 

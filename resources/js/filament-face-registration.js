@@ -1,4 +1,8 @@
 import * as faceapi from 'face-api.js'
+import {
+    mapFaceBoxToObjectCover,
+    mapFaceLandmarksToObjectCover,
+} from '@/Utils/faceOverlay.js'
 
 window.faceRegistration = ({ registerUrl, existingFaces = [] }) => ({
     video: null,
@@ -15,6 +19,9 @@ window.faceRegistration = ({ registerUrl, existingFaces = [] }) => ({
     faceInOval: false,
     faceClear: false,
     capturedPreview: '',
+    capturedBlob: null,
+    isReviewingCapture: false,
+    isCapturing: false,
     message: '',
     success: false,
     existingDescriptors: [],
@@ -30,6 +37,8 @@ window.faceRegistration = ({ registerUrl, existingFaces = [] }) => ({
             this.faceCount === 1 &&
             this.faceInOval &&
             this.faceClear &&
+            this.isReviewingCapture &&
+            this.capturedBlob &&
             !this.isSubmitting &&
             this.isCameraReady &&
             this.isModelReady
@@ -444,7 +453,10 @@ window.faceRegistration = ({ registerUrl, existingFaces = [] }) => ({
             !this.video ||
             !this.overlay ||
             !this.isCameraReady ||
-            !this.isModelReady
+            !this.isModelReady ||
+            this.isReviewingCapture ||
+            this.isCapturing ||
+            this.isSubmitting
         )
             return
 
@@ -469,10 +481,16 @@ window.faceRegistration = ({ registerUrl, existingFaces = [] }) => ({
 
         const resizedDetections = faceapi.resizeResults(detections, displaySize)
         const oval = this.ovalBounds(displaySize.width, displaySize.height)
+        const detectionBox = detections.length
+            ? mapFaceBoxToObjectCover(detections[0].detection.box, this.video)
+            : null
+        const detectionLandmarks = detections.length
+            ? mapFaceLandmarksToObjectCover(detections[0].landmarks, this.video)
+            : null
         this.faceInOval =
             detections.length === 1 &&
-            this.isBoxInsideOval(resizedDetections[0].detection.box, oval) &&
-            this.areLandmarksInsideOval(resizedDetections[0].landmarks, oval)
+            this.isBoxInsideOval(detectionBox, oval) &&
+            this.areLandmarksInsideOval(detectionLandmarks, oval)
         this.faceClear = false
 
         if (!detections.length) {
@@ -501,7 +519,14 @@ window.faceRegistration = ({ registerUrl, existingFaces = [] }) => ({
         }
 
         this.faceClear = true
-        this.statusText = 'Face clear. Ready to save.'
+        this.statusText = 'Face clear. Capturing for review...'
+        this.prepareCaptureForReview().catch((error) => {
+            console.error('Unable to prepare face capture.', error)
+            this.statusText = 'Unable to capture face for review.'
+            this.message = 'Unable to capture face for review.'
+            this.success = false
+            this.isCapturing = false
+        })
     },
 
     captureBlob() {
@@ -591,19 +616,23 @@ window.faceRegistration = ({ registerUrl, existingFaces = [] }) => ({
         return bestMatch
     },
 
-    async save() {
+    async prepareCaptureForReview() {
         if (this.faceCount !== 1 || !this.faceInOval || !this.faceClear) {
             this.message =
-                'Center one clear, uncovered face inside the oval before saving.'
+                'Center one clear, uncovered face inside the oval before capturing.'
             this.success = false
             return
         }
+
+        this.isCapturing = true
+        this.message = ''
 
         const duplicate = await this.findDuplicateFace()
         if (duplicate) {
             this.message = `This face is already registered to ${duplicate.name} (${duplicate.employeeId}).`
             this.success = false
             this.statusText = 'Duplicate registered face detected.'
+            this.isCapturing = false
             return
         }
 
@@ -611,13 +640,42 @@ window.faceRegistration = ({ registerUrl, existingFaces = [] }) => ({
         if (!image) {
             this.message = 'Camera image is not ready.'
             this.success = false
+            this.isCapturing = false
+            return
+        }
+
+        this.capturedBlob = image
+        this.isReviewingCapture = true
+        this.isCapturing = false
+        this.statusText = 'Review the captured face image.'
+        this.message = 'Save this image or retake if it is not clear.'
+        this.success = false
+        this.clearScanLoop()
+    },
+
+    retake() {
+        this.capturedPreview = ''
+        this.capturedBlob = null
+        this.isReviewingCapture = false
+        this.isCapturing = false
+        this.message = ''
+        this.success = false
+        this.faceClear = false
+        this.statusText = 'Center your face inside the oval.'
+        this.startScanLoop()
+    },
+
+    async save() {
+        if (!this.capturedBlob) {
+            this.message = 'Capture a face image before saving.'
+            this.success = false
             return
         }
 
         const formData = new FormData()
         formData.append(
             'face-image',
-            image,
+            this.capturedBlob,
             `face_registration_${Date.now()}.jpg`,
         )
 
@@ -653,6 +711,8 @@ window.faceRegistration = ({ registerUrl, existingFaces = [] }) => ({
             this.success = true
             this.message = payload.message || 'Face registered successfully.'
             this.statusText = 'Face saved.'
+            this.capturedBlob = null
+            this.isReviewingCapture = false
         } catch (error) {
             this.success = false
             this.message =

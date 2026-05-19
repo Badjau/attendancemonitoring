@@ -7,6 +7,7 @@ use App\Http\Controllers\FaceController;
 use App\Http\Controllers\HomeController;
 use App\Http\Controllers\TimeclockUnlockController;
 use Illuminate\Support\Facades\Route;
+use Inertia\Inertia;
 
 Route::controller(TimeclockUnlockController::class)
     ->prefix('unlock')
@@ -17,9 +18,15 @@ Route::controller(TimeclockUnlockController::class)
         Route::post('/lock', 'destroy')->name('lock');
     });
 
+Route::get('/face', [FaceController::class, 'index'])->name('face');
+
 Route::get('/', [HomeController::class, 'home'])
     ->middleware('timeclock.unlocked')
     ->name('home');
+
+Route::get('/offline-attendance', fn () => Inertia::render('OfflineAttendance/Index'))
+    ->middleware('timeclock.unlocked')
+    ->name('offline-attendance.index');
 
 // ROUTE FOR ANNOUNCEMENT
 Route::controller(AnnouncementController::class)
