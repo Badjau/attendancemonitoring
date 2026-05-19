@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import {Head} from '@inertiajs/vue3';
-import FeedAndStaff from "@/Components/Home/FeedAndStaff.vue";
-import PresentToday from "@/Components/Home/PresentToday.vue";
-import CameraCard from "@/Components/Home/CameraCard.vue";
-import GreetingsCard from "@/Components/Home/GreetingsCard.vue";
-import Toast from "@/Components/Toast.vue";
+import { Head } from '@inertiajs/vue3'
+import FeedAndStaff from '@/Components/Home/FeedAndStaff.vue'
+import PresentToday from '@/Components/Home/PresentToday.vue'
+import CameraCard from '@/Components/Home/CameraCard.vue'
+import GreetingsCard from '@/Components/Home/GreetingsCard.vue'
+import Toast from '@/Components/Toast.vue'
 
 const props = defineProps<{
     attendanceToday: any
@@ -17,12 +17,11 @@ const props = defineProps<{
         time_out_start: string
         time_out_end: string
     }
-}>();
-
+}>()
 </script>
 
 <template>
-    <Head title="Home"/>
+    <Head title="Home" />
 
     <Toast />
 
@@ -57,11 +56,11 @@ const props = defineProps<{
                 />
 
                 <!-- Greetings -->
-                <GreetingsCard/>
+                <GreetingsCard />
             </section>
 
             <!-- ================= 3. LEFT COLUMN: Present Today ================= -->
-            <PresentToday :attendance-today="props.attendanceToday"/>
+            <PresentToday :attendance-today="props.attendanceToday" />
         </main>
     </div>
 </template>

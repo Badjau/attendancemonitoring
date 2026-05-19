@@ -42,12 +42,23 @@ class AttendanceController extends Controller
         }
     }
 
-    public function recordTimeIn(Request $request): RedirectResponse
+    public function recordTimeIn(Request $request): RedirectResponse|JsonResponse
     {
         try {
             $attendance = $this->attendanceService->recordAttendance($request);
             $attendance->load('employee');
             $employee = $attendance->employee;
+
+            if ($request->expectsJson()) {
+                return response()->json([
+                    'message' => 'Attendance recorded successfully.',
+                    'greeting' => [
+                        'first_name' => $employee->first_name,
+                        'is_birthday' => $employee->date_of_birth?->isBirthday() ?? false,
+                        'attendance_type' => $request->attendance_type,
+                    ],
+                ]);
+            }
 
             return redirect()->back()
                 ->with('success', 'Attendance recorded successfully.')
@@ -57,9 +68,22 @@ class AttendanceController extends Controller
                     'attendance_type' => $request->attendance_type,
                 ]);
         } catch (ValidationException $e) {
+            if ($request->expectsJson()) {
+                return response()->json([
+                    'message' => collect($e->errors())->flatten()->first(),
+                    'errors' => $e->errors(),
+                ], 422);
+            }
+
             return redirect()->back()->withErrors($e->errors());
         } catch (\Exception $e) {
             Log::info('error in recording the attendance: '.$e->getMessage());
+
+            if ($request->expectsJson()) {
+                return response()->json([
+                    'message' => $e->getMessage(),
+                ], 422);
+            }
 
             return redirect()->back()->with('error', $e->getMessage());
         }
