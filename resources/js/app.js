@@ -6,7 +6,7 @@ import { resolvePageComponent } from 'laravel-vite-plugin/inertia-helpers'
 import PrimeVue from 'primevue/config'
 import ToastService from 'primevue/toastservice'
 
-const appName = import.meta.env.VITE_APP_NAME || "FoodCosting";
+const appName = import.meta.env.VITE_APP_NAME || 'FoodCosting'
 
 createInertiaApp({
     title: (title) => (title ? `${title} - ${appName}` : `${appName}`),

@@ -610,7 +610,6 @@ const captureAttendanceImage = (
             life: 5000,
         })
 
-        console.log('Camera not ready. Please allow camera access.')
         return null
     }
 
@@ -894,7 +893,7 @@ const submitRFIDAttendance = async (rfid: any) => {
     setTimeout(() => ensureRFIDFocus(), 50)
 
     if (!scannedRfid) {
-        console.log('No RFID data provided:', rfid)
+        console.error('No RFID data provided:', rfid)
         return
     }
 
@@ -902,16 +901,13 @@ const submitRFIDAttendance = async (rfid: any) => {
 
     const now = Date.now()
     if (now - lastScannedTime.value < SCAN_COOLDOWN_MS) {
-        console.log('Scan cooldown active, ignoring scan')
+        console.error('Scan cooldown active, ignoring scan')
         return
     }
     lastScannedTime.value = now
 
-    console.log('Processing RFID scan:', scannedRfid)
-
     try {
         isLoading.value = true
-        console.log('Verifying RFID attendance...')
         await verifyEmployeeFaceAndSubmit(scannedRfid, 'rfid')
     } catch (e) {
         console.error('Error submitting RFID attendance:', e)
@@ -941,7 +937,6 @@ const submitManualAttendance = async () => {
 
     try {
         isLoading.value = true
-        console.log('Verifying keypad attendance...')
         await verifyEmployeeFaceAndSubmit(password, 'keypad')
         employeePassword.value = ''
         hasTypedEmployeePassword.value = false
