@@ -68,6 +68,7 @@ const csrfToken = () =>
  * @property {string} offlineId
  * @property {string} occurredAt
  * @property {string} employeeIdentifier
+ * @property {string} [employeeName]
  * @property {string} attendanceMethod
  * @property {string} attendanceType
  * @property {number} latitude

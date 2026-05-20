@@ -19,8 +19,18 @@
     --color-brand-tertiary: #e16162;
 }
 
+@font-face {
+    font-family: 'Mona Sans';
+    font-style: normal;
+    src: url('../../public/fonts/public_fonts/mona_sans/MonaSans-VariableFont_wdth,wght.ttf')
+}
+
 body {
     background-color: #004643;
     color: #abd1c6;
     font-family: "Instrument Sans", sans-serif;
+}
+
+.font-mona-sans {
+    font-family: 'Mona Sans', sans-serif;
 }

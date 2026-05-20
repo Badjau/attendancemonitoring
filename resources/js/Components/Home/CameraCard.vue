@@ -877,7 +877,12 @@ const verifyEmployeeFaceAndSubmit = async (
         return
     }
 
-    await submitAttendance(employee.employee_id, image, method)
+    await submitAttendance(
+        employee.employee_id,
+        image,
+        method,
+        employeeFullName(employee),
+    )
 }
 
 const submitRFIDAttendance = async (rfid: any) => {
@@ -982,7 +987,12 @@ const submitFaceAttendance = async () => {
             return
         }
 
-        await submitAttendance(matchedFace.employee.employee_id, image, 'face')
+        await submitAttendance(
+            matchedFace.employee.employee_id,
+            image,
+            'face',
+            employeeFullName(matchedFace.employee),
+        )
     } catch (error) {
         console.error('Error submitting face attendance:', error)
         toast.add({
@@ -1094,6 +1104,7 @@ const submitAttendance = async (
     employeeIdentifier: string,
     image: string,
     method: AttendanceMethod,
+    employeeName?: string,
 ): Promise<void> => {
     const attendanceAction = attendanceType.value || inferredAttendanceType()
 
@@ -1118,6 +1129,7 @@ const submitAttendance = async (
         offlineId: createOfflineId(),
         occurredAt: new Date().toISOString(),
         employeeIdentifier,
+        employeeName: employeeName || employeeIdentifier,
         attendanceMethod: method,
         attendanceType: attendanceAction,
         latitude: coords.value.latitude,

@@ -4,9 +4,8 @@ import { onMounted, onUnmounted, ref } from 'vue'
 import {
     ArrowLeft,
     CalendarClock,
-    MapPin,
+    Download,
     RefreshCw,
-    Trash2,
     Wifi,
     WifiOff,
 } from '@lucide/vue'
@@ -17,6 +16,7 @@ type OfflineAttendance = {
     offlineId: string
     occurredAt: string
     employeeIdentifier: string
+    employeeName?: string
     attendanceMethod: string
     attendanceType: string
     latitude: number
@@ -58,6 +58,56 @@ const formatType = (value?: string) =>
               .join(' ')
         : '-'
 
+const csvValue = (value: unknown) => {
+    const normalized = String(value ?? '').replace(/\r?\n|\r/g, ' ')
+
+    return `"${normalized.replace(/"/g, '""')}"`
+}
+
+const exportCsv = () => {
+    if (!records.value.length) return
+
+    const headers = [
+        'Employee Name',
+        'Employee ID',
+        'Date / Time',
+        'Attendance Type',
+        'Method',
+        'Latitude',
+        'Longitude',
+    ]
+
+    const rows = records.value.map((record) => [
+        record.employeeName || '',
+        record.employeeIdentifier,
+        formatDateTime(record.occurredAt),
+        formatType(record.attendanceType),
+        formatType(record.attendanceMethod),
+        record.latitude,
+        record.longitude,
+    ])
+
+    const csv = [headers, ...rows]
+        .map((row) => row.map(csvValue).join(','))
+        .join('\r\n')
+    const blob = new Blob([`\uFEFF${csv}`], {
+        type: 'text/csv;charset=utf-8;',
+    })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    const timestamp = new Date()
+        .toISOString()
+        .slice(0, 19)
+        .replace(/[:T]/g, '-')
+
+    link.href = url
+    link.download = `offline-attendance-${timestamp}.csv`
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(url)
+}
+
 const releaseImageUrls = () => {
     records.value.forEach((record) => {
         if (record.imageUrl) URL.revokeObjectURL(record.imageUrl)
@@ -84,15 +134,6 @@ const syncNow = async () => {
     isSyncing.value = false
 }
 
-const deleteRecord = async (record: OfflineAttendance) => {
-    if (!confirm('Remove this offline attendance record from this device?')) {
-        return
-    }
-
-    await syncStore.deleteQueuedAttendance(record.offlineId)
-    await loadRecords()
-}
-
 const updateOnlineStatus = () => {
     isOnline.value = navigator.onLine
 }
@@ -115,7 +156,7 @@ onUnmounted(() => {
 
     <Toast />
 
-    <main class="min-h-screen p-4 md:p-8">
+    <main class="font-mona-sans min-h-screen bg-slate-50 p-4 md:p-8">
         <section class="mx-auto max-w-7xl">
             <div
                 class="mb-6 flex flex-col gap-4 md:flex-row md:items-center md:justify-between"
@@ -123,23 +164,22 @@ onUnmounted(() => {
                 <div>
                     <Link
                         href="/"
-                        class="mb-3 inline-flex items-center gap-2 text-sm font-black uppercase text-brand-bg hover:text-brand-stroke"
+                        class="mb-3 inline-flex items-center gap-2 text-sm font-semibold text-slate-600 hover:text-slate-950"
                     >
                         <ArrowLeft class="h-4 w-4" />
                         Back to timeclock
                     </Link>
-                    <h1 class="text-3xl font-black text-brand-stroke">
+                    <h1 class="text-2xl font-bold text-slate-950">
                         Offline Attendance
                     </h1>
-                    <p class="mt-1 text-sm font-bold text-brand-bg">
-                        These records are saved on this browser and will sync
-                        when the connection is available.
+                    <p class="mt-1 text-sm text-slate-600">
+                        Browser-saved attendance records waiting to sync.
                     </p>
                 </div>
 
                 <div class="flex flex-wrap items-center gap-3">
                     <div
-                        class="inline-flex items-center gap-2 rounded-full border-2 border-brand-stroke bg-brand-card px-4 py-2 text-sm font-black text-brand-stroke"
+                        class="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
                     >
                         <Wifi v-if="isOnline" class="h-4 w-4 text-green-600" />
                         <WifiOff v-else class="h-4 w-4 text-red-600" />
@@ -148,7 +188,17 @@ onUnmounted(() => {
 
                     <button
                         type="button"
-                        class="inline-flex items-center gap-2 rounded-2xl border-2 border-brand-stroke bg-brand-accent px-5 py-3 text-sm font-black text-brand-stroke shadow-[4px_4px_0px_0px_#001e1d] disabled:cursor-not-allowed disabled:bg-white disabled:opacity-60 active:translate-x-1 active:translate-y-1 active:shadow-none"
+                        class="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                        :disabled="!records.length"
+                        @click="exportCsv"
+                    >
+                        <Download class="h-4 w-4" />
+                        Export CSV
+                    </button>
+
+                    <button
+                        type="button"
+                        class="inline-flex items-center gap-2 rounded-lg bg-slate-950 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-slate-300"
                         :disabled="!isOnline || isSyncing || !records.length"
                         @click="syncNow"
                     >
@@ -161,183 +211,153 @@ onUnmounted(() => {
                 </div>
             </div>
 
-            <div class="mb-6 grid gap-4 md:grid-cols-3">
-                <div
-                    class="rounded-3xl border-2 border-brand-stroke bg-brand-card p-6 shadow-[6px_6px_0px_0px_#001e1d]"
+            <div class="mb-4 flex flex-wrap gap-2 text-sm text-slate-600">
+                <span
+                    class="rounded-lg border border-slate-200 bg-white px-3 py-2"
                 >
-                    <p class="text-xs font-black uppercase text-brand-bg">
-                        Pending Records
-                    </p>
-                    <p class="mt-2 text-4xl font-black text-brand-stroke">
-                        {{ records.length }}
-                    </p>
-                </div>
-                <div
-                    class="rounded-3xl border-2 border-brand-stroke bg-brand-card p-6 shadow-[6px_6px_0px_0px_#001e1d]"
+                    <strong class="text-slate-950">{{ records.length }}</strong>
+                    pending
+                </span>
+                <span
+                    class="rounded-lg border border-slate-200 bg-white px-3 py-2"
+                    >Stored on this device</span
                 >
-                    <p class="text-xs font-black uppercase text-brand-bg">
-                        Storage
-                    </p>
-                    <p class="mt-2 text-xl font-black text-brand-stroke">
-                        This device
-                    </p>
-                </div>
-                <div
-                    class="rounded-3xl border-2 border-brand-stroke bg-brand-card p-6 shadow-[6px_6px_0px_0px_#001e1d]"
+                <span
+                    class="rounded-lg border border-slate-200 bg-white px-3 py-2"
+                    >Oldest syncs first</span
                 >
-                    <p class="text-xs font-black uppercase text-brand-bg">
-                        Sync Order
-                    </p>
-                    <p class="mt-2 text-xl font-black text-brand-stroke">
-                        Oldest first
-                    </p>
-                </div>
             </div>
 
             <div
                 v-if="isLoading"
-                class="rounded-3xl border-2 border-brand-stroke bg-brand-card p-8 text-center text-brand-stroke"
+                class="rounded-xl border border-slate-200 bg-white p-8 text-center text-slate-600"
             >
                 Loading offline records...
             </div>
 
             <div
                 v-else-if="!records.length"
-                class="rounded-3xl border-2 border-brand-stroke bg-brand-card p-10 text-center shadow-[8px_8px_0px_0px_#001e1d]"
+                class="rounded-xl border border-slate-200 bg-white p-10 text-center"
             >
-                <CalendarClock class="mx-auto mb-4 h-12 w-12 text-brand-bg" />
-                <h2 class="text-2xl font-black text-brand-stroke">
+                <CalendarClock class="mx-auto mb-4 h-10 w-10 text-slate-400" />
+                <h2 class="text-xl font-semibold text-slate-950">
                     No offline attendance saved
                 </h2>
-                <p class="mt-2 text-sm font-bold text-brand-bg">
-                    When attendance is recorded offline, it will appear here
-                    until it syncs.
+                <p class="mt-2 text-sm text-slate-600">
+                    Offline records will appear here until they sync.
                 </p>
             </div>
 
-            <div v-else class="grid gap-5">
-                <article
-                    v-for="record in records"
-                    :key="record.offlineId"
-                    class="grid gap-4 rounded-3xl border-2 border-brand-stroke bg-brand-card p-5 shadow-[6px_6px_0px_0px_#001e1d] md:grid-cols-[180px_minmax(0,1fr)_auto]"
-                >
-                    <div
-                        class="overflow-hidden rounded-2xl border-2 border-brand-stroke bg-brand-stroke"
+            <div
+                v-else
+                class="overflow-hidden rounded-xl border border-slate-200 bg-white"
+            >
+                <div class="border-b border-slate-200 px-5 py-4">
+                    <h2 class="text-base font-semibold text-slate-950">
+                        Pending Records
+                    </h2>
+                    <p class="text-xs text-slate-500">
+                        Compact table view for HR review.
+                    </p>
+                </div>
+
+                <div class="overflow-x-auto">
+                    <table
+                        class="w-full min-w-280 border-collapse text-left text-sm"
                     >
-                        <img
-                            v-if="record.imageUrl"
-                            :src="record.imageUrl"
-                            :alt="`Offline attendance ${record.offlineId}`"
-                            class="aspect-square h-full w-full object-cover"
-                        />
-                        <div
-                            v-else
-                            class="flex aspect-square items-center justify-center text-sm font-bold text-brand-headline"
-                        >
-                            No image
-                        </div>
-                    </div>
-
-                    <div class="min-w-0">
-                        <div class="mb-3 flex flex-wrap items-center gap-2">
-                            <span
-                                class="rounded-full border border-brand-stroke bg-white px-3 py-1 text-xs font-black uppercase text-brand-stroke"
-                            >
-                                {{ formatType(record.attendanceType) }}
-                            </span>
-                            <span
-                                class="rounded-full border border-brand-stroke bg-white px-3 py-1 text-xs font-black uppercase text-brand-stroke"
-                            >
-                                {{ formatType(record.attendanceMethod) }}
-                            </span>
-                            <span
-                                class="rounded-full border px-3 py-1 text-xs font-black uppercase"
-                                :class="
-                                    record.locationSource === 'cached'
-                                        ? 'border-yellow-700 bg-yellow-50 text-yellow-800'
-                                        : 'border-green-700 bg-green-50 text-green-800'
-                                "
-                            >
-                                {{
-                                    record.locationSource === 'cached'
-                                        ? 'Cached GPS'
-                                        : 'Live GPS'
-                                }}
-                            </span>
-                        </div>
-
-                        <h2
-                            class="truncate text-xl font-black text-brand-stroke"
-                        >
-                            Employee: {{ record.employeeIdentifier }}
-                        </h2>
-
-                        <dl class="mt-4 grid gap-3 text-sm md:grid-cols-2">
-                            <div>
-                                <dt class="font-black uppercase text-brand-bg">
-                                    Occurred At
-                                </dt>
-                                <dd class="font-bold text-brand-stroke">
-                                    {{ formatDateTime(record.occurredAt) }}
-                                </dd>
-                            </div>
-                            <div>
-                                <dt class="font-black uppercase text-brand-bg">
-                                    Attempts
-                                </dt>
-                                <dd class="font-bold text-brand-stroke">
-                                    {{ record.attempts ?? 0 }}
-                                </dd>
-                            </div>
-                            <div class="md:col-span-2">
-                                <dt
-                                    class="flex items-center gap-1 font-black uppercase text-brand-bg"
-                                >
-                                    <MapPin class="h-4 w-4" />
+                        <thead class="bg-slate-100 text-xs text-slate-600">
+                            <tr>
+                                <th class="px-4 py-3 font-semibold uppercase">
+                                    Attendance Photo
+                                </th>
+                                <th class="px-4 py-3 font-semibold uppercase">
+                                    Employee
+                                </th>
+                                <th class="px-4 py-3 font-semibold uppercase">
+                                    Date / Time
+                                </th>
+                                <th class="px-4 py-3 font-semibold uppercase">
+                                    Type
+                                </th>
+                                <th class="px-4 py-3 font-semibold uppercase">
+                                    Method
+                                </th>
+                                <th class="px-4 py-3 font-semibold uppercase">
                                     Coordinates
-                                </dt>
-                                <dd class="font-bold text-brand-stroke">
-                                    {{ record.latitude }},
-                                    {{ record.longitude }}
-                                </dd>
-                            </div>
-                            <div v-if="record.location" class="md:col-span-2">
-                                <dt class="font-black uppercase text-brand-bg">
-                                    Resolved Address
-                                </dt>
-                                <dd class="font-bold text-brand-stroke">
-                                    {{ record.location }}
-                                </dd>
-                            </div>
-                            <div
-                                v-if="record.lastError"
-                                class="md:col-span-2 rounded-2xl border border-red-700 bg-red-50 p-3 text-red-800"
+                                </th>
+                            </tr>
+                        </thead>
+
+                        <tbody>
+                            <tr
+                                v-for="record in records"
+                                :key="record.offlineId"
+                                class="border-b border-slate-100 align-top last:border-b-0 hover:bg-slate-50"
                             >
-                                <dt class="font-black uppercase">Last Error</dt>
-                                <dd class="font-bold">
-                                    {{ record.lastError }}
-                                </dd>
-                            </div>
-                        </dl>
+                                <td class="px-4 py-3">
+                                    <img
+                                        v-if="record.imageUrl"
+                                        :src="record.imageUrl"
+                                        :alt="`Offline attendance ${record.offlineId}`"
+                                        class="h-16 w-16 rounded-lg object-cover"
+                                    />
+                                    <div
+                                        v-else
+                                        class="flex h-16 w-16 items-center justify-center rounded-lg bg-slate-100 text-xs text-slate-500"
+                                    >
+                                        No image
+                                    </div>
+                                </td>
 
-                        <p
-                            class="mt-4 break-all text-xs font-bold text-brand-bg"
-                        >
-                            Offline ID: {{ record.offlineId }}
-                        </p>
-                    </div>
+                                <td class="px-4 py-3">
+                                    <div class="font-semibold text-slate-950">
+                                        {{
+                                            record.employeeName ||
+                                            record.employeeIdentifier
+                                        }}
+                                    </div>
+                                    <div
+                                        v-if="record.employeeName"
+                                        class="mt-1 text-xs text-slate-500"
+                                    >
+                                        {{ record.employeeIdentifier }}
+                                    </div>
+                                </td>
 
-                    <div class="flex items-start justify-end">
-                        <button
-                            type="button"
-                            class="inline-flex items-center gap-2 rounded-2xl border-2 border-red-700 bg-red-50 px-4 py-3 text-sm font-black text-red-800 shadow-[3px_3px_0px_0px_#7f1d1d] active:translate-x-1 active:translate-y-1 active:shadow-none"
-                            @click="deleteRecord(record)"
-                        >
-                            <Trash2 class="h-4 w-4" />
-                            Remove
-                        </button>
-                    </div>
-                </article>
+                                <td
+                                    class="whitespace-nowrap px-4 py-3 text-slate-700"
+                                >
+                                    {{ formatDateTime(record.occurredAt) }}
+                                </td>
+
+                                <td class="px-4 py-3">
+                                    <span
+                                        class="inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold uppercase text-slate-700"
+                                    >
+                                        {{ formatType(record.attendanceType) }}
+                                    </span>
+                                </td>
+
+                                <td class="px-4 py-3">
+                                    <span
+                                        class="inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold uppercase text-slate-700"
+                                    >
+                                        {{
+                                            formatType(record.attendanceMethod)
+                                        }}
+                                    </span>
+                                </td>
+
+                                <td
+                                    class="px-4 py-3 font-mono text-xs text-slate-700"
+                                >
+                                    <div>{{ record.latitude }}</div>
+                                    <div>{{ record.longitude }}</div>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </section>
     </main>
