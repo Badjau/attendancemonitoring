@@ -14,6 +14,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useToast } from 'primevue'
 import { useGeolocator } from '@/Composables/useGeolocator.js'
 import { useSyncStore } from '@/Stores/sync.js'
+import { mapFaceBoxToObjectCover } from '@/Utils/faceOverlay.js'
 
 type AttendanceAction = 'time-in' | 'time-out'
 type AttendanceMethod = 'rfid' | 'keypad' | 'fingerprint' | 'face'
@@ -219,17 +220,21 @@ const drawFaceDetectorOverlay = async () => {
         .detectAllFaces(video, faceDetectorOptions)
         .withFaceLandmarks()
 
-    const resizedDetections = faceapi.resizeResults(detections, displaySize)
     const context = canvas.getContext('2d')
     context?.clearRect(0, 0, canvas.width, canvas.height)
 
-    resizedDetections.forEach((detection, index) => {
-        const drawBox = new faceapi.draw.DrawBox(detection.detection.box, {
-            label:
-                detections.length === 1 ? 'Face detected' : `Face ${index + 1}`,
-            boxColor: '#f9bc60',
-            lineWidth: 3,
-        })
+    detections.forEach((detection, index) => {
+        const drawBox = new faceapi.draw.DrawBox(
+            mapFaceBoxToObjectCover(detection.detection.box, video),
+            {
+                label:
+                    detections.length === 1
+                        ? 'Face detected'
+                        : `Face ${index + 1}`,
+                boxColor: '#f9bc60',
+                lineWidth: 3,
+            },
+        )
 
         drawBox.draw(canvas)
     })
@@ -605,7 +610,6 @@ const captureAttendanceImage = (
             life: 5000,
         })
 
-        console.log('Camera not ready. Please allow camera access.')
         return null
     }
 
@@ -872,7 +876,12 @@ const verifyEmployeeFaceAndSubmit = async (
         return
     }
 
-    await submitAttendance(employee.employee_id, image, method)
+    await submitAttendance(
+        employee.employee_id,
+        image,
+        method,
+        employeeFullName(employee),
+    )
 }
 
 const submitRFIDAttendance = async (rfid: any) => {
@@ -884,7 +893,7 @@ const submitRFIDAttendance = async (rfid: any) => {
     setTimeout(() => ensureRFIDFocus(), 50)
 
     if (!scannedRfid) {
-        console.log('No RFID data provided:', rfid)
+        console.error('No RFID data provided:', rfid)
         return
     }
 
@@ -892,16 +901,13 @@ const submitRFIDAttendance = async (rfid: any) => {
 
     const now = Date.now()
     if (now - lastScannedTime.value < SCAN_COOLDOWN_MS) {
-        console.log('Scan cooldown active, ignoring scan')
+        console.error('Scan cooldown active, ignoring scan')
         return
     }
     lastScannedTime.value = now
 
-    console.log('Processing RFID scan:', scannedRfid)
-
     try {
         isLoading.value = true
-        console.log('Verifying RFID attendance...')
         await verifyEmployeeFaceAndSubmit(scannedRfid, 'rfid')
     } catch (e) {
         console.error('Error submitting RFID attendance:', e)
@@ -931,7 +937,6 @@ const submitManualAttendance = async () => {
 
     try {
         isLoading.value = true
-        console.log('Verifying keypad attendance...')
         await verifyEmployeeFaceAndSubmit(password, 'keypad')
         employeePassword.value = ''
         hasTypedEmployeePassword.value = false
@@ -977,7 +982,12 @@ const submitFaceAttendance = async () => {
             return
         }
 
-        await submitAttendance(matchedFace.employee.employee_id, image, 'face')
+        await submitAttendance(
+            matchedFace.employee.employee_id,
+            image,
+            'face',
+            employeeFullName(matchedFace.employee),
+        )
     } catch (error) {
         console.error('Error submitting face attendance:', error)
         toast.add({
@@ -1089,6 +1099,7 @@ const submitAttendance = async (
     employeeIdentifier: string,
     image: string,
     method: AttendanceMethod,
+    employeeName?: string,
 ): Promise<void> => {
     const attendanceAction = attendanceType.value || inferredAttendanceType()
 
@@ -1113,6 +1124,7 @@ const submitAttendance = async (
         offlineId: createOfflineId(),
         occurredAt: new Date().toISOString(),
         employeeIdentifier,
+        employeeName: employeeName || employeeIdentifier,
         attendanceMethod: method,
         attendanceType: attendanceAction,
         latitude: coords.value.latitude,
@@ -1200,7 +1212,7 @@ onUnmounted(() => {
 <template>
     <div
         v-if="showCamera"
-        class="bg-brand-card rounded-[2.5rem] p-4 shadow-[12px_12px_0px_0px_#001e1d] border-2 border-brand-stroke relative overflow-hidden flex flex-col h-65 sm:h-80 lg:h-80"
+        class="bg-brand-card rounded-[2.5rem] p-4 shadow-[12px_12px_0px_0px_#001e1d] border-2 border-brand-stroke relative overflow-hidden flex flex-col"
     >
         <div
             class="absolute top-8 left-8 z-10 bg-brand-stroke rounded-full px-4 py-2 flex items-center gap-2 shadow-lg"
@@ -1238,7 +1250,7 @@ onUnmounted(() => {
         </div>
 
         <div
-            class="w-full h-full rounded-4xl bg-brand-stroke overflow-hidden relative flex items-center justify-center"
+            class="relative aspect-video w-full overflow-hidden rounded-4xl border-2 border-brand-stroke bg-brand-stroke"
         >
             <!--            <div-->
             <!--                v-if="isLoading"-->
@@ -1255,13 +1267,13 @@ onUnmounted(() => {
                 autoplay
                 playsinline
                 muted
-                class="home-camera-video h-full w-full rounded-2xl border-2 border-brand-stroke object-cover"
+                class="home-camera-video h-full w-full object-cover"
                 :class="{ loaded: isVideoReady }"
             />
 
             <canvas
                 ref="overlayRef"
-                class="absolute inset-0 h-full w-full rounded-2xl pointer-events-none"
+                class="absolute inset-0 h-full w-full pointer-events-none"
             />
             <canvas ref="canvasRef" style="display: none" />
 

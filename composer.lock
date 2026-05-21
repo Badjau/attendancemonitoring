@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "b481a65c13af4d9e48ebf217d1f89765",
+    "content-hash": "fc7fe3ccf8b46179ca1fb333138475f8",
     "packages": [
         {
             "name": "anourvalar/eloquent-serialize",
@@ -280,6 +280,68 @@
                 }
             ],
             "time": "2026-02-10T14:33:43+00:00"
+        },
+        {
+            "name": "carbon-cli/carbon-cli",
+            "version": "1.4.0",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/kylekatarnls/carbon-cli.git",
+                "reference": "737d80d7a76a3bde5876c71c29704a6ce4714f1d"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/kylekatarnls/carbon-cli/zipball/737d80d7a76a3bde5876c71c29704a6ce4714f1d",
+                "reference": "737d80d7a76a3bde5876c71c29704a6ce4714f1d",
+                "shasum": ""
+            },
+            "require": {
+                "nesbot/carbon": "^2.72.6 || ^3.0",
+                "php": "^7.1 || ^8.0",
+                "simple-cli/simple-cli": "^1.1"
+            },
+            "require-dev": {
+                "phpunit/phpunit": "^7.5.20 || ^8.5.41 || ^9.6.22"
+            },
+            "bin": [
+                "bin/carbon"
+            ],
+            "type": "library",
+            "autoload": {
+                "psr-4": {
+                    "Carbon\\": "src/Carbon/"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "authors": [
+                {
+                    "name": "kylekatarnls",
+                    "homepage": "http://github.com/kylekatarnls"
+                }
+            ],
+            "description": "CLI tool for Carbon",
+            "support": {
+                "issues": "https://github.com/kylekatarnls/carbon-cli/issues",
+                "source": "https://github.com/kylekatarnls/carbon-cli/tree/1.4.0"
+            },
+            "funding": [
+                {
+                    "url": "https://github.com/kylekatarnls",
+                    "type": "github"
+                },
+                {
+                    "url": "https://opencollective.com/Carbon",
+                    "type": "open_collective"
+                },
+                {
+                    "url": "https://tidelift.com/funding/github/packagist/nesbot/carbon",
+                    "type": "tidelift"
+                }
+            ],
+            "time": "2026-03-07T09:12:05+00:00"
         },
         {
             "name": "carbonphp/carbon-doctrine-types",
@@ -6391,6 +6453,64 @@
                 }
             ],
             "time": "2022-12-17T21:53:22+00:00"
+        },
+        {
+            "name": "simple-cli/simple-cli",
+            "version": "1.6.0",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/kylekatarnls/simple-cli.git",
+                "reference": "47055c9a172ab032e33a498001d2978c9800fd59"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/kylekatarnls/simple-cli/zipball/47055c9a172ab032e33a498001d2978c9800fd59",
+                "reference": "47055c9a172ab032e33a498001d2978c9800fd59",
+                "shasum": ""
+            },
+            "require": {
+                "php": "^7.1 || ^8.0"
+            },
+            "require-dev": {
+                "friendsofphp/php-cs-fixer": "^2.15.0",
+                "phan/phan": "^2.3",
+                "phpmd/phpmd": "dev-master",
+                "phpstan/phpstan": "^0.12",
+                "phpunit/phpunit": "^7",
+                "squizlabs/php_codesniffer": "^3.0",
+                "vimeo/psalm": "^3.6"
+            },
+            "bin": [
+                "bin/simple-cli"
+            ],
+            "type": "library",
+            "autoload": {
+                "psr-4": {
+                    "SimpleCli\\": "src/SimpleCli/"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "authors": [
+                {
+                    "name": "KyleK",
+                    "email": "kylekatarnls@gmail.com"
+                }
+            ],
+            "description": "A simple command line framework",
+            "support": {
+                "issues": "https://github.com/kylekatarnls/simple-cli/issues",
+                "source": "https://github.com/kylekatarnls/simple-cli/tree/1.6.0"
+            },
+            "funding": [
+                {
+                    "url": "https://tidelift.com/funding/github/packagist/simple-cli/simple-cli",
+                    "type": "tidelift"
+                }
+            ],
+            "time": "2020-11-18T22:40:00+00:00"
         },
         {
             "name": "spatie/image",

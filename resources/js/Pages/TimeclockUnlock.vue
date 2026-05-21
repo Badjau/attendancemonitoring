@@ -110,7 +110,7 @@ const submitUnlock = async () => {
         errorText.value =
             method.value === 'rfid'
                 ? 'Scan an RFID card first.'
-                : 'Enter your unlock password first.'
+                : 'Enter your unlock PIN first.'
         return
     }
 
@@ -173,7 +173,7 @@ const onRfidKeydown = (event: KeyboardEvent) => {
 onMounted(async () => {
     try {
         await startCamera()
-        statusText.value = 'Enter password or scan RFID to unlock.'
+        statusText.value = 'Enter PIN or scan RFID to unlock.'
     } catch (error) {
         errorText.value =
             error instanceof Error ? error.message : 'Failed to start.'
@@ -232,7 +232,7 @@ onUnmounted(() => {
                         @click="switchMethod('keypad')"
                     >
                         <KeyRound class="h-4 w-4" />
-                        Password
+                        PIN
                     </button>
                     <button
                         type="button"
@@ -258,7 +258,7 @@ onUnmounted(() => {
                         name="timeclock-unlock-password"
                         autocomplete="new-password"
                         class="w-full rounded-2xl border-2 border-brand-stroke bg-white px-4 py-4 text-lg font-bold outline-none transition-shadow focus:shadow-[4px_4px_0px_0px_#001e1d]"
-                        placeholder="Enter unlock password"
+                        placeholder="Enter unlock PIN"
                     />
 
                     <button
