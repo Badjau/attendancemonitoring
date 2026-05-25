@@ -16,6 +16,7 @@ namespace ZKTecoBridge
     public class EmployeeDto
     {
         public string command_id { get; set; }
+        public int finger_index { get; set; }
         public int id { get; set; }
         public string employee_id { get; set; }
         public string name { get; set; }
@@ -64,6 +65,23 @@ namespace ZKTecoBridge
         public string location_source { get; set; }
         public double? latitude { get; set; }
         public double? longitude { get; set; }
+    }
+
+    public class ZktecoEnrollmentCommitCommand
+    {
+        public string command_id { get; set; }
+    }
+
+    public class PendingEnrollmentPayload
+    {
+        public string command_id { get; set; }
+        public EmployeeDto employee { get; set; }
+        public int employee_id { get; set; }
+        public int finger_index { get; set; }
+        public string template_base64 { get; set; }
+        public int template_size { get; set; }
+        public string device_serial { get; set; }
+        public string fingerprint_image_base64 { get; set; }
     }
 
     public class BridgeStatus

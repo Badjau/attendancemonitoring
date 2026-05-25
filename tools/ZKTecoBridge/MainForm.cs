@@ -44,6 +44,8 @@ namespace ZKTecoBridge
         private bool shouldStopLocalServer;
         private readonly EmployeeDto launchEnrollmentEmployee;
         private readonly ZktecoAttendanceCommand launchAttendanceCommand;
+        private EmployeeDto pendingEnrollmentEmployee;
+        private PendingEnrollmentPayload pendingEnrollmentPayload;
         private ZktecoAttendanceCommand pendingAttendanceCommand;
         private FingerprintTemplateDto pendingMatchedTemplate;
         private int pendingMatchedScore;
@@ -58,6 +60,8 @@ namespace ZKTecoBridge
         private TextBox logText;
         private Button searchButton;
         private Button enrollButton;
+        private Button scanAgainButton;
+        private Button submitButton;
         private Button syncButton;
         private Button stopButton;
 
@@ -66,9 +70,10 @@ namespace ZKTecoBridge
 
         public MainForm(string[] args)
         {
-            Text = "ZKTeco Fingerprint Bridge";
+            Text = "Fingerprint Bridge";
             Width = 940;
-            Height = 560;
+            Height = 640;
+            MinimumSize = new Size(940, 640);
             StartPosition = FormStartPosition.CenterScreen;
             launchEnrollmentEmployee = ParseLaunchEnrollmentEmployee(args);
             launchAttendanceCommand = ParseLaunchAttendanceCommand(args);
@@ -212,12 +217,18 @@ namespace ZKTecoBridge
             var buttons = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true };
             syncButton = new Button { Text = "Sync", Width = 90 };
             enrollButton = new Button { Text = "Enroll", Width = 90 };
+            scanAgainButton = new Button { Text = "Scan Again", Width = 100, Enabled = false };
+            submitButton = new Button { Text = "Submit", Width = 90, Enabled = false };
             stopButton = new Button { Text = "Stop", Width = 90 };
             syncButton.Click += async (sender, args) => await SyncTemplatesAsync();
             enrollButton.Click += (sender, args) => BeginEnrollment();
+            scanAgainButton.Click += (sender, args) => BeginEnrollment();
+            submitButton.Click += async (sender, args) => await ConfirmPendingEnrollmentAsync();
             stopButton.Click += (sender, args) => StopScanner();
             buttons.Controls.Add(syncButton);
             buttons.Controls.Add(enrollButton);
+            buttons.Controls.Add(scanAgainButton);
+            buttons.Controls.Add(submitButton);
             buttons.Controls.Add(stopButton);
             right.Controls.Add(buttons, 0, 4);
 
@@ -267,7 +278,7 @@ namespace ZKTecoBridge
             if (deviceCount <= 0)
             {
                 zkfp2.Terminate();
-                throw new InvalidOperationException("No ZKTeco fingerprint scanner connected.");
+                throw new InvalidOperationException("No fingerprint scanner connected.");
             }
 
             deviceHandle = zkfp2.OpenDevice(0);
@@ -384,22 +395,76 @@ namespace ZKTecoBridge
             string templateBase64 = TemplateToBase64(registeredTemplate, registeredTemplateSize);
             string imageBase64 = FingerprintImageBase64();
 
-            await PostJsonAsync("fingerprints/enroll", new
+            pendingEnrollmentEmployee = employee;
+            pendingEnrollmentPayload = new PendingEnrollmentPayload
             {
+                command_id = employee.command_id,
+                employee = employee,
                 employee_id = employee.id,
-                finger_index = 1,
+                finger_index = employee.finger_index <= 0 ? 1 : employee.finger_index,
                 template_base64 = templateBase64,
                 template_size = registeredTemplateSize,
                 device_serial = DeviceSerial(),
                 fingerprint_image_base64 = imageBase64,
-            });
+            };
 
             isEnrolling = false;
-            Log("Enrolled " + employee.employee_id + " successfully.");
-            SetBridgeStatus("success", "Fingerprint successfully Registered!", employee);
+            Log("Fingerprint captured for " + employee.employee_id + ". Waiting for web confirmation.");
+            SetBridgeStatus("captured", "Fingerprint captured. Review and submit to save.", employee);
+            SetStatus("Fingerprint captured. Click Submit to save or Scan Again to retry.");
+            SetEnrollmentConfirmationEnabled(true);
+        }
+
+        private async Task ConfirmPendingEnrollmentAsync()
+        {
+            if (pendingEnrollmentPayload == null || pendingEnrollmentEmployee == null)
+            {
+                SetStatus("No captured fingerprint is waiting for confirmation.");
+                return;
+            }
+
+            SetEnrollmentConfirmationEnabled(false);
+
+            try
+            {
+                await SavePendingEnrollmentAsync();
+                Hide();
+            }
+            catch (Exception ex)
+            {
+                Log("Unable to save fingerprint: " + ex.Message);
+                SetBridgeStatus("error", "Unable to save fingerprint: " + ex.Message, pendingEnrollmentEmployee);
+                SetStatus("Unable to save fingerprint.");
+                SetEnrollmentConfirmationEnabled(true);
+            }
+        }
+
+        private async Task SavePendingEnrollmentAsync()
+        {
+            if (pendingEnrollmentPayload == null || pendingEnrollmentEmployee == null)
+            {
+                throw new InvalidOperationException("No captured fingerprint is waiting for confirmation.");
+            }
+
+            await PostJsonAsync("fingerprints/enroll", new
+            {
+                employee_id = pendingEnrollmentPayload.employee_id,
+                finger_index = pendingEnrollmentPayload.finger_index,
+                template_base64 = pendingEnrollmentPayload.template_base64,
+                template_size = pendingEnrollmentPayload.template_size,
+                device_serial = pendingEnrollmentPayload.device_serial,
+                fingerprint_image_base64 = pendingEnrollmentPayload.fingerprint_image_base64,
+            });
+
+            var confirmedEmployee = pendingEnrollmentEmployee;
+            Log("Enrolled " + confirmedEmployee.employee_id + " successfully.");
+            SetBridgeStatus("success", "Fingerprint successfully Registered!", confirmedEmployee);
+            SetStatus("Fingerprint successfully registered.");
             await SyncTemplatesAsync();
 
-            Hide();
+            pendingEnrollmentPayload = null;
+            pendingEnrollmentEmployee = null;
+            SetEnrollmentConfirmationEnabled(false);
         }
 
         private async Task IdentifyAndRecordAttendanceAsync()
@@ -407,7 +472,7 @@ namespace ZKTecoBridge
             if (loadedTemplates.Count == 0)
             {
                 SetStatus("No enrolled templates synced.");
-                SetBridgeStatus("error", "No enrolled ZKTeco fingerprint templates synced.");
+                SetBridgeStatus("error", "No enrolled fingerprint templates synced.");
                 return;
             }
 
@@ -598,8 +663,23 @@ namespace ZKTecoBridge
 
             registerCount = 0;
             isEnrolling = true;
+            pendingEnrollmentPayload = null;
+            SetEnrollmentConfirmationEnabled(false);
             SetBridgeStatus("waiting", "Waiting for fingerprint enrollment scans.");
             SetStatus("Scan the same finger 3 times.");
+        }
+
+        private void SetEnrollmentConfirmationEnabled(bool enabled)
+        {
+            if (scanAgainButton != null)
+            {
+                scanAgainButton.Enabled = enabled;
+            }
+
+            if (submitButton != null)
+            {
+                submitButton.Enabled = enabled;
+            }
         }
 
         private void BeginAttendanceScan(ZktecoAttendanceCommand command)
@@ -613,7 +693,7 @@ namespace ZKTecoBridge
             pendingAttendanceCommand = command;
             isEnrolling = false;
             registerCount = 0;
-            SetBridgeStatus("waiting", "Waiting for registered ZKTeco fingerprint scan.");
+            SetBridgeStatus("waiting", "Waiting for registered fingerprint scan.");
             SetStatus("Waiting for " + (command.attendance_type ?? "attendance") + " fingerprint scan.");
             Log("Attendance requested from web timeclock. Scan a registered finger.");
         }
@@ -622,7 +702,9 @@ namespace ZKTecoBridge
         {
             bridgeStatus = new BridgeStatus
             {
-                command_id = pendingAttendanceCommand == null ? bridgeStatus.command_id : pendingAttendanceCommand.command_id,
+                command_id = pendingAttendanceCommand == null
+                    ? (pendingEnrollmentEmployee == null ? bridgeStatus.command_id : pendingEnrollmentEmployee.command_id)
+                    : pendingAttendanceCommand.command_id,
                 state = state,
                 message = message,
                 employee_id = employee == null ? null : employee.employee_id,
@@ -663,11 +745,20 @@ namespace ZKTecoBridge
                 employeeCombo.Items.Add(employee);
                 existing = employee;
             }
+            else
+            {
+                existing.command_id = employee.command_id;
+                existing.finger_index = employee.finger_index;
+                existing.name = employee.name;
+                existing.first_name = employee.first_name;
+                existing.last_name = employee.last_name;
+                existing.position = employee.position;
+            }
 
             employeeCombo.SelectedItem = existing;
             BeginEnrollment();
             bridgeStatus.command_id = employee.command_id;
-            Log("Enrollment requested from web admin for " + employee.employee_id + ".");
+            Log("Enrollment requested from web admin for " + employee.employee_id + ", finger " + (employee.finger_index <= 0 ? 1 : employee.finger_index) + ".");
         }
 
         private void StartLocalCommandServer()
@@ -762,9 +853,33 @@ namespace ZKTecoBridge
                 return;
             }
 
-            if (method != "POST" || (path != "enroll" && path != "attendance" && path != "finalize-attendance"))
+            if (method != "POST" || (path != "enroll" && path != "attendance" && path != "finalize-attendance" && path != "commit-enrollment"))
             {
                 WriteLocalJson(stream, 404, "{\"message\":\"Endpoint not found.\"}");
+                return;
+            }
+
+            if (path == "commit-enrollment")
+            {
+                var command = json.Deserialize<ZktecoEnrollmentCommitCommand>(body);
+
+                if (pendingEnrollmentPayload == null || pendingEnrollmentEmployee == null)
+                {
+                    WriteLocalJson(stream, 422, "{\"message\":\"No captured fingerprint is waiting for confirmation.\"}");
+                    return;
+                }
+
+                if (command == null ||
+                    string.IsNullOrWhiteSpace(command.command_id) ||
+                    !string.Equals(command.command_id, pendingEnrollmentPayload.command_id, StringComparison.Ordinal))
+                {
+                    WriteLocalJson(stream, 409, "{\"message\":\"Fingerprint command does not match the pending enrollment.\"}");
+                    return;
+                }
+
+                SavePendingEnrollmentAsync().GetAwaiter().GetResult();
+                Hide();
+                WriteLocalJson(stream, 200, "{\"message\":\"Fingerprint successfully Registered!\"}");
                 return;
             }
 
@@ -808,7 +923,7 @@ namespace ZKTecoBridge
                 }
 
                 BeginAttendanceScan(command);
-                WriteLocalJson(stream, 200, "{\"message\":\"ZKTeco Bridge is ready. Scan a registered finger.\"}");
+                WriteLocalJson(stream, 200, "{\"message\":\"Fingerprint Scanner Bridge is ready. Scan a registered finger.\"}");
                 return;
             }
 
@@ -821,7 +936,7 @@ namespace ZKTecoBridge
             }
 
             BeginEnrollmentFor(employee);
-            WriteLocalJson(stream, 200, "{\"message\":\"ZKTeco Bridge is ready. Scan the same finger 3 times.\"}");
+            WriteLocalJson(stream, 200, "{\"message\":\"Fingerprint Scanner Bridge is ready. Scan the same finger 3 times.\"}");
         }
 
         private EmployeeDto ParseLaunchEnrollmentEmployee(string[] args)

@@ -1,4 +1,41 @@
-window.timeclockWebAuthn = window.timeclockWebAuthn || {
+/**
+ * @param {{ bridgeUrl?: string, scannerDeleteUrl?: string, employee?: Record<string, any>, registeredTemplates?: Array<{ id?: number, finger_index: number, label: string, enrolled_at?: string | null }> }} config
+ */
+window.fingerprintEnrollment = ({
+    bridgeUrl = 'http://127.0.0.1:8765',
+    scannerDeleteUrl = '',
+    employee = {},
+    registeredTemplates = [],
+}) => ({
+    maxRegisteredFingers: 3,
+    zktecoLoading: false,
+    submittingEnrollment: false,
+    removingFingerIndex: null,
+    enrollmentCaptured: false,
+    enrollmentCommandId: '',
+    message: '',
+    success: false,
+    selectedFinger: null,
+    fingers: [
+        { index: 1, label: 'Left Thumb' },
+        { index: 2, label: 'Left Index' },
+        { index: 3, label: 'Left Middle' },
+        { index: 4, label: 'Left Ring' },
+        { index: 5, label: 'Left Little' },
+        { index: 6, label: 'Right Thumb' },
+        { index: 7, label: 'Right Index' },
+        { index: 8, label: 'Right Middle' },
+        { index: 9, label: 'Right Ring' },
+        { index: 10, label: 'Right Little' },
+    ],
+    registeredTemplates: registeredTemplates.map((template) => ({
+        ...template,
+        finger_index: Number(template.finger_index),
+    })),
+    zktecoBridgeUrl: bridgeUrl,
+    scannerDeleteUrl,
+    employee,
+
     csrfToken() {
         return (
             document
@@ -6,284 +43,167 @@ window.timeclockWebAuthn = window.timeclockWebAuthn || {
                 ?.getAttribute('content') || ''
         )
     },
-    /**
-     * @param {string} input
-     * @returns {Uint8Array}
-     */
-    decode(input) {
-        input = input.replace(/-/g, '+').replace(/_/g, '/')
-        const pad = input.length % 4
-        if (pad) input += '='.repeat(4 - pad)
-        return Uint8Array.from(atob(input), (char) => char.charCodeAt(0))
+
+    scannerMessage(message) {
+        return String(message || '')
+            .replaceAll('ZKTeco Bridge', 'Fingerprint scanner')
+            .replaceAll('ZKTeco', 'Fingerprint')
     },
-    /**
-     * @param {ArrayBuffer} buffer
-     * @returns {string}
-     */
-    encode(buffer) {
-        return btoa(String.fromCharCode(...new Uint8Array(buffer)))
+
+    get busy() {
+        return this.zktecoLoading || this.submittingEnrollment
     },
-    /**
-     * @param {Record<string, any>} publicKey
-     * @returns {Record<string, any>}
-     */
-    parseOptions(publicKey) {
-        publicKey.challenge = this.decode(publicKey.challenge)
 
-        if (publicKey.user?.id) {
-            publicKey.user.id = this.decode(publicKey.user.id)
-        }
-
-        for (const key of ['excludeCredentials', 'allowCredentials']) {
-            if (!publicKey[key]) continue
-            /** @param {{ id: string }} credential */
-            publicKey[key] = publicKey[key].map((credential) => ({
-                ...credential,
-                id: this.decode(credential.id),
-            }))
-        }
-
-        return publicKey
+    get registeredFingerIndexes() {
+        return this.registeredTemplates.map((template) =>
+            Number(template.finger_index),
+        )
     },
-    /**
-     * @param {PublicKeyCredential} credential
-     * @returns {Record<string, any>}
-     */
-    parseCredential(credential) {
-        /** @type {Record<string, string>} */
-        const response = {}
-        const authenticatorResponse =
-            /** @type {Record<string, ArrayBuffer | undefined>} */ (
-                credential.response
-            )
-
-        for (const key of [
-            'clientDataJSON',
-            'attestationObject',
-            'authenticatorData',
-            'signature',
-            'userHandle',
-        ]) {
-            if (authenticatorResponse[key]) {
-                response[key] = this.encode(authenticatorResponse[key])
-            }
-        }
-
-        return {
-            id: credential.id,
-            rawId: this.encode(credential.rawId),
-            type: credential.type,
-            authenticatorAttachment: credential.authenticatorAttachment,
-            clientExtensionResults: credential.getClientExtensionResults(),
-            response,
-        }
-    },
-    /**
-     * @param {string} url
-     * @param {Record<string, any>} data
-     * @param {string} method
-     * @returns {Promise<Record<string, any>>}
-     */
-    async postJson(url, data = {}, method = 'POST') {
-        const response = await fetch(url, {
-            method,
-            credentials: 'same-origin',
-            headers: {
-                Accept: 'application/json',
-                'Content-Type': 'application/json',
-                'X-CSRF-TOKEN': this.csrfToken(),
-                'X-Requested-With': 'XMLHttpRequest',
-            },
-            body: JSON.stringify(data),
-        })
-
-        if (!response.ok) {
-            const payload = await response.json().catch(() => ({}))
-            throw new Error(payload.message || 'The WebAuthn request failed.')
-        }
-
-        return response.json().catch(() => ({}))
-    },
-}
-
-/**
- * @param {{ optionsUrl: string, registerUrl: string, deleteUrl: string, zktecoBridgeUrl?: string, employee?: Record<string, any>, registeredFingers?: string[] }} config
- */
-window.fingerprintEnrollment = ({
-    optionsUrl,
-    registerUrl,
-    deleteUrl,
-    zktecoBridgeUrl = 'http://127.0.0.1:8765',
-    employee = {},
-    registeredFingers = [],
-}) => ({
-    loading: false,
-    zktecoLoading: false,
-    message: '',
-    success: false,
-    supported: typeof PublicKeyCredential !== 'undefined',
-    selectedFinger: '',
-    requiredTaps: 3,
-    completedTaps: 0,
-    activeTap: 0,
-    fingers: [
-        { value: 'left-thumb', label: 'Left thumb' },
-        { value: 'left-index', label: 'Left index' },
-        { value: 'left-middle', label: 'Left middle' },
-        { value: 'left-ring', label: 'Left ring' },
-        { value: 'left-little', label: 'Left little' },
-        { value: 'right-thumb', label: 'Right thumb' },
-        { value: 'right-index', label: 'Right index' },
-        { value: 'right-middle', label: 'Right middle' },
-        { value: 'right-ring', label: 'Right ring' },
-        { value: 'right-little', label: 'Right little' },
-    ],
-    registeredFingers,
-    zktecoBridgeUrl,
-    employee,
 
     get selectedFingerLabel() {
         return (
-            this.fingers.find((finger) => finger.value === this.selectedFinger)
+            this.fingers.find((finger) => finger.index === this.selectedFinger)
                 ?.label || ''
         )
     },
 
     get selectedFingerRegistered() {
-        return this.registeredFingers.includes(this.selectedFingerLabel)
+        return this.registeredFingerIndexes.includes(Number(this.selectedFinger))
     },
 
-    get canEnroll() {
+    get registrationLimitReached() {
+        return this.registeredTemplates.length >= this.maxRegisteredFingers
+    },
+
+    get canScan() {
         return (
-            this.supported &&
-            !this.loading &&
+            !this.busy &&
             Boolean(this.selectedFinger) &&
             !this.selectedFingerRegistered &&
-            this.completedTaps < this.requiredTaps
+            !this.registrationLimitReached
+        )
+    },
+
+    get canSubmit() {
+        return (
+            this.enrollmentCaptured &&
+            Boolean(this.enrollmentCommandId) &&
+            !this.busy
         )
     },
 
     isRegistered(finger) {
-        return this.registeredFingers.includes(finger.label)
+        return this.registeredFingerIndexes.includes(Number(finger.index))
+    },
+
+    resetPendingEnrollment() {
+        this.enrollmentCaptured = false
+        this.enrollmentCommandId = ''
     },
 
     selectFinger(finger) {
-        if (this.loading) return
+        if (
+            this.busy ||
+            this.isRegistered(finger) ||
+            this.registrationLimitReached
+        ) {
+            return
+        }
 
-        this.selectedFinger = finger.value
-        this.completedTaps = 0
-        this.activeTap = 0
+        this.selectedFinger = finger.index
         this.message = ''
         this.success = false
-
-        if (this.selectedFingerRegistered) {
-            this.message = `${this.selectedFingerLabel} is already registered. Remove it before registering again.`
-        }
+        this.resetPendingEnrollment()
     },
 
-    async enroll() {
-        if (!this.selectedFinger) {
-            this.message = 'Select which finger to enroll first.'
-            this.success = false
+    async removeRegisteredFinger(template) {
+        if (!this.scannerDeleteUrl || this.busy || this.removingFingerIndex) {
             return
         }
 
-        if (this.selectedFingerRegistered) {
-            this.message = `${this.selectedFingerLabel} is already registered. Remove it before registering again.`
-            this.success = false
-            return
-        }
-
-        this.loading = true
+        this.removingFingerIndex = Number(template.finger_index)
         this.message = ''
         this.success = false
 
         try {
-            const tap = this.completedTaps + 1
-            this.activeTap = tap
-            this.message = `Tap ${tap} of ${this.requiredTaps}: waiting for ${this.selectedFingerLabel}.`
-
-            const options = await window.timeclockWebAuthn.postJson(optionsUrl)
-            const credential = await navigator.credentials.create({
-                publicKey: window.timeclockWebAuthn.parseOptions(options),
+            const response = await fetch(this.scannerDeleteUrl, {
+                method: 'DELETE',
+                credentials: 'same-origin',
+                headers: {
+                    Accept: 'application/json',
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': this.csrfToken(),
+                    'X-Requested-With': 'XMLHttpRequest',
+                },
+                body: JSON.stringify({
+                    finger_index: Number(template.finger_index),
+                }),
             })
 
-            await window.timeclockWebAuthn.postJson(registerUrl, {
-                ...window.timeclockWebAuthn.parseCredential(credential),
-                alias: `${this.selectedFingerLabel} fingerprint - scan ${tap}`,
-            })
+            const payload = await response.json().catch(() => ({}))
 
-            this.completedTaps = tap
-
-            if (this.completedTaps < this.requiredTaps) {
-                this.message = `Tap ${tap} read. Continue with tap ${tap + 1}.`
-                return
+            if (!response.ok) {
+                throw new Error(
+                    payload.message || 'Unable to remove registered finger.',
+                )
             }
 
-            this.success = true
-            this.message = `${this.selectedFingerLabel} enrolled successfully.`
-            this.registeredFingers = [
-                ...new Set([
-                    ...this.registeredFingers,
-                    this.selectedFingerLabel,
-                ]),
-            ]
-        } catch (error) {
-            this.message =
-                error instanceof Error
-                    ? error.message
-                    : 'Fingerprint enrollment failed.'
-        } finally {
-            this.loading = false
-            this.activeTap = 0
-        }
-    },
-
-    async removeSelectedFinger() {
-        if (!this.selectedFingerRegistered || this.loading) return
-
-        this.loading = true
-        this.message = ''
-        this.success = false
-
-        try {
-            const payload = await window.timeclockWebAuthn.postJson(
-                deleteUrl,
-                {
-                    finger: this.selectedFingerLabel,
-                },
-                'DELETE',
+            this.registeredTemplates = this.registeredTemplates.filter(
+                (registeredTemplate) =>
+                    Number(registeredTemplate.finger_index) !==
+                    Number(template.finger_index),
             )
 
-            this.registeredFingers = this.registeredFingers.filter(
-                (finger) => finger !== this.selectedFingerLabel,
-            )
-            this.completedTaps = 0
-            this.activeTap = 0
+            if (this.selectedFinger === Number(template.finger_index)) {
+                this.selectedFinger = null
+            }
+
+            this.resetPendingEnrollment()
             this.success = true
             this.message =
-                payload.message ||
-                `${this.selectedFingerLabel} registration removed.`
+                payload.message || `${template.label} registration removed.`
         } catch (error) {
             this.message =
                 error instanceof Error
                     ? error.message
                     : 'Unable to remove registered finger.'
         } finally {
-            this.loading = false
+            this.removingFingerIndex = null
         }
     },
 
-    async startZktecoEnrollment() {
+    async startScannerEnrollment() {
+        if (!this.selectedFinger) {
+            this.message = 'Select which finger to register first.'
+            this.success = false
+            return
+        }
+
+        if (this.selectedFingerRegistered) {
+            this.message = `${this.selectedFingerLabel} is already registered.`
+            this.success = false
+            return
+        }
+
+        if (this.registrationLimitReached) {
+            this.message =
+                'This employee already has 3 registered fingers. Remove one before registering another.'
+            this.success = false
+            return
+        }
+
         this.zktecoLoading = true
         this.message = ''
         this.success = false
+        this.resetPendingEnrollment()
+
         const commandId =
             crypto.randomUUID?.() ??
-            `zkteco-enroll-${Date.now()}-${Math.random().toString(36).slice(2)}`
+            `fingerprint-enroll-${Date.now()}-${Math.random().toString(36).slice(2)}`
         const employeePayload = {
             ...this.employee,
             command_id: commandId,
+            finger_index: this.selectedFinger,
         }
 
         try {
@@ -303,35 +223,93 @@ window.fingerprintEnrollment = ({
 
             if (!response.ok) {
                 throw new Error(
-                    payload.message || 'Unable to connect to ZKTeco Bridge.',
+                    payload.message ||
+                        'Unable to connect to the fingerprint scanner.',
                 )
             }
 
-            this.success = true
-            this.message =
+            this.message = this.scannerMessage(
                 payload.message ||
-                'ZKTeco Bridge is ready. Scan the same finger 3 times.'
+                    `Waiting for ${this.selectedFingerLabel}. Scan the same finger 3 times.`,
+            )
 
-            await this.pollZktecoEnrollmentStatus(commandId)
+            await this.pollEnrollmentStatus(commandId)
         } catch (error) {
             const launchUrl = `zkteco-bridge://enroll?payload=${encodeURIComponent(JSON.stringify(employeePayload))}`
 
             window.location.href = launchUrl
 
-            this.message =
-                'Opening ZKTeco Bridge. If your browser asks for permission, allow it, then scan the same finger 3 times.'
+            this.message = `Opening the fingerprint scanner. Scan ${this.selectedFingerLabel} 3 times when it is ready.`
 
-            await this.pollZktecoEnrollmentStatus(commandId)
+            await this.pollEnrollmentStatus(commandId)
         } finally {
             this.zktecoLoading = false
         }
     },
 
-    async pollZktecoEnrollmentStatus(commandId) {
+    async submitEnrollment() {
+        if (!this.canSubmit) return
+
+        this.submittingEnrollment = true
+        this.message = ''
+        this.success = false
+
+        try {
+            const response = await fetch(
+                `${this.zktecoBridgeUrl.replace(/\/$/, '')}/commit-enrollment`,
+                {
+                    method: 'POST',
+                    headers: {
+                        Accept: 'application/json',
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        command_id: this.enrollmentCommandId,
+                    }),
+                },
+            )
+
+            const payload = await response.json().catch(() => ({}))
+
+            if (!response.ok) {
+                throw new Error(
+                    payload.message || 'Unable to save registered fingerprint.',
+                )
+            }
+
+            this.success = true
+            this.message = payload.message || 'Fingerprint successfully Registered!'
+            this.registeredTemplates = [
+                ...this.registeredTemplates,
+                {
+                    finger_index: Number(this.selectedFinger),
+                    label: this.selectedFingerLabel,
+                    enrolled_at: new Intl.DateTimeFormat('en-US', {
+                        month: 'short',
+                        day: '2-digit',
+                        year: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                    }).format(new Date()),
+                },
+            ]
+            this.selectedFinger = null
+            this.resetPendingEnrollment()
+        } catch (error) {
+            this.message =
+                error instanceof Error
+                    ? error.message
+                    : 'Unable to save registered fingerprint.'
+        } finally {
+            this.submittingEnrollment = false
+        }
+    },
+
+    async pollEnrollmentStatus(commandId) {
         const statusUrl = `${this.zktecoBridgeUrl.replace(/\/$/, '')}/status`
         const startedAt = Date.now()
 
-        while (Date.now() - startedAt < 45000) {
+        while (Date.now() - startedAt < 300000) {
             await new Promise((resolve) => setTimeout(resolve, 1000))
 
             const status = await fetch(statusUrl, {
@@ -348,12 +326,37 @@ window.fingerprintEnrollment = ({
             if (status.command_id && status.command_id !== commandId) continue
 
             if (status.message) {
-                this.message = status.message
+                this.message = this.scannerMessage(status.message)
+            }
+
+            if (status.state === 'captured' && !this.enrollmentCaptured) {
+                this.success = true
+                this.enrollmentCaptured = true
+                this.enrollmentCommandId = commandId
+                this.message =
+                    'Fingerprint captured. Click Submit in the scanner window to save this registration.'
+                continue
             }
 
             if (status.state === 'success') {
                 this.success = true
                 this.message = 'Fingerprint successfully Registered!'
+                this.registeredTemplates = [
+                    ...this.registeredTemplates,
+                    {
+                        finger_index: Number(this.selectedFinger),
+                        label: this.selectedFingerLabel,
+                        enrolled_at: new Intl.DateTimeFormat('en-US', {
+                            month: 'short',
+                            day: '2-digit',
+                            year: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                        }).format(new Date()),
+                    },
+                ]
+                this.selectedFinger = null
+                this.resetPendingEnrollment()
                 setTimeout(() => {
                     document.dispatchEvent(
                         new KeyboardEvent('keydown', {
@@ -361,7 +364,7 @@ window.fingerprintEnrollment = ({
                             bubbles: true,
                         }),
                     )
-                }, 1200)
+                }, 900)
                 return
             }
 

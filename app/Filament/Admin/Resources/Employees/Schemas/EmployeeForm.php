@@ -36,7 +36,7 @@ class EmployeeForm
                                 ->required(),
 
                             TextInput::make('middle_name')
-                                ->required(),
+                                ->nullable(),
 
                             DatePicker::make('date_of_birth')
                                 ->required(),
@@ -100,6 +100,7 @@ class EmployeeForm
                                     ->modalHeading(fn (Employee $record): string => 'Enroll fingerprint for '.$record->name)
                                     ->modalSubmitAction(false)
                                     ->modalCancelActionLabel('Close')
+                                    ->modalWidth('5xl')
                                     ->modalContent(fn (Employee $record) => view('filament.admin.employees.fingerprint-enrollment', [
                                         'employee' => $record,
                                     ])),

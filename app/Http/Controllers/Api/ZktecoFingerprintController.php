@@ -78,20 +78,39 @@ class ZktecoFingerprintController extends Controller
             'fingerprint_image_base64' => ['nullable', 'string'],
         ])->validate();
 
-        $template = ZktecoFingerprintTemplate::query()->updateOrCreate(
-            [
-                'employee_id' => $validated['employee_id'],
-                'finger_index' => $validated['finger_index'] ?? 1,
-            ],
-            [
-                'template_base64' => $validated['template_base64'],
-                'template_format' => 'zkteco-v10',
-                'device_serial' => $validated['device_serial'] ?? null,
-                'template_size' => $validated['template_size'] ?? null,
-                'fingerprint_image_base64' => $validated['fingerprint_image_base64'] ?? null,
-                'enrolled_at' => now(),
-            ],
-        );
+        $fingerIndex = $validated['finger_index'] ?? 1;
+        $alreadyRegistered = ZktecoFingerprintTemplate::query()
+            ->where('employee_id', $validated['employee_id'])
+            ->where('finger_index', $fingerIndex)
+            ->exists();
+
+        if ($alreadyRegistered) {
+            throw ValidationException::withMessages([
+                'finger_index' => 'This finger is already registered. Remove it before registering again.',
+            ]);
+        }
+
+        $registeredFingerCount = ZktecoFingerprintTemplate::query()
+            ->where('employee_id', $validated['employee_id'])
+            ->distinct()
+            ->count('finger_index');
+
+        if ($registeredFingerCount >= 3) {
+            throw ValidationException::withMessages([
+                'finger_index' => 'This employee already has 3 registered fingers. Remove one before registering another.',
+            ]);
+        }
+
+        $template = ZktecoFingerprintTemplate::query()->create([
+            'employee_id' => $validated['employee_id'],
+            'finger_index' => $fingerIndex,
+            'template_base64' => $validated['template_base64'],
+            'template_format' => 'zkteco-v10',
+            'device_serial' => $validated['device_serial'] ?? null,
+            'template_size' => $validated['template_size'] ?? null,
+            'fingerprint_image_base64' => $validated['fingerprint_image_base64'] ?? null,
+            'enrolled_at' => now(),
+        ]);
 
         $template->load('employee:id,employee_id,first_name,last_name,position');
 
@@ -168,7 +187,7 @@ class ZktecoFingerprintController extends Controller
 
         if (! is_string($configuredToken) || $configuredToken === '') {
             throw ValidationException::withMessages([
-                'token' => 'ZKTeco scanner token is not configured.',
+                'token' => 'Scanner token is not configured.',
             ]);
         }
 

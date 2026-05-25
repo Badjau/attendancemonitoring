@@ -1042,7 +1042,7 @@ const submitFingerprintAttendance = async () => {
     }
 
     try {
-        startProcessing('fingerprint', 'Connecting to ZKTeco fingerprint scanner...')
+        startProcessing('fingerprint', 'Connecting to Fingerprint scanner...')
         const commandId = createOfflineId()
 
         const payload = {
@@ -1061,11 +1061,11 @@ const submitFingerprintAttendance = async () => {
         toast.add({
             severity: 'info',
             summary: 'Fingerprint',
-            detail: 'Scan your registered finger on the ZKTeco scanner.',
+            detail: 'Scan your registered finger on the scanner.',
             life: 8000,
         })
 
-        faceStatusText.value = 'Scan your registered finger on the ZKTeco scanner.'
+        faceStatusText.value = 'Scan your registered finger on the scanner.'
         await pollZktecoBridgeStatus(commandId)
     } catch (error) {
         toast.add({
@@ -1074,7 +1074,7 @@ const submitFingerprintAttendance = async () => {
             detail:
                 error instanceof Error
                     ? error.message
-                    : 'Unable to start ZKTeco fingerprint attendance.',
+                    : 'Unable to start fingerprint attendance.',
             life: 5000,
         })
         resetAttendanceSelection()
@@ -1199,11 +1199,11 @@ const startZktecoAttendanceScan = async (
             lastError =
                 error instanceof Error
                     ? error
-                    : new Error('Unable to connect to ZKTeco Bridge.')
+                    : new Error('Unable to connect to Finger Scanner Bridge.')
         }
     }
 
-    throw lastError || new Error('Unable to connect to ZKTeco Bridge.')
+    throw lastError || new Error('Unable to connect to Finger Scanner Bridge.')
 }
 
 const postZktecoBridgeCommand = async (
@@ -1223,7 +1223,7 @@ const postZktecoBridgeCommand = async (
 
     if (!response.ok) {
         throw new Error(
-            bridgePayload.message || 'Unable to connect to ZKTeco Bridge.',
+            bridgePayload.message || 'Unable to connect to Finger Scanner Bridge.',
         )
     }
 }

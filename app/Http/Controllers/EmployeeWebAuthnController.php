@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Http\Requests\EmployeeWebAuthn\RecordAttendanceRequest;
 use App\Models\Employee;
+use App\Models\ZktecoFingerprintTemplate;
 use App\Services\AttendanceService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -91,6 +92,26 @@ class EmployeeWebAuthnController extends Controller
             'message' => $deleted
                 ? "{$validated['finger']} registration removed."
                 : "{$validated['finger']} was not registered.",
+        ]);
+    }
+
+    public function destroyScannerFinger(Request $request, Employee $employee): JsonResponse
+    {
+        $validated = $request->validate([
+            'finger_index' => ['required', 'integer', 'min:1', 'max:10'],
+        ]);
+
+        $fingerLabel = $this->scannerFingerLabels()[(int) $validated['finger_index']] ?? 'Fingerprint';
+
+        $deleted = ZktecoFingerprintTemplate::query()
+            ->where('employee_id', $employee->id)
+            ->where('finger_index', $validated['finger_index'])
+            ->delete();
+
+        return response()->json([
+            'message' => $deleted
+                ? "{$fingerLabel} registration removed."
+                : "{$fingerLabel} was not registered.",
         ]);
     }
 
@@ -204,6 +225,25 @@ class EmployeeWebAuthnController extends Controller
             'Right middle',
             'Right ring',
             'Right little',
+        ];
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function scannerFingerLabels(): array
+    {
+        return [
+            1 => 'Left Thumb',
+            2 => 'Left Index',
+            3 => 'Left Middle',
+            4 => 'Left Ring',
+            5 => 'Left Little',
+            6 => 'Right Thumb',
+            7 => 'Right Index',
+            8 => 'Right Middle',
+            9 => 'Right Ring',
+            10 => 'Right Little',
         ];
     }
 }

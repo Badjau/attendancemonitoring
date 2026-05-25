@@ -66,6 +66,7 @@ Route::controller(EmployeeWebAuthnController::class)
         Route::post('/options', 'registrationOptions')->name('options');
         Route::post('/', 'register')->name('register');
         Route::delete('/finger', 'destroyFinger')->name('destroy-finger');
+        Route::delete('/scanner-finger', 'destroyScannerFinger')->name('destroy-scanner-finger');
     });
 
 // ROUTE FOR FACE RECOGNITION
