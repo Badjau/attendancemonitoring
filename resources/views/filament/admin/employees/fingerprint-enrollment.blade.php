@@ -4,6 +4,15 @@
         optionsUrl: @js(route('admin.employees.fingerprint.options', $employee)),
         registerUrl: @js(route('admin.employees.fingerprint.register', $employee)),
         deleteUrl: @js(route('admin.employees.fingerprint.destroy-finger', $employee)),
+        zktecoBridgeUrl: @js(config('services.zkteco.bridge_url')),
+        employee: @js([
+            'id' => $employee->id,
+            'employee_id' => $employee->employee_id,
+            'name' => $employee->name,
+            'first_name' => $employee->first_name,
+            'last_name' => $employee->last_name,
+            'position' => $employee->position,
+        ]),
         registeredFingers: @js($employee->webAuthnCredentials()
             ->pluck('alias')
             ->filter()
@@ -19,6 +28,23 @@
     </div>
 
     @include('filament.admin.employees.fingerprint-summary', ['employee' => $employee])
+
+    <div class="rounded-lg border border-primary-200 bg-primary-50 p-4 text-sm text-primary-800 dark:border-primary-800 dark:bg-primary-950 dark:text-primary-200">
+        <div class="font-semibold">ZKTeco scanner enrollment</div>
+        <div class="mt-1 text-primary-700 dark:text-primary-300">
+            Keep the ZKTeco Bridge app open, then start scanner enrollment for this employee.
+        </div>
+
+        <button
+            type="button"
+            class="fi-btn fi-btn-size-md fi-color-primary mt-3"
+            :disabled="zktecoLoading"
+            @click="startZktecoEnrollment"
+        >
+            <span x-show="! zktecoLoading">Start ZKTeco enrollment</span>
+            <span x-show="zktecoLoading">Connecting to bridge...</span>
+        </button>
+    </div>
 
     <template x-if="! supported">
         <div class="rounded-lg border border-danger-200 bg-danger-50 p-4 text-sm text-danger-700 dark:border-danger-800 dark:bg-danger-950 dark:text-danger-300">

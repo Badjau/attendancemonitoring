@@ -89,4 +89,14 @@ class Employee extends Model implements HasMedia, WebAuthnAuthenticatable
     {
         return $this->hasOne(TimeclockAuthorizedUser::class);
     }
+
+    public function zktecoFingerprintTemplates(): HasMany
+    {
+        return $this->hasMany(ZktecoFingerprintTemplate::class);
+    }
+
+    public function latestZktecoFingerprintTemplate(): HasOne
+    {
+        return $this->hasOne(ZktecoFingerprintTemplate::class)->latestOfMany('enrolled_at');
+    }
 }

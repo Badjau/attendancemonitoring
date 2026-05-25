@@ -61,7 +61,7 @@ class AttendanceService
 
         if (! $employee) {
             throw ValidationException::withMessages([
-                'employee_id' => 'Employee is not existings.',
+                'employee_id' => 'Employee is not existing.',
             ]);
         }
 

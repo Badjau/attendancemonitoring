@@ -2,10 +2,12 @@
 
 namespace App\Filament\Admin\Resources\Employees\Tables;
 
+use App\Models\Employee;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
 use Filament\Actions\ViewAction;
+use Filament\Tables\Columns\ImageColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
@@ -15,11 +17,29 @@ class EmployeesTable
     public static function configure(Table $table): Table
     {
         return $table
+            ->modifyQueryUsing(fn ($query) => $query->with('latestZktecoFingerprintTemplate'))
             ->columns([
                 TextColumn::make('employee_id')
                     ->label('Employee ID')
                     ->searchable()
                     ->sortable(),
+
+                ImageColumn::make('latestZktecoFingerprintTemplate.fingerprint_image_base64')
+                    ->label('Fingerprint')
+                    ->state(function (Employee $record): ?string {
+                        $image = $record->latestZktecoFingerprintTemplate?->fingerprint_image_base64;
+
+                        return filled($image)
+                            ? 'data:image/png;base64,'.$image
+                            : null;
+                    })
+                    ->imageHeight(52)
+                    ->imageWidth(52)
+                    ->square()
+                    ->tooltip(fn (Employee $record): string => $record->latestZktecoFingerprintTemplate
+                        ? 'ZKTeco fingerprint enrolled'
+                        : 'No ZKTeco fingerprint enrolled')
+                    ->placeholder('-'),
 
                 TextColumn::make('rfid_uid')
                     ->label('RFID UID')

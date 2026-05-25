@@ -107,15 +107,18 @@ window.timeclockWebAuthn = window.timeclockWebAuthn || {
 }
 
 /**
- * @param {{ optionsUrl: string, registerUrl: string, deleteUrl: string, registeredFingers?: string[] }} config
+ * @param {{ optionsUrl: string, registerUrl: string, deleteUrl: string, zktecoBridgeUrl?: string, employee?: Record<string, any>, registeredFingers?: string[] }} config
  */
 window.fingerprintEnrollment = ({
     optionsUrl,
     registerUrl,
     deleteUrl,
+    zktecoBridgeUrl = 'http://127.0.0.1:8765',
+    employee = {},
     registeredFingers = [],
 }) => ({
     loading: false,
+    zktecoLoading: false,
     message: '',
     success: false,
     supported: typeof PublicKeyCredential !== 'undefined',
@@ -136,6 +139,8 @@ window.fingerprintEnrollment = ({
         { value: 'right-little', label: 'Right little' },
     ],
     registeredFingers,
+    zktecoBridgeUrl,
+    employee,
 
     get selectedFingerLabel() {
         return (
@@ -267,5 +272,104 @@ window.fingerprintEnrollment = ({
         } finally {
             this.loading = false
         }
+    },
+
+    async startZktecoEnrollment() {
+        this.zktecoLoading = true
+        this.message = ''
+        this.success = false
+        const commandId =
+            crypto.randomUUID?.() ??
+            `zkteco-enroll-${Date.now()}-${Math.random().toString(36).slice(2)}`
+        const employeePayload = {
+            ...this.employee,
+            command_id: commandId,
+        }
+
+        try {
+            const response = await fetch(
+                `${this.zktecoBridgeUrl.replace(/\/$/, '')}/enroll`,
+                {
+                    method: 'POST',
+                    headers: {
+                        Accept: 'application/json',
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(employeePayload),
+                },
+            )
+
+            const payload = await response.json().catch(() => ({}))
+
+            if (!response.ok) {
+                throw new Error(
+                    payload.message || 'Unable to connect to ZKTeco Bridge.',
+                )
+            }
+
+            this.success = true
+            this.message =
+                payload.message ||
+                'ZKTeco Bridge is ready. Scan the same finger 3 times.'
+
+            await this.pollZktecoEnrollmentStatus(commandId)
+        } catch (error) {
+            const launchUrl = `zkteco-bridge://enroll?payload=${encodeURIComponent(JSON.stringify(employeePayload))}`
+
+            window.location.href = launchUrl
+
+            this.message =
+                'Opening ZKTeco Bridge. If your browser asks for permission, allow it, then scan the same finger 3 times.'
+
+            await this.pollZktecoEnrollmentStatus(commandId)
+        } finally {
+            this.zktecoLoading = false
+        }
+    },
+
+    async pollZktecoEnrollmentStatus(commandId) {
+        const statusUrl = `${this.zktecoBridgeUrl.replace(/\/$/, '')}/status`
+        const startedAt = Date.now()
+
+        while (Date.now() - startedAt < 45000) {
+            await new Promise((resolve) => setTimeout(resolve, 1000))
+
+            const status = await fetch(statusUrl, {
+                headers: {
+                    Accept: 'application/json',
+                },
+            })
+                .then((response) =>
+                    response.ok ? response.json().catch(() => ({})) : null,
+                )
+                .catch(() => null)
+
+            if (!status) continue
+            if (status.command_id && status.command_id !== commandId) continue
+
+            if (status.message) {
+                this.message = status.message
+            }
+
+            if (status.state === 'success') {
+                this.success = true
+                this.message = 'Fingerprint successfully Registered!'
+                setTimeout(() => {
+                    document.dispatchEvent(
+                        new KeyboardEvent('keydown', {
+                            key: 'Escape',
+                            bubbles: true,
+                        }),
+                    )
+                }, 1200)
+                return
+            }
+
+            if (status.state === 'error') {
+                throw new Error(status.message || 'Fingerprint enrollment failed.')
+            }
+        }
+
+        throw new Error('Fingerprint enrollment timed out.')
     },
 })

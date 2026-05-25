@@ -50,6 +50,7 @@ type AttendanceSchedule = {
 const props = defineProps<{
     employees: VerifiedEmployee[]
     attendanceSchedule: AttendanceSchedule
+    zktecoBridgeUrl: string
 }>()
 
 const toast = useToast()
@@ -70,6 +71,7 @@ const videoRef = ref<HTMLVideoElement | null>(null)
 const overlayRef = ref<HTMLCanvasElement | null>(null)
 const canvasRef = ref<HTMLCanvasElement | null>(null)
 const isLoading = ref(false)
+const processingMethod = ref<AttendanceMethod | ''>('')
 const isError = ref(false)
 const isVideoReady = ref(false)
 const isCameraActive = ref(false)
@@ -110,6 +112,12 @@ const isLocationReady = computed(
         !locationError.value,
 )
 const showCamera = computed(() => isCameraActive.value)
+const isProcessing = computed(() => Boolean(processingMethod.value))
+const processingLabel = computed(() =>
+    faceStatusText.value && faceStatusText.value !== 'Face verification ready.'
+        ? faceStatusText.value
+        : 'Processing, please wait...',
+)
 
 const employeeFullName = (employee: VerifiedEmployee): string =>
     `${employee.first_name} ${employee.last_name}`.trim()
@@ -415,9 +423,21 @@ const resetAttendanceSelection = () => {
     employeePassword.value = ''
     hasTypedEmployeePassword.value = false
     isLoading.value = false
+    processingMethod.value = ''
     faceStatusText.value = 'Face verification ready.'
     stopCamera()
     setTimeout(() => forceRFIDFocus(), 50)
+}
+
+const startProcessing = (method: AttendanceMethod, message: string) => {
+    processingMethod.value = method
+    isLoading.value = true
+    faceStatusText.value = message
+}
+
+const stopProcessing = () => {
+    processingMethod.value = ''
+    isLoading.value = false
 }
 
 const announceAttendanceGreeting = (greeting?: AttendanceGreeting) => {
@@ -907,11 +927,11 @@ const submitRFIDAttendance = async (rfid: any) => {
     lastScannedTime.value = now
 
     try {
-        isLoading.value = true
+        startProcessing('rfid', 'Processing RFID attendance...')
         await verifyEmployeeFaceAndSubmit(scannedRfid, 'rfid')
     } catch (e) {
         console.error('Error submitting RFID attendance:', e)
-        isLoading.value = false
+        stopProcessing()
     }
 }
 
@@ -936,14 +956,14 @@ const submitManualAttendance = async () => {
     await ensureAttendanceFlowReady()
 
     try {
-        isLoading.value = true
+        startProcessing('keypad', 'Processing keypad attendance...')
         await verifyEmployeeFaceAndSubmit(password, 'keypad')
         employeePassword.value = ''
         hasTypedEmployeePassword.value = false
         setTimeout(() => forceRFIDFocus(), 50)
     } catch (e) {
         console.error('Error submitting keypad attendance:', e)
-        isLoading.value = false
+        stopProcessing()
     }
 }
 
@@ -968,17 +988,17 @@ const submitFaceAttendance = async () => {
     }
 
     try {
-        isLoading.value = true
+        startProcessing('face', 'Processing facial recognition...')
 
         const matchedFace = await recognizeLiveFaceEmployee()
         if (!matchedFace) {
-            isLoading.value = false
+            stopProcessing()
             return
         }
 
         const image = captureAttendanceImage(matchedFace)
         if (!image) {
-            isLoading.value = false
+            stopProcessing()
             return
         }
 
@@ -1004,25 +1024,8 @@ const submitFaceAttendance = async () => {
 }
 
 const submitFingerprintAttendance = async () => {
-    const attendanceAction = attendanceType.value || undefined
-
-    if (typeof PublicKeyCredential === 'undefined') {
-        toast.add({
-            severity: 'error',
-            summary: 'Fingerprint',
-            detail: 'This browser does not support fingerprint authentication.',
-            life: 5000,
-        })
-        return
-    }
-
+    const attendanceAction = attendanceType.value || inferredAttendanceType()
     await ensureAttendanceFlowReady(attendanceAction)
-    await openCameraForCapture()
-
-    const image = captureAttendanceImage()
-    if (!image) {
-        return
-    }
 
     if (
         locationLoading.value ||
@@ -1039,44 +1042,31 @@ const submitFingerprintAttendance = async () => {
     }
 
     try {
-        isLoading.value = true
-        faceStatusText.value = 'Waiting for fingerprint verification...'
+        startProcessing('fingerprint', 'Connecting to ZKTeco fingerprint scanner...')
+        const commandId = createOfflineId()
 
-        const options = await postWebAuthnJson(
-            '/attendance/fingerprint/options',
-        )
-        const credential = await navigator.credentials.get({
-            publicKey: parseWebAuthnOptions(
-                options,
-            ) as PublicKeyCredentialRequestOptions,
-        })
-
-        const fingerprintPayload: Record<string, unknown> = {
-            ...parseWebAuthnCredential(credential),
-            attendance_image: image,
+        const payload = {
+            command_id: commandId,
+            attendance_type: attendanceAction,
+            occurred_at: new Date().toISOString(),
+            offline_id: commandId,
             latitude: coords.value.latitude,
             longitude: coords.value.longitude,
             location: locationLabel(),
+            location_source: locationSource.value || 'live',
         }
 
-        if (attendanceAction) {
-            fingerprintPayload.attendance_type = attendanceAction
-        }
-
-        const payload = await postWebAuthnJson(
-            '/attendance/fingerprint/record',
-            fingerprintPayload,
-        )
+        await startZktecoAttendanceScan(payload)
 
         toast.add({
-            severity: 'success',
-            summary: 'Success',
-            detail: payload.message ?? 'Attendance recorded successfully.',
-            life: 5000,
+            severity: 'info',
+            summary: 'Fingerprint',
+            detail: 'Scan your registered finger on the ZKTeco scanner.',
+            life: 8000,
         })
 
-        announceAttendanceGreeting(payload.greeting)
-        resetAttendanceSelection()
+        faceStatusText.value = 'Scan your registered finger on the ZKTeco scanner.'
+        await pollZktecoBridgeStatus(commandId)
     } catch (error) {
         toast.add({
             severity: 'error',
@@ -1084,10 +1074,157 @@ const submitFingerprintAttendance = async () => {
             detail:
                 error instanceof Error
                     ? error.message
-                    : 'Fingerprint attendance failed.',
+                    : 'Unable to start ZKTeco fingerprint attendance.',
             life: 5000,
         })
         resetAttendanceSelection()
+    } finally {
+        stopProcessing()
+    }
+}
+
+const pollZktecoBridgeStatus = async (commandId: string): Promise<void> => {
+    const statusUrl = `${props.zktecoBridgeUrl.replace(/\/$/, '')}/status`
+    const startedAt = Date.now()
+    let lastMessage = ''
+    let attendancePhotoSent = false
+
+    while (Date.now() - startedAt < 30000) {
+        await new Promise((resolve) => setTimeout(resolve, 1000))
+
+        const status = await fetch(statusUrl, {
+            headers: {
+                Accept: 'application/json',
+            },
+        })
+            .then((response) =>
+                response.ok ? response.json().catch(() => ({})) : null,
+            )
+            .catch(() => null)
+
+        if (!status) continue
+        if (status.command_id && status.command_id !== commandId) continue
+
+        if (status.message && status.message !== lastMessage) {
+            lastMessage = status.message
+            faceStatusText.value = status.message
+        }
+
+        if (status.state === 'matched' && !attendancePhotoSent) {
+            attendancePhotoSent = true
+            faceStatusText.value = 'Fingerprint matched. Capturing attendance photo...'
+            await openCameraForCapture()
+            const image = captureAttendanceImage()
+
+            if (!image) {
+                throw new Error('Camera photo could not be captured.')
+            }
+
+            await postZktecoBridgeCommand(
+                `${props.zktecoBridgeUrl.replace(/\/$/, '')}/finalize-attendance`,
+                {
+                    command_id: commandId,
+                    attendance_image: image,
+                },
+            )
+
+            faceStatusText.value = 'Recording fingerprint attendance...'
+            continue
+        }
+
+        if (status.state === 'success') {
+            toast.add({
+                severity: 'success',
+                summary: 'Success',
+                detail:
+                    status.message ?? 'Attendance recorded successfully.',
+                life: 5000,
+            })
+            announceAttendanceGreeting({
+                first_name:
+                    status.employee_first_name ||
+                    status.employee_name?.split(' ')?.[0] ||
+                    '',
+                is_birthday: Boolean(status.is_birthday),
+                attendance_type:
+                    status.attendance_type ||
+                    attendanceType.value ||
+                    inferredAttendanceType(),
+            })
+            resetAttendanceSelection()
+            return
+        }
+
+        if (status.state === 'error') {
+            throw new Error(status.message || 'Fingerprint attendance failed.')
+        }
+    }
+
+    throw new Error('No fingerprint scan was received. Please try again.')
+}
+
+const startZktecoAttendanceScan = async (
+    payload: Record<string, unknown>,
+): Promise<void> => {
+    const attendanceUrl = `${props.zktecoBridgeUrl.replace(/\/$/, '')}/attendance`
+
+    try {
+        await postZktecoBridgeCommand(attendanceUrl, payload)
+        return
+    } catch {
+        const launchPayload = {
+            command_id: payload.command_id,
+            attendance_type: payload.attendance_type,
+            occurred_at: payload.occurred_at,
+            offline_id: payload.offline_id,
+            latitude: payload.latitude,
+            longitude: payload.longitude,
+            location: payload.location,
+            location_source: payload.location_source,
+        }
+
+        window.location.href = `zkteco-bridge://attendance?payload=${encodeURIComponent(JSON.stringify(launchPayload))}`
+    }
+
+    const startedAt = Date.now()
+    let lastError: Error | null = null
+
+    while (Date.now() - startedAt < 12000) {
+        await new Promise((resolve) => setTimeout(resolve, 700))
+
+        try {
+            await postZktecoBridgeCommand(attendanceUrl, payload)
+            return
+        } catch (error) {
+            lastError =
+                error instanceof Error
+                    ? error
+                    : new Error('Unable to connect to ZKTeco Bridge.')
+        }
+    }
+
+    throw lastError || new Error('Unable to connect to ZKTeco Bridge.')
+}
+
+const postZktecoBridgeCommand = async (
+    url: string,
+    payload: Record<string, unknown>,
+): Promise<void> => {
+    const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+            Accept: 'application/json',
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+    })
+
+    const bridgePayload = await response.json().catch(() => ({}))
+
+    if (!response.ok) {
+        throw new Error(
+            bridgePayload.message || 'Unable to connect to ZKTeco Bridge.',
+        )
     }
 }
 
@@ -1118,7 +1255,7 @@ const submitAttendance = async (
         throw new Error('Location is not ready.')
     }
 
-    isLoading.value = true
+    startProcessing(method, 'Recording attendance...')
 
     const result = await syncStore.submitOrQueueAttendance({
         offlineId: createOfflineId(),
@@ -1316,10 +1453,13 @@ onUnmounted(() => {
                 <div class="grid grid-cols-2 gap-4">
                     <button
                         @click="handleTimeAction('time-in')"
+                        :disabled="isProcessing"
                         class="group relative bg-brand-accent hover:bg-[#ffcf81] text-brand-stroke border-2 border-brand-stroke rounded-2xl py-4 px-3 transition-all duration-200 ease-out font-bold shadow-[4px_4px_0px_0px_#001e1d] hover:-translate-y-1 hover:shadow-[6px_6px_0px_0px_#001e1d] active:translate-x-1 active:translate-y-1 active:shadow-none flex flex-col items-center gap-2"
                         :class="{
                             'ring-4 ring-brand-stroke ring-offset-2 ring-offset-brand-card shadow-none translate-x-1 translate-y-1':
                                 attendanceType === 'time-in',
+                            'opacity-60 cursor-not-allowed hover:translate-y-0 hover:shadow-[4px_4px_0px_0px_#001e1d]':
+                                isProcessing,
                         }"
                         :aria-pressed="attendanceType === 'time-in'"
                     >
@@ -1334,10 +1474,13 @@ onUnmounted(() => {
 
                     <button
                         @click="handleTimeAction('time-out')"
+                        :disabled="isProcessing"
                         class="group relative bg-brand-tertiary hover:bg-[#f07a7b] text-brand-headline border-2 border-brand-stroke rounded-2xl py-4 px-3 transition-all duration-200 ease-out font-bold shadow-[4px_4px_0px_0px_#001e1d] hover:-translate-y-1 hover:shadow-[6px_6px_0px_0px_#001e1d] active:translate-x-1 active:translate-y-1 active:shadow-none flex flex-col items-center gap-2"
                         :class="{
                             'ring-4 ring-brand-stroke ring-offset-2 ring-offset-brand-card shadow-none translate-x-1 translate-y-1':
                                 attendanceType === 'time-out',
+                            'opacity-60 cursor-not-allowed hover:translate-y-0 hover:shadow-[4px_4px_0px_0px_#001e1d]':
+                                isProcessing,
                         }"
                         :aria-pressed="attendanceType === 'time-out'"
                     >
@@ -1355,16 +1498,30 @@ onUnmounted(() => {
                     <button
                         type="button"
                         class="inline-flex w-full items-center justify-center gap-2 bg-brand-card hover:bg-white text-brand-stroke border-2 border-brand-stroke rounded-2xl py-4 px-3 transition-all duration-200 ease-out font-bold shadow-[4px_4px_0px_0px_#001e1d] hover:-translate-y-1 hover:shadow-[6px_6px_0px_0px_#001e1d] active:translate-x-1 active:translate-y-1 active:shadow-none"
+                        :class="{
+                            'opacity-60 cursor-not-allowed hover:translate-y-0 hover:shadow-[4px_4px_0px_0px_#001e1d]':
+                                isProcessing,
+                        }"
+                        :disabled="isProcessing"
                         title="Fingerprint"
                         @click="submitFingerprintAttendance"
                     >
-                        <Fingerprint class="w-5 h-5" />
+                        <LoaderCircle
+                            v-if="processingMethod === 'fingerprint'"
+                            class="w-5 h-5 animate-spin"
+                        />
+                        <Fingerprint v-else class="w-5 h-5" />
                         <span class="text-sm">Fingerprint</span>
                     </button>
 
                     <button
                         type="button"
                         class="inline-flex w-full items-center justify-center gap-2 bg-brand-card hover:bg-white text-brand-stroke border-2 border-brand-stroke rounded-2xl py-4 px-3 transition-all duration-200 ease-out font-bold shadow-[4px_4px_0px_0px_#001e1d] hover:-translate-y-1 hover:shadow-[6px_6px_0px_0px_#001e1d] active:translate-x-1 active:translate-y-1 active:shadow-none"
+                        :class="{
+                            'opacity-60 cursor-not-allowed hover:translate-y-0 hover:shadow-[4px_4px_0px_0px_#001e1d]':
+                                isProcessing,
+                        }"
+                        :disabled="isProcessing"
                         title="Facial Recognition"
                         @click="submitFaceAttendance"
                     >
@@ -1373,11 +1530,15 @@ onUnmounted(() => {
                     </button>
                 </div>
 
-                <div v-if="isLoading" class="mt-5">
+                <div
+                    v-if="isProcessing"
+                    class="mt-5 flex items-center gap-3 rounded-2xl border-2 border-brand-stroke bg-brand-headline px-4 py-3 text-left shadow-[3px_3px_0px_0px_#001e1d]"
+                >
+                    <LoaderCircle class="h-5 w-5 shrink-0 animate-spin text-brand-stroke" />
                     <p
-                        class="text-brand-bg font-bold tracking-wider uppercase text-xs"
+                        class="text-brand-stroke font-bold tracking-wider uppercase text-xs"
                     >
-                        Processing, please wait...
+                        {{ processingLabel }}
                     </p>
                 </div>
 

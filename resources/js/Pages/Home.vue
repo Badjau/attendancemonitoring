@@ -17,6 +17,7 @@ const props = defineProps<{
         time_out_start: string
         time_out_end: string
     }
+    zktecoBridgeUrl: string
 }>()
 </script>
 
@@ -55,6 +56,7 @@ const props = defineProps<{
                 <CameraCard
                     :employees="props.employeesWithFaces"
                     :attendance-schedule="props.attendanceSchedule"
+                    :zkteco-bridge-url="props.zktecoBridgeUrl"
                 />
 
                 <!-- Greetings -->
