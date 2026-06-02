@@ -106,11 +106,13 @@ const registeredFaceDescriptorPromises = new Map<
 
 const lastScannedTime = ref(0)
 const SCAN_COOLDOWN_MS = 1000
-const AUTO_FINGERPRINT_RETRY_MS = 2500
+const AUTO_FINGERPRINT_RETRY_MS = 500
 const AUTO_FINGERPRINT_SCAN_WINDOW_MS = 120000
 const FACE_MODEL_PATH = '/models/face-api'
 const FACE_MATCH_THRESHOLD = 0.52
 const ATTENDANCE_IMAGE_MAX_WIDTH = 960
+const FAST_ATTENDANCE_PLACEHOLDER_IMAGE =
+    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII='
 const faceDetectorOptions = new faceapi.TinyFaceDetectorOptions({
     inputSize: 320,
     scoreThreshold: 0.5,
@@ -956,18 +958,9 @@ const verifyEmployeeFaceAndSubmit = async (
     if (!employee) return
 
     if (method === 'rfid') {
-        faceStatusText.value = `Capturing attendance for ${employeeFullName(employee)}...`
-        await openCameraForCapture({ loadFaceVerification: false })
-
-        const image = captureAttendanceImage()
-        if (!image) {
-            isLoading.value = false
-            return
-        }
-
+        faceStatusText.value = `Recording attendance for ${employeeFullName(employee)}...`
         await submitAttendance(
             employee.employee_id,
-            image,
             method,
             employeeFullName(employee),
         )
@@ -991,9 +984,9 @@ const verifyEmployeeFaceAndSubmit = async (
 
     await submitAttendance(
         employee.employee_id,
-        image,
         method,
         employeeFullName(employee),
+        image,
     )
 }
 
@@ -1012,8 +1005,6 @@ const submitRFIDAttendance = async (rfid: any) => {
         scheduleAutoFingerprintScan()
         return
     }
-
-    await ensureAttendanceFlowReady()
 
     const now = Date.now()
     if (now - lastScannedTime.value < SCAN_COOLDOWN_MS) {
@@ -1107,9 +1098,9 @@ const submitFaceAttendance = async () => {
 
         await submitAttendance(
             matchedFace.employee.employee_id,
-            image,
             'face',
             employeeFullName(matchedFace.employee),
+            image,
         )
     } catch (error) {
         console.error('Error submitting face attendance:', error)
@@ -1138,6 +1129,7 @@ const fingerprintAttendancePayload = (
     longitude: coords.value.longitude,
     location: locationLabel(),
     location_source: locationSource.value || 'live',
+    skip_attendance_image: true,
 })
 
 const runFingerprintAttendance = async (
@@ -1293,19 +1285,11 @@ const pollZktecoBridgeStatus = async (
 
         if (status.state === 'matched' && !attendancePhotoSent) {
             attendancePhotoSent = true
-            faceStatusText.value = 'Fingerprint matched. Capturing attendance photo...'
-            await openCameraForCapture({ loadFaceVerification: false })
-            const image = captureAttendanceImage()
-
-            if (!image) {
-                throw new Error('Camera photo could not be captured.')
-            }
-
             await postZktecoBridgeCommand(
                 `${props.zktecoBridgeUrl.replace(/\/$/, '')}/finalize-attendance`,
                 {
                     command_id: commandId,
-                    attendance_image: image,
+                    attendance_image: FAST_ATTENDANCE_PLACEHOLDER_IMAGE,
                 },
             )
 
@@ -1421,9 +1405,9 @@ const createOfflineId = (): string =>
 
 const submitAttendance = async (
     employeeIdentifier: string,
-    image: string,
     method: AttendanceMethod,
     employeeName?: string,
+    image?: string,
 ): Promise<void> => {
     const attendanceAction = attendanceType.value || inferredAttendanceType()
 
@@ -1455,8 +1439,8 @@ const submitAttendance = async (
         longitude: coords.value.longitude,
         location: locationLabel(),
         locationSource: locationSource.value || 'live',
-        imageBlob: base64ToBlob(image, 'image/jpeg'),
-        imageFileName: `attendance_${Date.now()}.jpg`,
+        imageBlob: image ? base64ToBlob(image, 'image/jpeg') : undefined,
+        imageFileName: image ? `attendance_${Date.now()}.jpg` : undefined,
     })
 
     if (result.queued) {

@@ -74,8 +74,8 @@ const csrfToken = () =>
  * @property {number} latitude
  * @property {number} longitude
  * @property {string} [location]
- * @property {Blob} imageBlob
- * @property {string} imageFileName
+ * @property {Blob} [imageBlob]
+ * @property {string} [imageFileName]
  * @property {string} [status]
  * @property {number} [attempts]
  * @property {string|null} [lastError]
@@ -136,7 +136,13 @@ const buildAttendanceFormData = (record) => {
     formData.append('latitude', String(record.latitude))
     formData.append('longitude', String(record.longitude))
     formData.append('location', record.location || '')
-    formData.append('attendance-image', record.imageBlob, record.imageFileName)
+    if (record.imageBlob && record.imageFileName) {
+        formData.append(
+            'attendance-image',
+            record.imageBlob,
+            record.imageFileName,
+        )
+    }
 
     const token = csrfToken()
     if (token) formData.append('_token', token)
