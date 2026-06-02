@@ -1,3 +1,36 @@
+# Attendance Monitoring System
+
+Laravel/Vue attendance monitoring system with RFID, face attendance, and ZKTeco fingerprint support.
+
+## Documentation
+
+- [Test Server Installation Guide](docs/TEST_SERVER_INSTALLATION.md)
+- [System Documentation](docs/SYSTEM_DOCUMENTATION.md)
+- [ZKTeco Fingerprint Setup](docs/ZKTECO_FINGERPRINT_SETUP.md)
+
+## Quick Start On Test Server
+
+```powershell
+cd C:\laragon\www
+git clone https://github.com/angelomiguelrcua2025-bot/attendancemonitoring.git
+cd attendancemonitoring
+git checkout fix/fingerprint_registration_issue-2026-05-21
+composer install
+npm install
+npm run build
+copy .env.example .env
+php artisan key:generate
+php artisan migrate --seed
+php artisan storage:link
+php artisan optimize:clear
+```
+
+See the full [Test Server Installation Guide](docs/TEST_SERVER_INSTALLATION.md) for HTTPS, camera, Laragon, and fingerprint bridge setup.
+
+<!--
+Original Laravel README content below.
+-->
+
 <p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
 
 <p align="center">
