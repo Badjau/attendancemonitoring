@@ -111,8 +111,6 @@ const AUTO_FINGERPRINT_SCAN_WINDOW_MS = 120000
 const FACE_MODEL_PATH = '/models/face-api'
 const FACE_MATCH_THRESHOLD = 0.52
 const ATTENDANCE_IMAGE_MAX_WIDTH = 960
-const FAST_ATTENDANCE_PLACEHOLDER_IMAGE =
-    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII='
 const faceDetectorOptions = new faceapi.TinyFaceDetectorOptions({
     inputSize: 320,
     scoreThreshold: 0.5,
@@ -958,11 +956,20 @@ const verifyEmployeeFaceAndSubmit = async (
     if (!employee) return
 
     if (method === 'rfid') {
-        faceStatusText.value = `Recording attendance for ${employeeFullName(employee)}...`
+        faceStatusText.value = `Capturing attendance photo for ${employeeFullName(employee)}...`
+        await openCameraForCapture({ loadFaceVerification: false })
+
+        const image = captureAttendanceImage()
+        if (!image) {
+            isLoading.value = false
+            return
+        }
+
         await submitAttendance(
             employee.employee_id,
             method,
             employeeFullName(employee),
+            image,
         )
         return
     }
@@ -1129,7 +1136,6 @@ const fingerprintAttendancePayload = (
     longitude: coords.value.longitude,
     location: locationLabel(),
     location_source: locationSource.value || 'live',
-    skip_attendance_image: true,
 })
 
 const runFingerprintAttendance = async (
@@ -1285,11 +1291,19 @@ const pollZktecoBridgeStatus = async (
 
         if (status.state === 'matched' && !attendancePhotoSent) {
             attendancePhotoSent = true
+            faceStatusText.value = 'Fingerprint matched. Capturing attendance photo...'
+            await openCameraForCapture({ loadFaceVerification: false })
+            const image = captureAttendanceImage()
+
+            if (!image) {
+                throw new Error('Camera photo could not be captured.')
+            }
+
             await postZktecoBridgeCommand(
                 `${props.zktecoBridgeUrl.replace(/\/$/, '')}/finalize-attendance`,
                 {
                     command_id: commandId,
-                    attendance_image: FAST_ATTENDANCE_PLACEHOLDER_IMAGE,
+                    attendance_image: image,
                 },
             )
 

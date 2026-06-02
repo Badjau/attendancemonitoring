@@ -61,7 +61,6 @@ namespace ZKTecoBridge
         public string occurred_at { get; set; }
         public string offline_id { get; set; }
         public string attendance_image { get; set; }
-        public bool skip_attendance_image { get; set; }
         public string location { get; set; }
         public string location_source { get; set; }
         public double? latitude { get; set; }

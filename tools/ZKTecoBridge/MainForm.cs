@@ -497,7 +497,7 @@ namespace ZKTecoBridge
             var template = loadedTemplates[fid];
             var command = pendingAttendanceCommand;
 
-            if (command != null && string.IsNullOrWhiteSpace(command.attendance_image) && !command.skip_attendance_image)
+            if (command != null && string.IsNullOrWhiteSpace(command.attendance_image))
             {
                 pendingMatchedTemplate = template;
                 pendingMatchedScore = score;
