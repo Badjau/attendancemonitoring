@@ -27,10 +27,10 @@ class AttendancesTable
             ->columns([
                 TextColumn::make('employee.first_name')
                     ->label('Employee')
-                    ->formatStateUsing(fn ($record) => "{$record->employee->first_name} {$record->employee->last_name}")
-                    ->searchable(query: function (Builder $query, string $search) {
-                        $query->whereHas('employee', function (Builder $query) use ($search) {
-                            $query->where('first_name', 'like', "%{$search}%")
+                    ->formatStateUsing(fn (Attendance $record): string => "{$record->employee->first_name} {$record->employee->last_name}")
+                    ->searchable(query: function (Builder $query, string $search): Builder {
+                        return $query->whereHas('employee', function (Builder $query) use ($search): Builder {
+                            return $query->where('first_name', 'like', "%{$search}%")
                                 ->orWhere('last_name', 'like', "%{$search}%");
                         });
                     }),
@@ -170,6 +170,7 @@ class AttendancesTable
                                 ->fromTable(),
                         ]),
                 ]),
-            ]);
+            ])
+            ->modifyQueryUsing(fn (Builder $query) => $query->with('employee'));
     }
 }

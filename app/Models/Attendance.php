@@ -93,16 +93,21 @@ class Attendance extends Model implements HasMedia
 
     public function dailyTotalHours(): ?float
     {
-        $minutes = $this->dailyTotalMinutes();
-
-        if ($minutes === null) {
-            return null;
-        }
-
-        return round($minutes / 60, 2);
+        // Use the stored total_hours value to avoid expensive recalculations
+        // This value is already calculated and cached when time_out is recorded
+        return $this->total_hours ?? $this->calculateDailyTotalHours();
     }
 
     public function dailyTotalMinutes(): ?int
+    {
+        $hours = $this->dailyTotalHours();
+        if ($hours === null) {
+            return null;
+        }
+        return (int) ($hours * 60);
+    }
+
+    private function calculateDailyTotalHours(): ?float
     {
         if (! $this->employee_id || ! $this->attendance_date) {
             return null;
@@ -124,7 +129,7 @@ class Attendance extends Model implements HasMedia
             return null;
         }
 
-        return Carbon::parse($firstTimeIn)->diffInMinutes(Carbon::parse($lastTimeOut));
+        return round(Carbon::parse($firstTimeIn)->diffInMinutes(Carbon::parse($lastTimeOut)) / 60, 2);
     }
 
     public function formattedDailyTotalHours(): string

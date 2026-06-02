@@ -18,6 +18,18 @@ export const objectCoverMetrics = (video) => {
 }
 
 export const mapFaceBoxToObjectCover = (box, video) => {
+    if (
+        !box ||
+        !Number.isFinite(box.x) ||
+        !Number.isFinite(box.y) ||
+        !Number.isFinite(box.width) ||
+        !Number.isFinite(box.height) ||
+        box.width <= 0 ||
+        box.height <= 0
+    ) {
+        return null
+    }
+
     const metrics = objectCoverMetrics(video)
 
     return {

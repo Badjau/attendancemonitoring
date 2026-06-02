@@ -93,15 +93,26 @@ let stream: MediaStream | null = null
 let interval: ReturnType<typeof setInterval>
 let focusInterval: ReturnType<typeof setInterval>
 let faceDetectionInterval: ReturnType<typeof setInterval> | null = null
+let autoFingerprintTimeout: ReturnType<typeof setTimeout> | null = null
 let rfidTimeout: any = null
+let isDrawingFaceDetectorOverlay = false
+let isAutoFingerprintScanActive = false
+let autoFingerprintScanVersion = 0
 const registeredFaceDescriptors = new Map<string, Float32Array>()
+const registeredFaceDescriptorPromises = new Map<
+    string,
+    Promise<Float32Array | null>
+>()
 
 const lastScannedTime = ref(0)
 const SCAN_COOLDOWN_MS = 1000
+const AUTO_FINGERPRINT_RETRY_MS = 2500
+const AUTO_FINGERPRINT_SCAN_WINDOW_MS = 120000
 const FACE_MODEL_PATH = '/models/face-api'
 const FACE_MATCH_THRESHOLD = 0.52
+const ATTENDANCE_IMAGE_MAX_WIDTH = 960
 const faceDetectorOptions = new faceapi.TinyFaceDetectorOptions({
-    inputSize: 416,
+    inputSize: 320,
     scoreThreshold: 0.5,
 })
 const isLocationReady = computed(
@@ -158,8 +169,8 @@ const initializeCamera = async () => {
 
         stream = await navigator.mediaDevices.getUserMedia({
             video: {
-                width: { ideal: 1280 },
-                height: { ideal: 720 },
+                width: { ideal: 960 },
+                height: { ideal: 540 },
                 facingMode: 'user',
             },
             audio: false,
@@ -203,7 +214,21 @@ const clearFaceDetectorOverlay = () => {
     if (canvas && context) context.clearRect(0, 0, canvas.width, canvas.height)
 }
 
+const clearAutoFingerprintScan = () => {
+    if (autoFingerprintTimeout) {
+        clearTimeout(autoFingerprintTimeout)
+        autoFingerprintTimeout = null
+    }
+}
+
+const pauseAutoFingerprintScan = () => {
+    autoFingerprintScanVersion++
+    clearAutoFingerprintScan()
+    isAutoFingerprintScanActive = false
+}
+
 const drawFaceDetectorOverlay = async () => {
+    if (isDrawingFaceDetectorOverlay) return
     if (
         !videoRef.value ||
         !overlayRef.value ||
@@ -213,39 +238,46 @@ const drawFaceDetectorOverlay = async () => {
         return
     if (videoRef.value.paused || videoRef.value.ended) return
 
-    const video = videoRef.value
-    const canvas = overlayRef.value
-    const displaySize = {
-        width: video.clientWidth,
-        height: video.clientHeight,
-    }
+    isDrawingFaceDetectorOverlay = true
 
-    if (!displaySize.width || !displaySize.height) return
+    try {
+        const video = videoRef.value
+        const canvas = overlayRef.value
+        const displaySize = {
+            width: video.clientWidth,
+            height: video.clientHeight,
+        }
 
-    faceapi.matchDimensions(canvas, displaySize)
+        if (!displaySize.width || !displaySize.height) return
 
-    const detections = await faceapi
-        .detectAllFaces(video, faceDetectorOptions)
-        .withFaceLandmarks()
+        faceapi.matchDimensions(canvas, displaySize)
 
-    const context = canvas.getContext('2d')
-    context?.clearRect(0, 0, canvas.width, canvas.height)
+        const detections = await faceapi.detectAllFaces(
+            video,
+            faceDetectorOptions,
+        )
 
-    detections.forEach((detection, index) => {
-        const drawBox = new faceapi.draw.DrawBox(
-            mapFaceBoxToObjectCover(detection.detection.box, video),
-            {
+        const context = canvas.getContext('2d')
+        context?.clearRect(0, 0, canvas.width, canvas.height)
+
+        detections.forEach((detection, index) => {
+            const box = mapFaceBoxToObjectCover(detection.box, video)
+            if (!box) return
+
+            const drawBox = new faceapi.draw.DrawBox(box, {
                 label:
                     detections.length === 1
                         ? 'Face detected'
                         : `Face ${index + 1}`,
                 boxColor: '#f9bc60',
                 lineWidth: 3,
-            },
-        )
+            })
 
-        drawBox.draw(canvas)
-    })
+            drawBox.draw(canvas)
+        })
+    } finally {
+        isDrawingFaceDetectorOverlay = false
+    }
 }
 
 const startFaceDetectorOverlay = () => {
@@ -256,7 +288,7 @@ const startFaceDetectorOverlay = () => {
             console.error('Face detector overlay failed:', error)
             clearFaceDetectorOverlay()
         })
-    }, 900)
+    }, 1200)
 }
 
 const captureImage = (): string | null => {
@@ -265,16 +297,16 @@ const captureImage = (): string | null => {
     const video = videoRef.value
     const canvas = canvasRef.value
 
-    canvas.width = video.videoWidth
-    canvas.height = video.videoHeight
+    const scale = Math.min(1, ATTENDANCE_IMAGE_MAX_WIDTH / video.videoWidth)
+    canvas.width = Math.round(video.videoWidth * scale)
+    canvas.height = Math.round(video.videoHeight * scale)
 
     const ctx = canvas.getContext('2d')
     if (!ctx) return null
 
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
 
-    // Returns base64 image string
-    return canvas.toDataURL('image/jpeg', 0.8)
+    return canvas.toDataURL('image/jpeg', 0.72)
 }
 
 const cropFaceFromVideo = (
@@ -320,7 +352,7 @@ const cropFaceFromVideo = (
         canvas.height,
     )
 
-    return canvas.toDataURL('image/jpeg', 0.8)
+    return canvas.toDataURL('image/jpeg', 0.72)
 }
 
 const updateTime = () => {
@@ -427,6 +459,7 @@ const resetAttendanceSelection = () => {
     faceStatusText.value = 'Face verification ready.'
     stopCamera()
     setTimeout(() => forceRFIDFocus(), 50)
+    scheduleAutoFingerprintScan()
 }
 
 const startProcessing = (method: AttendanceMethod, message: string) => {
@@ -675,19 +708,33 @@ const getRegisteredFaceDescriptor = async (
     const cachedDescriptor = registeredFaceDescriptors.get(employee.employee_id)
     if (cachedDescriptor) return cachedDescriptor
 
+    const cachedPromise = registeredFaceDescriptorPromises.get(
+        employee.employee_id,
+    )
+    if (cachedPromise) return cachedPromise
+
     if (!employee.profile_url) return null
 
-    const image = await faceapi.fetchImage(employee.profile_url)
-    const detection = await faceapi
-        .detectSingleFace(image, faceDetectorOptions)
-        .withFaceLandmarks()
-        .withFaceDescriptor()
+    const descriptorPromise = (async () => {
+        const image = await faceapi.fetchImage(employee.profile_url!)
+        const detection = await faceapi
+            .detectSingleFace(image, faceDetectorOptions)
+            .withFaceLandmarks()
+            .withFaceDescriptor()
 
-    if (!detection) return null
+        if (!detection) return null
 
-    registeredFaceDescriptors.set(employee.employee_id, detection.descriptor)
+        registeredFaceDescriptors.set(employee.employee_id, detection.descriptor)
 
-    return detection.descriptor
+        return detection.descriptor
+    })()
+
+    registeredFaceDescriptorPromises.set(
+        employee.employee_id,
+        descriptorPromise,
+    )
+
+    return descriptorPromise
 }
 
 const verifyLiveFaceMatchesEmployee = async (
@@ -836,8 +883,14 @@ const recognizeLiveFaceEmployee = async (): Promise<LiveFaceMatch | null> => {
         distance: number
     } | null = null
 
-    for (const employee of props.employees) {
-        const registeredDescriptor = await getRegisteredFaceDescriptor(employee)
+    const employeeDescriptors = await Promise.all(
+        props.employees.map(async (employee) => ({
+            employee,
+            descriptor: await getRegisteredFaceDescriptor(employee),
+        })),
+    )
+
+    for (const { employee, descriptor: registeredDescriptor } of employeeDescriptors) {
         if (!registeredDescriptor) continue
 
         for (const detection of detections) {
@@ -905,6 +958,8 @@ const verifyEmployeeFaceAndSubmit = async (
 }
 
 const submitRFIDAttendance = async (rfid: any) => {
+    pauseAutoFingerprintScan()
+
     const scannedRfid = rfid?.trim()
 
     rfidBuffer.value = ''
@@ -914,6 +969,7 @@ const submitRFIDAttendance = async (rfid: any) => {
 
     if (!scannedRfid) {
         console.error('No RFID data provided:', rfid)
+        scheduleAutoFingerprintScan()
         return
     }
 
@@ -922,6 +978,7 @@ const submitRFIDAttendance = async (rfid: any) => {
     const now = Date.now()
     if (now - lastScannedTime.value < SCAN_COOLDOWN_MS) {
         console.error('Scan cooldown active, ignoring scan')
+        scheduleAutoFingerprintScan()
         return
     }
     lastScannedTime.value = now
@@ -932,10 +989,13 @@ const submitRFIDAttendance = async (rfid: any) => {
     } catch (e) {
         console.error('Error submitting RFID attendance:', e)
         stopProcessing()
+        scheduleAutoFingerprintScan()
     }
 }
 
 const submitManualAttendance = async () => {
+    pauseAutoFingerprintScan()
+
     const password = employeePassword.value.trim()
 
     if (!hasTypedEmployeePassword.value) {
@@ -964,10 +1024,13 @@ const submitManualAttendance = async () => {
     } catch (e) {
         console.error('Error submitting keypad attendance:', e)
         stopProcessing()
+        scheduleAutoFingerprintScan()
     }
 }
 
 const submitFaceAttendance = async () => {
+    pauseAutoFingerprintScan()
+
     const attendanceAction = attendanceType.value || undefined
 
     await ensureAttendanceFlowReady(attendanceAction)
@@ -1023,74 +1086,152 @@ const submitFaceAttendance = async () => {
     }
 }
 
-const submitFingerprintAttendance = async () => {
+const fingerprintAttendancePayload = (
+    commandId: string,
+    attendanceAction: AttendanceAction,
+) => ({
+    command_id: commandId,
+    attendance_type: attendanceAction,
+    occurred_at: new Date().toISOString(),
+    offline_id: commandId,
+    latitude: coords.value.latitude,
+    longitude: coords.value.longitude,
+    location: locationLabel(),
+    location_source: locationSource.value || 'live',
+})
+
+const runFingerprintAttendance = async (
+    automatic = false,
+    scanVersion = autoFingerprintScanVersion,
+): Promise<boolean> => {
     const attendanceAction = attendanceType.value || inferredAttendanceType()
-    await ensureAttendanceFlowReady(attendanceAction)
+
+    if (automatic) {
+        attendanceType.value = attendanceAction
+    } else {
+        await ensureAttendanceFlowReady(attendanceAction)
+    }
 
     if (
         locationLoading.value ||
         locationError.value ||
         !isLocationReady.value
     ) {
-        toast.add({
-            severity: 'error',
-            summary: 'Location',
-            detail: locationError.value || 'Waiting for GPS location.',
-            life: 5000,
-        })
-        return
+        if (!automatic) {
+            toast.add({
+                severity: 'error',
+                summary: 'Location',
+                detail: locationError.value || 'Waiting for GPS location.',
+                life: 5000,
+            })
+        }
+
+        return false
     }
 
     try {
-        startProcessing('fingerprint', 'Connecting to Fingerprint scanner...')
-        const commandId = createOfflineId()
-
-        const payload = {
-            command_id: commandId,
-            attendance_type: attendanceAction,
-            occurred_at: new Date().toISOString(),
-            offline_id: commandId,
-            latitude: coords.value.latitude,
-            longitude: coords.value.longitude,
-            location: locationLabel(),
-            location_source: locationSource.value || 'live',
+        if (!automatic) {
+            startProcessing('fingerprint', 'Connecting to Fingerprint scanner...')
+        } else {
+            faceStatusText.value = 'Fingerprint scanner ready.'
         }
 
-        await startZktecoAttendanceScan(payload)
+        const commandId = createOfflineId()
+        const payload = fingerprintAttendancePayload(commandId, attendanceAction)
 
-        toast.add({
-            severity: 'info',
-            summary: 'Fingerprint',
-            detail: 'Scan your registered finger on the scanner.',
-            life: 8000,
+        await startZktecoAttendanceScan(payload, {
+            launchBridge: !automatic,
         })
+
+        if (!automatic) {
+            toast.add({
+                severity: 'info',
+                summary: 'Fingerprint',
+                detail: 'Scan your registered finger on the scanner.',
+                life: 8000,
+            })
+        }
 
         faceStatusText.value = 'Scan your registered finger on the scanner.'
-        await pollZktecoBridgeStatus(commandId)
+        await pollZktecoBridgeStatus(
+            commandId,
+            automatic ? AUTO_FINGERPRINT_SCAN_WINDOW_MS : 30000,
+            automatic
+                ? () => scanVersion === autoFingerprintScanVersion
+                : undefined,
+        )
+        return true
     } catch (error) {
-        toast.add({
-            severity: 'error',
-            summary: 'Fingerprint',
-            detail:
-                error instanceof Error
-                    ? error.message
-                    : 'Unable to start fingerprint attendance.',
-            life: 5000,
-        })
-        resetAttendanceSelection()
+        if (!automatic) {
+            toast.add({
+                severity: 'error',
+                summary: 'Fingerprint',
+                detail:
+                    error instanceof Error
+                        ? error.message
+                        : 'Unable to start fingerprint attendance.',
+                life: 5000,
+            })
+            resetAttendanceSelection()
+        }
+
+        return false
     } finally {
-        stopProcessing()
+        if (!automatic) stopProcessing()
     }
 }
 
-const pollZktecoBridgeStatus = async (commandId: string): Promise<void> => {
+const submitFingerprintAttendance = async () => {
+    clearAutoFingerprintScan()
+    await runFingerprintAttendance(false)
+    scheduleAutoFingerprintScan()
+}
+
+const scheduleAutoFingerprintScan = (delay = AUTO_FINGERPRINT_RETRY_MS) => {
+    clearAutoFingerprintScan()
+
+    autoFingerprintTimeout = setTimeout(async () => {
+        if (
+            isAutoFingerprintScanActive ||
+            isProcessing.value ||
+            showEmployeeIdInputField.value ||
+            isCameraActive.value ||
+            !isLocationReady.value
+        ) {
+            scheduleAutoFingerprintScan()
+            return
+        }
+
+        isAutoFingerprintScanActive = true
+        const scanVersion = ++autoFingerprintScanVersion
+
+        try {
+            await runFingerprintAttendance(true, scanVersion)
+        } finally {
+            if (scanVersion === autoFingerprintScanVersion) {
+                isAutoFingerprintScanActive = false
+                scheduleAutoFingerprintScan()
+            }
+        }
+    }, delay)
+}
+
+const pollZktecoBridgeStatus = async (
+    commandId: string,
+    timeoutMs = 30000,
+    shouldContinue: (() => boolean) | undefined = undefined,
+): Promise<void> => {
     const statusUrl = `${props.zktecoBridgeUrl.replace(/\/$/, '')}/status`
     const startedAt = Date.now()
     let lastMessage = ''
     let attendancePhotoSent = false
 
-    while (Date.now() - startedAt < 30000) {
+    while (Date.now() - startedAt < timeoutMs) {
+        if (shouldContinue && !shouldContinue()) return
+
         await new Promise((resolve) => setTimeout(resolve, 1000))
+
+        if (shouldContinue && !shouldContinue()) return
 
         const status = await fetch(statusUrl, {
             headers: {
@@ -1165,13 +1306,19 @@ const pollZktecoBridgeStatus = async (commandId: string): Promise<void> => {
 
 const startZktecoAttendanceScan = async (
     payload: Record<string, unknown>,
+    options: { launchBridge?: boolean } = {},
 ): Promise<void> => {
     const attendanceUrl = `${props.zktecoBridgeUrl.replace(/\/$/, '')}/attendance`
+    const shouldLaunchBridge = options.launchBridge ?? true
 
     try {
         await postZktecoBridgeCommand(attendanceUrl, payload)
         return
     } catch {
+        if (!shouldLaunchBridge) {
+            throw new Error('Fingerprint scanner bridge is not connected.')
+        }
+
         const launchPayload = {
             command_id: payload.command_id,
             attendance_type: payload.attendance_type,
@@ -1325,10 +1472,12 @@ onMounted(async () => {
 
     focusInterval = setInterval(() => {
         ensureRFIDFocus()
-    }, 300)
+    }, 1000)
 
     document.addEventListener('click', onDocumentClick)
     document.addEventListener('touchend', onDocumentClick)
+
+    scheduleAutoFingerprintScan(1000)
 })
 
 onUnmounted(() => {
@@ -1338,6 +1487,7 @@ onUnmounted(() => {
 
     clearInterval(interval)
     clearInterval(focusInterval)
+    clearAutoFingerprintScan()
     stopCamera()
 
     document.removeEventListener('click', onDocumentClick)

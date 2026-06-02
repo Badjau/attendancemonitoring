@@ -6,6 +6,7 @@ use Filament\Actions\ViewAction;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
 
 class TimeclockUnlockLogsTable
 {
@@ -15,12 +16,21 @@ class TimeclockUnlockLogsTable
             ->columns([
                 TextColumn::make('authorizedUser.employee.name')
                     ->label('Employee')
-                    ->searchable(['employees.first_name', 'employees.last_name'])
+                    ->searchable(query: function (Builder $query, string $search): Builder {
+                        return $query->whereHas('authorizedUser.employee', function (Builder $query) use ($search): Builder {
+                            return $query->where('first_name', 'like', "%{$search}%")
+                                ->orWhere('last_name', 'like', "%{$search}%");
+                        });
+                    })
                     ->placeholder('-'),
 
                 TextColumn::make('authorizedUser.employee.employee_id')
                     ->label('Employee ID')
-                    ->searchable()
+                    ->searchable(query: function (Builder $query, string $search): Builder {
+                        return $query->whereHas('authorizedUser.employee', function (Builder $query) use ($search): Builder {
+                            return $query->where('employee_id', 'like', "%{$search}%");
+                        });
+                    })
                     ->placeholder('-'),
 
                 TextColumn::make('method')
@@ -59,6 +69,7 @@ class TimeclockUnlockLogsTable
             ])
             ->recordActions([
                 ViewAction::make(),
-            ]);
+            ])
+            ->modifyQueryUsing(fn (Builder $query) => $query->with('authorizedUser.employee'));
     }
 }

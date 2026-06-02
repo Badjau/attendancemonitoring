@@ -45,23 +45,22 @@ class ZktecoFingerprintController extends Controller
     {
         $this->authorizeScanner($request);
 
+        // Paginate fingerprint templates to avoid loading all templates at once
+        // This is important for systems with thousands of fingerprints
         $templates = ZktecoFingerprintTemplate::query()
             ->with('employee:id,employee_id,first_name,last_name,position')
             ->orderBy('employee_id')
             ->orderBy('finger_index')
-            ->get();
+            ->paginate(500, ['*'], 'page', $request->query('page', 1));
 
         return response()->json([
-            'data' => $templates->map(fn (ZktecoFingerprintTemplate $template): array => [
-                'id' => $template->id,
-                'employee' => $this->employeePayload($template->employee),
-                'finger_index' => $template->finger_index,
-                'template_base64' => $template->template_base64,
-                'template_format' => $template->template_format,
-                'template_size' => $template->template_size,
-                'device_serial' => $template->device_serial,
-                'enrolled_at' => $template->enrolled_at?->toIso8601String(),
-            ])->values(),
+            'data' => $templates->items(),
+            'pagination' => [
+                'current_page' => $templates->currentPage(),
+                'total' => $templates->total(),
+                'last_page' => $templates->lastPage(),
+                'per_page' => $templates->perPage(),
+            ],
         ]);
     }
 

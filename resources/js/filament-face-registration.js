@@ -22,6 +22,7 @@ window.faceRegistration = ({ registerUrl, existingFaces = [] }) => ({
     capturedBlob: null,
     isReviewingCapture: false,
     isCapturing: false,
+    captureCountdown: 0,
     message: '',
     success: false,
     existingDescriptors: [],
@@ -72,6 +73,8 @@ window.faceRegistration = ({ registerUrl, existingFaces = [] }) => ({
     },
 
     isBoxInsideOval(box, oval) {
+        if (!box) return false
+
         const centerX = box.x + box.width / 2
         const centerY = box.y + box.height / 2
         const normalizedCenter =
@@ -627,6 +630,12 @@ window.faceRegistration = ({ registerUrl, existingFaces = [] }) => ({
         this.isCapturing = true
         this.message = ''
 
+        const countdownCompleted = await this.waitForCaptureCountdown()
+        if (!countdownCompleted) {
+            this.isCapturing = false
+            return
+        }
+
         const duplicate = await this.findDuplicateFace()
         if (duplicate) {
             this.message = `This face is already registered to ${duplicate.name} (${duplicate.employeeId}).`
@@ -658,11 +667,34 @@ window.faceRegistration = ({ registerUrl, existingFaces = [] }) => ({
         this.capturedBlob = null
         this.isReviewingCapture = false
         this.isCapturing = false
+        this.captureCountdown = 0
         this.message = ''
         this.success = false
         this.faceClear = false
         this.statusText = 'Center your face inside the oval.'
         this.startScanLoop()
+    },
+
+    async waitForCaptureCountdown() {
+        for (let seconds = 3; seconds > 0; seconds--) {
+            this.captureCountdown = seconds
+            this.statusText = `Hold still. Capturing in ${seconds}...`
+
+            await new Promise((resolve) => setTimeout(resolve, 1000))
+
+            if (
+                !this.isCapturing ||
+                this.isReviewingCapture ||
+                this.isSubmitting ||
+                !this.isCameraReady
+            ) {
+                this.captureCountdown = 0
+                return false
+            }
+        }
+
+        this.captureCountdown = 0
+        return true
     },
 
     async save() {

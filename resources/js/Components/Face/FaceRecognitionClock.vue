@@ -379,9 +379,11 @@ const recognizeFace = async () => {
                 (item) => item.employee_id === result?.label,
             ) ?? null
         const label = employee ? employeeName(employee) : 'Unknown'
+        const box = mapFaceBoxToObjectCover(detection.detection.box, video)
+        if (!box) return
 
         const drawBox = new faceapi.draw.DrawBox(
-            mapFaceBoxToObjectCover(detection.detection.box, video),
+            box,
             {
                 label: result
                     ? `${label} (${result.distance.toFixed(2)})`

@@ -271,8 +271,10 @@ class AttendanceService
 
     private function findEmployeeByPassword(string $password): ?Employee
     {
+        // Select only necessary columns to reduce memory footprint
         return Employee::query()
             ->whereNotNull('password')
+            ->select(['id', 'first_name', 'last_name', 'employee_id', 'password'])
             ->get()
             ->first(function (Employee $employee) use ($password): bool {
                 return Hash::isHashed($employee->password)

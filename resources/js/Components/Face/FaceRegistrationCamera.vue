@@ -42,6 +42,7 @@ const isSubmitting = ref(false)
 const isCapturing = ref(false)
 const isReviewingCapture = ref(false)
 const faceCount = ref(0)
+const captureCountdown = ref(0)
 const capturedPreview = ref('')
 const capturedImage = ref<Blob | null>(null)
 const existingFaceDescriptors = new Map<string, Float32Array>()
@@ -188,8 +189,11 @@ const scanFace = async () => {
     context?.clearRect(0, 0, canvas.width, canvas.height)
 
     detections.forEach((detection, index) => {
+        const box = mapFaceBoxToObjectCover(detection.detection.box, video)
+        if (!box) return
+
         const drawBox = new faceapi.draw.DrawBox(
-            mapFaceBoxToObjectCover(detection.detection.box, video),
+            box,
             {
                 label: index === 0 ? 'Enrollment face' : 'Extra face',
                 boxColor: detections.length === 1 ? '#f9bc60' : '#e16162',
@@ -249,6 +253,27 @@ const captureBlob = (): Blob | null => {
     }
 
     return new Blob([buffer], { type: 'image/jpeg' })
+}
+
+const waitForCaptureCountdown = async () => {
+    for (let seconds = 3; seconds > 0; seconds--) {
+        captureCountdown.value = seconds
+        statusText.value = `Hold still. Capturing in ${seconds}...`
+        await new Promise((resolve) => setTimeout(resolve, 1000))
+
+        if (
+            !isCapturing.value ||
+            isReviewingCapture.value ||
+            isSubmitting.value ||
+            !isCameraReady.value
+        ) {
+            captureCountdown.value = 0
+            return false
+        }
+    }
+
+    captureCountdown.value = 0
+    return true
 }
 
 const findDuplicateFace = async (): Promise<FaceEmployee | null> => {
@@ -365,6 +390,11 @@ const captureForReview = async () => {
         return
 
     isCapturing.value = true
+    const countdownCompleted = await waitForCaptureCountdown()
+    if (!countdownCompleted) {
+        isCapturing.value = false
+        return
+    }
 
     const duplicate = await findDuplicateFace()
     if (duplicate) {
@@ -407,6 +437,7 @@ const retakeRegistration = () => {
     capturedPreview.value = ''
     isReviewingCapture.value = false
     isCapturing.value = false
+    captureCountdown.value = 0
     statusText.value = 'Center one face in the camera.'
     startScanLoop()
 }
@@ -416,6 +447,7 @@ watch(selectedEmployeeId, () => {
     capturedImage.value = null
     isReviewingCapture.value = false
     isCapturing.value = false
+    captureCountdown.value = 0
     startScanLoop()
 })
 
@@ -443,6 +475,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
     stopCamera()
+    captureCountdown.value = 0
 
     if (scanInterval) clearInterval(scanInterval)
 })
@@ -488,6 +521,20 @@ onUnmounted(() => {
                     class="absolute inset-0 h-full w-full"
                 />
                 <canvas ref="captureCanvasRef" class="hidden" />
+
+                <div
+                    v-if="captureCountdown > 0 && !isReviewingCapture"
+                    class="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/45 text-brand-headline"
+                >
+                    <div
+                        class="flex h-28 w-28 items-center justify-center rounded-full border-4 border-brand-accent bg-brand-stroke text-6xl font-black shadow-2xl"
+                    >
+                        {{ captureCountdown }}
+                    </div>
+                    <p class="mt-4 text-sm font-black uppercase tracking-widest">
+                        Hold still
+                    </p>
+                </div>
 
                 <div
                     v-if="isReviewingCapture"

@@ -1,17 +1,13 @@
+@php
+    $homeService = app(\App\Services\HomeService::class);
+    $existingFaces = $homeService->getRegisteredEmployeeFacesExcept($employee->getKey());
+@endphp
+
 <div
     class="space-y-4"
     x-data="faceRegistration({
         registerUrl: @js(route('admin.employees.face.register', $employee)),
-        existingFaces: @js(\App\Models\Employee::with('media')
-            ->whereKeyNot($employee->getKey())
-            ->get()
-            ->map(fn (\App\Models\Employee $item): array => [
-                'employee_id' => $item->employee_id,
-                'name' => $item->name,
-                'profile_url' => $item->getFirstMediaUrl('employee-profile'),
-            ])
-            ->filter(fn (array $item): bool => filled($item['profile_url']))
-            ->values()),
+        existingFaces: @js($existingFaces),
     })"
 >
     <div
@@ -46,6 +42,19 @@
                     class="absolute inset-0 h-full w-full"
                     x-show="! isReviewingCapture"
                 ></canvas>
+                <div
+                    x-show="captureCountdown > 0 && ! isReviewingCapture"
+                    x-transition.opacity
+                    class="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/50 text-white"
+                >
+                    <div
+                        class="flex h-24 w-24 items-center justify-center rounded-full border-4 border-warning-300 bg-gray-950 text-5xl font-black shadow-2xl"
+                        x-text="captureCountdown"
+                    ></div>
+                    <div class="mt-4 text-xs font-bold uppercase tracking-widest">
+                        Hold still
+                    </div>
+                </div>
                 <div
                     x-show="! isReviewingCapture"
                     class="pointer-events-none absolute inset-0 bg-black/10 backdrop-blur-[30px]"

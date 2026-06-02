@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Enums\Attendance\Type;
 use Carbon\Carbon;
+use Illuminate\Support\Facades\Cache;
 use Joaopaulolndev\FilamentGeneralSettings\Models\GeneralSetting;
 
 class AttendanceScheduleSettings
@@ -14,6 +15,8 @@ class AttendanceScheduleSettings
         'time_out_start' => '16:01', // 04:01 PM
         'time_out_end' => '23:59', // 11:59 PM
     ];
+
+    private static ?array $cachedSettings = null;
 
     public function inferAttendanceType(Carbon $now): string
     {
@@ -67,9 +70,9 @@ class AttendanceScheduleSettings
 
     private function setting(string $key): string
     {
-        $settings = GeneralSetting::query()->first();
-        $configs = $settings?->more_configs ?? [];
-        $value = is_array($configs) ? ($configs[$key] ?? null) : null;
+        // Load all settings once per request to avoid multiple queries
+        $allSettings = $this->getAllSettings();
+        $value = $allSettings[$key] ?? null;
 
         if (is_string($value) && preg_match('/^\d{2}:\d{2}$/', $value)) {
             return $value;
@@ -80,6 +83,21 @@ class AttendanceScheduleSettings
         }
 
         return self::DEFAULTS[$key];
+    }
+
+    private function getAllSettings(): array
+    {
+        // Cache at request level to avoid multiple database queries
+        if (self::$cachedSettings === null) {
+            self::$cachedSettings = Cache::remember('attendance_schedule_settings', 3600, function () {
+                $settings = GeneralSetting::query()->first();
+                $configs = $settings?->more_configs ?? [];
+
+                return is_array($configs) ? $configs : [];
+            });
+        }
+
+        return self::$cachedSettings;
     }
 
     private function timeToMinutes(string $time): int
