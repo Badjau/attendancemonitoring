@@ -75,6 +75,7 @@ const processingMethod = ref<AttendanceMethod | ''>('')
 const isError = ref(false)
 const isVideoReady = ref(false)
 const isCameraActive = ref(false)
+const isSilentCameraCapture = ref(false)
 const isFaceModelReady = ref(false)
 const faceStatusText = ref('Face verification ready.')
 
@@ -122,7 +123,9 @@ const isLocationReady = computed(
         Number.isFinite(coords.value.longitude) &&
         !locationError.value,
 )
-const showCamera = computed(() => isCameraActive.value)
+const showCamera = computed(
+    () => isCameraActive.value && !isSilentCameraCapture.value,
+)
 const isProcessing = computed(() => Boolean(processingMethod.value))
 const processingLabel = computed(() =>
     faceStatusText.value && faceStatusText.value !== 'Face verification ready.'
@@ -221,7 +224,9 @@ const waitForCameraFrame = async (timeoutMs = 2500): Promise<boolean> => {
             return true
         }
 
-        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+        await new Promise<void>((resolve) =>
+            requestAnimationFrame(() => resolve()),
+        )
     }
 
     return false
@@ -234,6 +239,7 @@ const stopCamera = (): any => {
     clearFaceDetectorOverlay()
     isVideoReady.value = false
     isCameraActive.value = false
+    isSilentCameraCapture.value = false
 }
 
 const clearFaceDetectorOverlay = () => {
@@ -470,12 +476,13 @@ const ensureAttendanceFlowReady = async (actionName?: AttendanceAction) => {
 }
 
 const openCameraForCapture = async (
-    options: { loadFaceVerification?: boolean } = {},
+    options: { loadFaceVerification?: boolean; silent?: boolean } = {},
 ) => {
     const loadFaceVerification = options.loadFaceVerification ?? true
 
     showEmployeeIdInputField.value = true
     isCameraActive.value = true
+    isSilentCameraCapture.value = options.silent ?? !loadFaceVerification
     await nextTick()
     await initializeCamera()
 
@@ -989,8 +996,11 @@ const verifyEmployeeFaceAndSubmit = async (
     if (!employee) return
 
     if (method === 'rfid') {
-        faceStatusText.value = `Capturing attendance photo for ${employeeFullName(employee)}...`
-        await openCameraForCapture({ loadFaceVerification: false })
+        faceStatusText.value = `Recording attendance for ${employeeFullName(employee)}...`
+        await openCameraForCapture({
+            loadFaceVerification: false,
+            silent: true,
+        })
 
         const image = captureAttendanceImage()
         if (!image) {
@@ -1324,8 +1334,11 @@ const pollZktecoBridgeStatus = async (
 
         if (status.state === 'matched' && !attendancePhotoSent) {
             attendancePhotoSent = true
-            faceStatusText.value = 'Fingerprint matched. Capturing attendance photo...'
-            await openCameraForCapture({ loadFaceVerification: false })
+            faceStatusText.value = 'Fingerprint matched. Recording attendance...'
+            await openCameraForCapture({
+                loadFaceVerification: false,
+                silent: true,
+            })
             const image = captureAttendanceImage()
 
             if (!image) {
@@ -1569,8 +1582,13 @@ onUnmounted(() => {
 
 <template>
     <div
-        v-if="showCamera"
+        v-if="isCameraActive"
         class="bg-brand-card rounded-[2.5rem] p-4 shadow-[12px_12px_0px_0px_#001e1d] border-2 border-brand-stroke relative overflow-hidden flex flex-col"
+        :class="{
+            'fixed -left-[9999px] top-0 h-px w-px opacity-0 pointer-events-none':
+                isSilentCameraCapture,
+        }"
+        :aria-hidden="isSilentCameraCapture"
     >
         <div
             class="absolute top-8 left-8 z-10 bg-brand-stroke rounded-full px-4 py-2 flex items-center gap-2 shadow-lg"
