@@ -205,6 +205,28 @@ const initializeCamera = async () => {
     }
 }
 
+const waitForCameraFrame = async (timeoutMs = 2500): Promise<boolean> => {
+    const startedAt = Date.now()
+
+    while (Date.now() - startedAt < timeoutMs) {
+        const video = videoRef.value
+
+        if (
+            video &&
+            isVideoReady.value &&
+            video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA &&
+            video.videoWidth > 0 &&
+            video.videoHeight > 0
+        ) {
+            return true
+        }
+
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+    }
+
+    return false
+}
+
 const stopCamera = (): any => {
     stream?.getTracks().forEach((track) => track.stop())
     stream = null
@@ -308,6 +330,8 @@ const captureImage = (): string | null => {
     const video = videoRef.value
     const canvas = canvasRef.value
 
+    if (video.videoWidth <= 0 || video.videoHeight <= 0) return null
+
     const scale = Math.min(1, ATTENDANCE_IMAGE_MAX_WIDTH / video.videoWidth)
     canvas.width = Math.round(video.videoWidth * scale)
     canvas.height = Math.round(video.videoHeight * scale)
@@ -329,6 +353,9 @@ const cropFaceFromVideo = (
     const video = videoRef.value
     const canvas = canvasRef.value
     const { x, y, width, height } = detection.box
+
+    if (video.videoWidth <= 0 || video.videoHeight <= 0) return null
+
     const paddingX = width * paddingRatio
     const paddingY = height * paddingRatio
 
@@ -451,6 +478,11 @@ const openCameraForCapture = async (
     isCameraActive.value = true
     await nextTick()
     await initializeCamera()
+
+    const hasFrame = await waitForCameraFrame()
+    if (!hasFrame) {
+        throw new Error('Camera opened, but no video frame was ready.')
+    }
 
     if (!loadFaceVerification) {
         clearFaceDetectorOverlay()
