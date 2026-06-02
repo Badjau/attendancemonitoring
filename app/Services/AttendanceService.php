@@ -66,8 +66,12 @@ class AttendanceService
         }
 
         $profileUrl = $employee->getFirstMediaUrl('employee-profile');
+        $requiresFaceProfile = in_array($request->attendance_method, [
+            AttendanceMethod::KEYPAD->value,
+            AttendanceMethod::FACE->value,
+        ], true);
 
-        if (blank($profileUrl)) {
+        if ($requiresFaceProfile && blank($profileUrl)) {
             throw ValidationException::withMessages([
                 'employee_id' => 'No registered face found for this employee.',
             ]);

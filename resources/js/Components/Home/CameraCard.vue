@@ -136,7 +136,18 @@ const employeeFullName = (employee: VerifiedEmployee): string =>
 const locationLabel = (): string => {
     const currentCoords = coords.value as any
 
-    return address.value || currentCoords.address || ''
+    if (address.value || currentCoords.address) {
+        return address.value || currentCoords.address
+    }
+
+    if (
+        Number.isFinite(currentCoords.latitude) &&
+        Number.isFinite(currentCoords.longitude)
+    ) {
+        return `${currentCoords.latitude.toFixed(6)}, ${currentCoords.longitude.toFixed(6)}`
+    }
+
+    return ''
 }
 
 const loadFaceModels = async () => {
@@ -431,11 +442,21 @@ const ensureAttendanceFlowReady = async (actionName?: AttendanceAction) => {
     forceRFIDFocus()
 }
 
-const openCameraForCapture = async () => {
+const openCameraForCapture = async (
+    options: { loadFaceVerification?: boolean } = {},
+) => {
+    const loadFaceVerification = options.loadFaceVerification ?? true
+
     showEmployeeIdInputField.value = true
     isCameraActive.value = true
     await nextTick()
     await initializeCamera()
+
+    if (!loadFaceVerification) {
+        clearFaceDetectorOverlay()
+        return
+    }
+
     await loadFaceModels().catch((error) => {
         console.error('Face model load failed:', error)
         faceStatusText.value = 'Face verification failed to load.'
@@ -524,7 +545,7 @@ const onRFIDInput = () => {
 
         rfidTimeout = setTimeout(() => {
             submitRFIDAttendance(rfidBuffer.value)
-        }, 100)
+        }, 50)
     }
 }
 
@@ -934,7 +955,26 @@ const verifyEmployeeFaceAndSubmit = async (
     const employee = await verifyEmployeeIdentifier(employeeIdentifier, method)
     if (!employee) return
 
-    await openCameraForCapture()
+    if (method === 'rfid') {
+        faceStatusText.value = `Capturing attendance for ${employeeFullName(employee)}...`
+        await openCameraForCapture({ loadFaceVerification: false })
+
+        const image = captureAttendanceImage()
+        if (!image) {
+            isLoading.value = false
+            return
+        }
+
+        await submitAttendance(
+            employee.employee_id,
+            image,
+            method,
+            employeeFullName(employee),
+        )
+        return
+    }
+
+    await openCameraForCapture({ loadFaceVerification: true })
 
     const matchedFace = await verifyLiveFaceMatchesEmployee(employee)
     if (!matchedFace) {
@@ -1229,7 +1269,7 @@ const pollZktecoBridgeStatus = async (
     while (Date.now() - startedAt < timeoutMs) {
         if (shouldContinue && !shouldContinue()) return
 
-        await new Promise((resolve) => setTimeout(resolve, 1000))
+        await new Promise((resolve) => setTimeout(resolve, 250))
 
         if (shouldContinue && !shouldContinue()) return
 
@@ -1254,7 +1294,7 @@ const pollZktecoBridgeStatus = async (
         if (status.state === 'matched' && !attendancePhotoSent) {
             attendancePhotoSent = true
             faceStatusText.value = 'Fingerprint matched. Capturing attendance photo...'
-            await openCameraForCapture()
+            await openCameraForCapture({ loadFaceVerification: false })
             const image = captureAttendanceImage()
 
             if (!image) {
