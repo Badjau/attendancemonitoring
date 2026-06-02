@@ -10,3 +10,16 @@ const csrfToken = document
 if (csrfToken) {
     window.axios.defaults.headers.common['X-CSRF-TOKEN'] = csrfToken
 }
+
+window.axios.interceptors.request.use((config) => {
+    const freshToken = document
+        .querySelector('meta[name="csrf-token"]')
+        ?.getAttribute('content')
+
+    if (freshToken) {
+        config.headers = config.headers || {}
+        config.headers['X-CSRF-TOKEN'] = freshToken
+    }
+
+    return config
+})

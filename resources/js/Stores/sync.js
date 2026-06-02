@@ -63,6 +63,12 @@ const csrfToken = () =>
         .querySelector('meta[name="csrf-token"]')
         ?.getAttribute('content') || ''
 
+const csrfHeaders = () => {
+    const token = csrfToken()
+
+    return token ? { 'X-CSRF-TOKEN': token } : {}
+}
+
 /**
  * @typedef {Object} AttendanceRecord
  * @property {string} offlineId
@@ -177,6 +183,7 @@ const postAttendanceRecord = async (record) => {
         headers: {
             Accept: 'application/json',
             'X-Requested-With': 'XMLHttpRequest',
+            ...csrfHeaders(),
         },
         body: buildAttendanceFormData(enrichedRecord),
     })

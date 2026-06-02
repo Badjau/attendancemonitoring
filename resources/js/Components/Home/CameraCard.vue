@@ -698,6 +698,7 @@ const verifyEmployeeIdentifier = async (
         faceStatusText.value = 'Checking employee...'
 
         const response = await axios.post('/attendance/verify-employee', {
+            _token: csrfToken(),
             employee_id: employeeIdentifier,
             attendance_method: method,
         })
