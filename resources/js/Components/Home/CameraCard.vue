@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import * as faceapi from 'face-api.js'
 import axios from 'axios'
 import {
     Fingerprint,
@@ -33,11 +32,7 @@ type VerifiedEmployee = {
 }
 type LiveFaceMatch = {
     employee: VerifiedEmployee
-    detection: faceapi.WithFaceDescriptor<
-        faceapi.WithFaceLandmarks<{
-            detection: faceapi.FaceDetection
-        }>
-    >
+    detection: any
     detectedFaceCount: number
 }
 type AttendanceSchedule = {
@@ -99,6 +94,9 @@ let rfidTimeout: any = null
 let isDrawingFaceDetectorOverlay = false
 let isAutoFingerprintScanActive = false
 let autoFingerprintScanVersion = 0
+let faceapi: typeof import('face-api.js') | null = null
+let faceApiLoadPromise: Promise<typeof import('face-api.js')> | null = null
+let faceDetectorOptions: any = null
 const registeredFaceDescriptors = new Map<string, Float32Array>()
 const registeredFaceDescriptorPromises = new Map<
     string,
@@ -112,10 +110,6 @@ const AUTO_FINGERPRINT_SCAN_WINDOW_MS = 120000
 const FACE_MODEL_PATH = '/models/face-api'
 const FACE_MATCH_THRESHOLD = 0.52
 const ATTENDANCE_IMAGE_MAX_WIDTH = 960
-const faceDetectorOptions = new faceapi.TinyFaceDetectorOptions({
-    inputSize: 320,
-    scoreThreshold: 0.5,
-})
 const isLocationReady = computed(
     () =>
         Boolean(coords.value) &&
@@ -136,6 +130,22 @@ const processingLabel = computed(() =>
 const employeeFullName = (employee: VerifiedEmployee): string =>
     `${employee.first_name} ${employee.last_name}`.trim()
 
+const loadFaceApi = async (): Promise<typeof import('face-api.js')> => {
+    if (faceapi) return faceapi
+
+    faceApiLoadPromise ??= import('face-api.js').then((module) => {
+        faceapi = module
+        faceDetectorOptions = new module.TinyFaceDetectorOptions({
+            inputSize: 320,
+            scoreThreshold: 0.5,
+        })
+
+        return module
+    })
+
+    return faceApiLoadPromise
+}
+
 const locationLabel = (): string => {
     const currentCoords = coords.value as any
 
@@ -153,19 +163,22 @@ const locationLabel = (): string => {
     return ''
 }
 
-const loadFaceModels = async () => {
-    if (isFaceModelReady.value) return
+const loadFaceModels = async (): Promise<typeof import('face-api.js')> => {
+    const api = await loadFaceApi()
+    if (isFaceModelReady.value) return api
 
     faceStatusText.value = 'Loading face verification...'
 
     await Promise.all([
-        faceapi.nets.tinyFaceDetector.loadFromUri(FACE_MODEL_PATH),
-        faceapi.nets.faceLandmark68Net.loadFromUri(FACE_MODEL_PATH),
-        faceapi.nets.faceRecognitionNet.loadFromUri(FACE_MODEL_PATH),
+        api.nets.tinyFaceDetector.loadFromUri(FACE_MODEL_PATH),
+        api.nets.faceLandmark68Net.loadFromUri(FACE_MODEL_PATH),
+        api.nets.faceRecognitionNet.loadFromUri(FACE_MODEL_PATH),
     ])
 
     isFaceModelReady.value = true
     faceStatusText.value = 'Face verification ready.'
+
+    return api
 }
 
 const initializeCamera = async () => {
@@ -267,8 +280,12 @@ const pauseAutoFingerprintScan = () => {
 }
 
 const drawFaceDetectorOverlay = async () => {
+    const api = faceapi
+
     if (isDrawingFaceDetectorOverlay) return
     if (
+        !api ||
+        !faceDetectorOptions ||
         !videoRef.value ||
         !overlayRef.value ||
         !isVideoReady.value ||
@@ -289,9 +306,9 @@ const drawFaceDetectorOverlay = async () => {
 
         if (!displaySize.width || !displaySize.height) return
 
-        faceapi.matchDimensions(canvas, displaySize)
+        api.matchDimensions(canvas, displaySize)
 
-        const detections = await faceapi.detectAllFaces(
+        const detections = await api.detectAllFaces(
             video,
             faceDetectorOptions,
         )
@@ -303,7 +320,7 @@ const drawFaceDetectorOverlay = async () => {
             const box = mapFaceBoxToObjectCover(detection.box, video)
             if (!box) return
 
-            const drawBox = new faceapi.draw.DrawBox(box, {
+            const drawBox = new api.draw.DrawBox(box, {
                 label:
                     detections.length === 1
                         ? 'Face detected'
@@ -351,7 +368,7 @@ const captureImage = (): string | null => {
 }
 
 const cropFaceFromVideo = (
-    detection: faceapi.FaceDetection,
+    detection: any,
     paddingRatio = 0.25,
 ): string | null => {
     if (!videoRef.value || !canvasRef.value || !isVideoReady.value) return null
@@ -777,8 +794,9 @@ const getRegisteredFaceDescriptor = async (
     if (!employee.profile_url) return null
 
     const descriptorPromise = (async () => {
-        const image = await faceapi.fetchImage(employee.profile_url!)
-        const detection = await faceapi
+        const api = await loadFaceModels()
+        const image = await api.fetchImage(employee.profile_url!)
+        const detection = await api
             .detectSingleFace(image, faceDetectorOptions)
             .withFaceLandmarks()
             .withFaceDescriptor()
@@ -812,7 +830,7 @@ const verifyLiveFaceMatchesEmployee = async (
     }
 
     try {
-        await loadFaceModels()
+        const api = await loadFaceModels()
 
         faceStatusText.value = `Checking face for ${employeeFullName(employee)}...`
 
@@ -828,7 +846,7 @@ const verifyLiveFaceMatchesEmployee = async (
             return null
         }
 
-        const detections = await faceapi
+        const detections = await api
             .detectAllFaces(videoRef.value, faceDetectorOptions)
             .withFaceLandmarks()
             .withFaceDescriptors()
@@ -847,7 +865,7 @@ const verifyLiveFaceMatchesEmployee = async (
 
         const bestDetection = detections.reduce(
             (best, detection) => {
-                const distance = faceapi.euclideanDistance(
+                const distance = api.euclideanDistance(
                     registeredDescriptor,
                     detection.descriptor,
                 )
@@ -919,10 +937,10 @@ const recognizeLiveFaceEmployee = async (): Promise<LiveFaceMatch | null> => {
         return null
     }
 
-    await loadFaceModels()
+    const api = await loadFaceModels()
     faceStatusText.value = 'Recognizing face...'
 
-    const detections = await faceapi
+    const detections = await api
         .detectAllFaces(videoRef.value, faceDetectorOptions)
         .withFaceLandmarks()
         .withFaceDescriptors()
@@ -955,7 +973,7 @@ const recognizeLiveFaceEmployee = async (): Promise<LiveFaceMatch | null> => {
         if (!registeredDescriptor) continue
 
         for (const detection of detections) {
-            const distance = faceapi.euclideanDistance(
+            const distance = api.euclideanDistance(
                 registeredDescriptor,
                 detection.descriptor,
             )

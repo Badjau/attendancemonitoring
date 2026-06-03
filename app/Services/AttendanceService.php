@@ -144,7 +144,7 @@ class AttendanceService
         $locationData = $this->validateLocation($request, $employee);
 
         $firstTimeInAttendance = $this->model
-            ->whereDate('attendance_date', $now->toDateString())
+            ->where('attendance_date', $now->toDateString())
             ->where('employee_id', $employee->id)
             ->whereNotNull('time_in')
             ->where('time_in', '<=', $now)
@@ -195,7 +195,7 @@ class AttendanceService
     private function syncDailyTotalHours(Employee $employee, Carbon $date): ?float
     {
         $query = $this->model
-            ->whereDate('attendance_date', $date->toDateString())
+            ->where('attendance_date', $date->toDateString())
             ->where('employee_id', $employee->id);
 
         $firstTimeIn = (clone $query)

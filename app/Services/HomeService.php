@@ -5,7 +5,6 @@ namespace App\Services;
 use App\Models\Announcement;
 use App\Models\Attendance;
 use App\Models\Employee;
-use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\Cache;
 
@@ -13,12 +12,14 @@ class HomeService
 {
     public function getAttendanceToday(): Collection
     {
+        $today = today()->toDateString();
+
         return Attendance::with(['employee.media'])
-            ->whereDate('attendance_date', Carbon::now())
-            ->whereIn('id', function ($query) {
+            ->where('attendance_date', $today)
+            ->whereIn('id', function ($query) use ($today) {
                 $query->selectRaw('MAX(id)')
                     ->from('attendances')
-                    ->whereDate('attendance_date', today())
+                    ->where('attendance_date', $today)
                     ->groupBy('employee_id');
             })
             ->latest()
@@ -29,8 +30,8 @@ class HomeService
     public function getTodayBirthdayCelebrants(): Collection
     {
         return Employee::with(['media', 'department'])
-            ->whereMonth('date_of_birth', Carbon::now()->month)
-            ->whereDay('date_of_birth', Carbon::now()->day)
+            ->whereMonth('date_of_birth', today()->month)
+            ->whereDay('date_of_birth', today()->day)
             ->get();
     }
 
