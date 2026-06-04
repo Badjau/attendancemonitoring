@@ -28,6 +28,10 @@ class EmployeeInfolist
                     ->label('RFID UID')
                     ->placeholder('-'),
 
+                TextEntry::make('branch')
+                    ->label('Branch')
+                    ->placeholder('-'),
+
                 TextEntry::make('first_name')
                     ->label('First Name'),
 

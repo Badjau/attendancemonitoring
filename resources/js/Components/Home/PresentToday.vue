@@ -1,9 +1,27 @@
 <script setup lang="ts">
 import { CircleUser, Users } from '@lucide/vue'
+import { computed } from 'vue'
 
 const props = defineProps<{
     attendanceToday: any
+    activeBranch?: string
 }>()
+
+const normalizeBranch = (branch?: string | null) =>
+    (branch || '').trim().toLowerCase()
+
+const filteredAttendanceToday = computed(() => {
+    const branch = normalizeBranch(props.activeBranch)
+
+    if (!branch) {
+        return props.attendanceToday
+    }
+
+    return props.attendanceToday.filter(
+        (attendance: any) =>
+            normalizeBranch(attendance?.employee?.branch) === branch,
+    )
+})
 </script>
 
 <template>
@@ -27,11 +45,18 @@ const props = defineProps<{
                 <span
                     class="text-xs font-bold bg-brand-bg text-brand-headline px-3 py-1 rounded-full"
                     id="present-count"
-                    v-if="props.attendanceToday.length > 0"
+                    v-if="filteredAttendanceToday.length > 0"
                 >
-                    {{ props.attendanceToday.length }}
+                    {{ filteredAttendanceToday.length }}
                 </span>
             </div>
+
+            <p
+                v-if="props.activeBranch"
+                class="mb-4 text-xs font-bold uppercase tracking-wide text-brand-bg"
+            >
+                {{ props.activeBranch }}
+            </p>
 
             <div
                 class="space-y-3 grow custom-scrollbar overflow-y-auto pr-2"
@@ -40,7 +65,7 @@ const props = defineProps<{
                 <div
                     v-for="(
                         attendance, attendanceIndex
-                    ) in props.attendanceToday"
+                    ) in filteredAttendanceToday"
                     :key="attendanceIndex"
                     class="flex items-center gap-3 p-2 rounded-xl hover:bg-brand-paragraph/20 transition-colors"
                 >

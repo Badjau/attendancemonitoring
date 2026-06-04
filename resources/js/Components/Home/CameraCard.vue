@@ -28,6 +28,7 @@ type VerifiedEmployee = {
     first_name: string
     last_name: string
     position: string
+    branch?: string | null
     profile_url?: string | null
 }
 type LiveFaceMatch = {
@@ -46,6 +47,10 @@ const props = defineProps<{
     employees: VerifiedEmployee[]
     attendanceSchedule: AttendanceSchedule
     zktecoBridgeUrl: string
+}>()
+
+const emit = defineEmits<{
+    employeeVerified: [employee: VerifiedEmployee]
 }>()
 
 const toast = useToast()
@@ -759,7 +764,10 @@ const verifyEmployeeIdentifier = async (
             attendance_method: method,
         })
 
-        return response.data.employee as VerifiedEmployee
+        const employee = response.data.employee as VerifiedEmployee
+        emit('employeeVerified', employee)
+
+        return employee
     } catch (error: any) {
         const message =
             error?.response?.data?.message ??
@@ -998,6 +1006,7 @@ const recognizeLiveFaceEmployee = async (): Promise<LiveFaceMatch | null> => {
     }
 
     faceStatusText.value = `Recognized ${employeeFullName(bestMatch.employee)}.`
+    emit('employeeVerified', bestMatch.employee)
 
     return {
         employee: bestMatch.employee,
@@ -1376,6 +1385,10 @@ const pollZktecoBridgeStatus = async (
         }
 
         if (status.state === 'success') {
+            if (status.employee || status.data?.employee) {
+                emit('employeeVerified', status.employee || status.data.employee)
+            }
+
             window.dispatchEvent(
                 new CustomEvent('attendance:recorded', {
                     detail: { payload: status },

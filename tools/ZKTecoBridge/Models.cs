@@ -23,6 +23,7 @@ namespace ZKTecoBridge
         public string first_name { get; set; }
         public string last_name { get; set; }
         public string position { get; set; }
+        public string branch { get; set; }
         public bool is_birthday { get; set; }
 
         public override string ToString()
@@ -92,6 +93,7 @@ namespace ZKTecoBridge
         public string employee_name { get; set; }
         public string employee_first_name { get; set; }
         public string employee_id { get; set; }
+        public string employee_branch { get; set; }
         public bool is_birthday { get; set; }
         public string attendance_type { get; set; }
     }

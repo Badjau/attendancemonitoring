@@ -18,8 +18,15 @@ class Employee extends Model implements HasMedia, WebAuthnAuthenticatable
     use InteractsWithMedia;
     use WebAuthnAuthentication;
 
+    public const BRANCHES = [
+        'Esquivel',
+        'Apo',
+        'Cebu',
+    ];
+
     protected $fillable = [
         'department_id',
+        'branch',
         'employee_id',
         'rfid_uid',
         'password',
@@ -47,6 +54,13 @@ class Employee extends Model implements HasMedia, WebAuthnAuthenticatable
     public function getNameAttribute(): string
     {
         return "{$this->first_name} {$this->last_name}";
+    }
+
+    public static function branchOptions(): array
+    {
+        return collect(self::BRANCHES)
+            ->mapWithKeys(fn (string $branch): array => [$branch => $branch])
+            ->all();
     }
 
     public function webAuthnData(): WebAuthnData

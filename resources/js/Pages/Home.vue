@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Head, router } from '@inertiajs/vue3'
-import { onMounted, onUnmounted } from 'vue'
+import { onMounted, onUnmounted, ref } from 'vue'
 import FeedAndStaff from '@/Components/Home/FeedAndStaff.vue'
 import PresentToday from '@/Components/Home/PresentToday.vue'
 import CameraCard from '@/Components/Home/CameraCard.vue'
@@ -21,20 +21,65 @@ const props = defineProps<{
     zktecoBridgeUrl: string
 }>()
 
-const refreshAttendanceToday = () => {
+const activeBranch = ref('')
+
+const employeeIdFromPayload = (payload: any) =>
+    payload?.employee?.employee_id ??
+    payload?.data?.employee?.employee_id ??
+    payload?.employee_id ??
+    ''
+
+const branchFromPayload = (payload: any) =>
+    payload?.employee?.branch ??
+    payload?.data?.employee?.branch ??
+    payload?.employee_branch ??
+    ''
+
+const branchFromAttendance = (employeeId?: string) => {
+    if (!employeeId) return ''
+
+    const attendance = props.attendanceToday.find(
+        (attendance: any) =>
+            String(attendance?.employee?.employee_id ?? '') ===
+            String(employeeId),
+    )
+
+    return attendance?.employee?.branch?.trim() || ''
+}
+
+const refreshAttendanceToday = (employeeId?: string) => {
     router.reload({
         only: ['attendanceToday'],
+        data: activeBranch.value ? { branch: activeBranch.value } : {},
         preserveScroll: true,
         preserveState: true,
+        onSuccess: () => {
+            if (activeBranch.value || !employeeId) return
+
+            activeBranch.value = branchFromAttendance(employeeId)
+        },
     })
 }
 
+const setActiveBranch = (employee?: { branch?: string | null }) => {
+    activeBranch.value = employee?.branch?.trim() || ''
+}
+
+const handleAttendanceRecorded = (event: Event) => {
+    const payload = (event as CustomEvent)?.detail?.payload
+    const employeeId = employeeIdFromPayload(payload)
+    const branch = branchFromPayload(payload)
+
+    setActiveBranch({ branch })
+    refreshAttendanceToday(employeeId)
+}
+
 onMounted(() => {
-    window.addEventListener('attendance:recorded', refreshAttendanceToday)
+    window.addEventListener('attendance:recorded', handleAttendanceRecorded)
 })
 
 onUnmounted(() => {
-    window.removeEventListener('attendance:recorded', refreshAttendanceToday)
+    window.removeEventListener('attendance:recorded', handleAttendanceRecorded)
 })
 </script>
 
@@ -74,6 +119,7 @@ onUnmounted(() => {
                     :employees="props.employeesWithFaces"
                     :attendance-schedule="props.attendanceSchedule"
                     :zkteco-bridge-url="props.zktecoBridgeUrl"
+                    @employee-verified="setActiveBranch"
                 />
 
                 <!-- Greetings -->
@@ -81,7 +127,10 @@ onUnmounted(() => {
             </section>
 
             <!-- ================= 3. LEFT COLUMN: Present Today ================= -->
-            <PresentToday :attendance-today="props.attendanceToday" />
+            <PresentToday
+                :attendance-today="props.attendanceToday"
+                :active-branch="activeBranch"
+            />
         </main>
     </div>
 </template>

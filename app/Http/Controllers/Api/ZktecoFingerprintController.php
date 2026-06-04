@@ -34,7 +34,7 @@ class ZktecoFingerprintController extends Controller
             })
             ->orderBy('employee_id')
             ->limit(25)
-            ->get(['id', 'employee_id', 'first_name', 'last_name', 'position']);
+            ->get(['id', 'employee_id', 'first_name', 'last_name', 'position', 'branch']);
 
         return response()->json([
             'data' => $employees->map(fn (Employee $employee): array => $this->employeePayload($employee))->values(),
@@ -48,7 +48,7 @@ class ZktecoFingerprintController extends Controller
         // Paginate fingerprint templates to avoid loading all templates at once
         // This is important for systems with thousands of fingerprints
         $templates = ZktecoFingerprintTemplate::query()
-            ->with('employee:id,employee_id,first_name,last_name,position')
+            ->with('employee:id,employee_id,first_name,last_name,position,branch')
             ->orderBy('employee_id')
             ->orderBy('finger_index')
             ->paginate(500, ['*'], 'page', $request->query('page', 1));
@@ -111,7 +111,7 @@ class ZktecoFingerprintController extends Controller
             'enrolled_at' => now(),
         ]);
 
-        $template->load('employee:id,employee_id,first_name,last_name,position');
+        $template->load('employee:id,employee_id,first_name,last_name,position,branch');
 
         return response()->json([
             'message' => 'Fingerprint enrolled successfully.',
@@ -164,7 +164,7 @@ class ZktecoFingerprintController extends Controller
         ]);
 
         $attendance = $this->attendanceService->recordAttendance($attendanceRequest);
-        $attendance->load('employee:id,employee_id,first_name,last_name,position');
+        $attendance->load('employee:id,employee_id,first_name,last_name,position,branch');
 
         return response()->json([
             'message' => 'Attendance recorded successfully.',
@@ -226,6 +226,7 @@ class ZktecoFingerprintController extends Controller
             'first_name' => $employee->first_name,
             'last_name' => $employee->last_name,
             'position' => $employee->position,
+            'branch' => $employee->branch,
             'is_birthday' => $employee->date_of_birth?->isBirthday() ?? false,
         ];
     }

@@ -24,6 +24,7 @@ class FaceController extends Controller
                 'first_name' => $employee->first_name,
                 'last_name' => $employee->last_name,
                 'position' => $employee->position,
+                'branch' => $employee->branch,
                 'profile_url' => $employee->getFirstMediaUrl('employee-profile'),
             ])
             ->filter(fn (array $employee): bool => filled($employee['profile_url']))
@@ -46,6 +47,7 @@ class FaceController extends Controller
                 'first_name' => $employee->first_name,
                 'last_name' => $employee->last_name,
                 'position' => $employee->position,
+                'branch' => $employee->branch,
                 'profile_url' => $employee->getFirstMediaUrl('employee-profile'),
             ])
             ->values();

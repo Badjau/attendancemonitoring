@@ -79,6 +79,13 @@ class EmployeeImporter extends Importer
                 ->rules(['required', 'string', 'max:255'])
                 ->example('IT')
                 ->guess(['department name', 'team']),
+
+            ImportColumn::make('branch')
+                ->label('Branch')
+                ->rules(['nullable', 'string', 'max:255'])
+                ->ignoreBlankState()
+                ->example('Esquivel')
+                ->guess(['site', 'office', 'location', 'branch name']),
         ];
     }
 
@@ -104,6 +111,7 @@ class EmployeeImporter extends Importer
         $this->data['middle_name'] = $this->sanitizeText($this->data['middle_name'] ?? null);
         $this->data['position'] = $this->sanitizeText($this->data['position'] ?? null);
         $this->data['department'] = $this->sanitizeText($this->data['department'] ?? null);
+        $this->data['branch'] = $this->sanitizeText($this->data['branch'] ?? null);
     }
 
     public function getValidationRules(): array

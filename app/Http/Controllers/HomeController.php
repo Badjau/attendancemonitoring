@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Services\AttendanceScheduleSettings;
 use App\Services\HomeService;
+use Illuminate\Http\Request;
 use Inertia\Inertia;
 
 class HomeController extends Controller
@@ -13,9 +14,9 @@ class HomeController extends Controller
         protected AttendanceScheduleSettings $attendanceScheduleSettings,
     ) {}
 
-    public function home()
+    public function home(Request $request)
     {
-        $attendanceToday = $this->homeService->getAttendanceToday();
+        $attendanceToday = $this->homeService->getAttendanceToday($request->query('branch'));
         $todayBirthdayCelebrants = $this->homeService->getTodayBirthdayCelebrants();
         $announcements = $this->homeService->getAnnouncements();
         $employeesWithFaces = $this->homeService->getEmployeesWithFaces();

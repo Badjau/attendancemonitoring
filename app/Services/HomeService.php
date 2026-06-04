@@ -10,12 +10,18 @@ use Illuminate\Support\Facades\Cache;
 
 class HomeService
 {
-    public function getAttendanceToday(): Collection
+    public function getAttendanceToday(?string $branch = null): Collection
     {
         $today = today()->toDateString();
+        $branch = trim((string) $branch);
 
         return Attendance::with(['employee.media'])
             ->where('attendance_date', $today)
+            ->when($branch !== '', function ($query) use ($branch): void {
+                $query->whereHas('employee', function ($query) use ($branch): void {
+                    $query->whereRaw('LOWER(TRIM(branch)) = ?', [strtolower($branch)]);
+                });
+            })
             ->whereIn('id', function ($query) use ($today) {
                 $query->selectRaw('MAX(id)')
                     ->from('attendances')
@@ -23,7 +29,6 @@ class HomeService
                     ->groupBy('employee_id');
             })
             ->latest()
-            ->take(10)
             ->get();
     }
 
@@ -54,7 +59,7 @@ class HomeService
         // Limit to 100 employees max to prevent loading all employees into memory
         // This is better for systems with many employees
         return Employee::with('media')
-            ->select(['id', 'employee_id', 'first_name', 'last_name', 'position'])
+            ->select(['id', 'employee_id', 'first_name', 'last_name', 'position', 'branch'])
             ->limit(100)
             ->get()
             ->map(fn (Employee $employee): array => [
@@ -63,6 +68,7 @@ class HomeService
                 'first_name' => $employee->first_name,
                 'last_name' => $employee->last_name,
                 'position' => $employee->position,
+                'branch' => $employee->branch,
                 'profile_url' => $employee->getFirstMediaUrl('employee-profile'),
             ])
             ->filter(fn (array $employee): bool => filled($employee['profile_url']))
@@ -74,7 +80,7 @@ class HomeService
         // Cache per request to avoid repeated database queries during same request
         return Cache::remember("registered_faces_{$employeeId}", 3600, function () use ($employeeId) {
             $query = Employee::with('media')
-                ->select(['id', 'employee_id', 'first_name', 'last_name']);
+                ->select(['id', 'employee_id', 'first_name', 'last_name', 'branch']);
 
             if ($employeeId) {
                 $query->whereKeyNot($employeeId);
@@ -84,6 +90,7 @@ class HomeService
                 ->map(fn (Employee $employee): array => [
                     'employee_id' => $employee->employee_id,
                     'name' => $employee->first_name . ' ' . $employee->last_name,
+                    'branch' => $employee->branch,
                     'profile_url' => $employee->getFirstMediaUrl('employee-profile'),
                 ])
                 ->filter(fn (array $employee): bool => filled($employee['profile_url']))

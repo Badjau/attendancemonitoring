@@ -712,6 +712,7 @@ namespace ZKTecoBridge
                 employee_id = employee == null ? null : employee.employee_id,
                 employee_name = employee == null ? null : employee.name,
                 employee_first_name = employee == null ? null : employee.first_name,
+                employee_branch = employee == null ? null : employee.branch,
                 is_birthday = employee != null && employee.is_birthday,
                 attendance_type = attendanceType,
             };
@@ -755,6 +756,7 @@ namespace ZKTecoBridge
                 existing.first_name = employee.first_name;
                 existing.last_name = employee.last_name;
                 existing.position = employee.position;
+                existing.branch = employee.branch;
             }
 
             employeeCombo.SelectedItem = existing;

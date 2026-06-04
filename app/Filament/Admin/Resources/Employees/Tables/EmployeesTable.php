@@ -47,6 +47,10 @@ class EmployeesTable
                     ->placeholder('-')
                     ->toggleable(),
 
+                TextColumn::make('branch')
+                    ->searchable()
+                    ->sortable(),
+
                 TextColumn::make('first_name')
                     ->searchable()
                     ->sortable(),
@@ -87,6 +91,10 @@ class EmployeesTable
                     ->relationship('department', 'name')
                     ->searchable()
                     ->preload(),
+
+                SelectFilter::make('branch')
+                    ->options(Employee::branchOptions())
+                    ->searchable(),
 
                 SelectFilter::make('position'),
             ])

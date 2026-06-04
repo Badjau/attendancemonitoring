@@ -27,6 +27,7 @@ class AttendanceController extends Controller
                     'first_name' => $employee->first_name,
                     'last_name' => $employee->last_name,
                     'position' => $employee->position,
+                    'branch' => $employee->branch,
                     'profile_url' => $verifiedEmployee['profile_url'],
                 ],
             ]);
@@ -56,6 +57,14 @@ class AttendanceController extends Controller
                         'first_name' => $employee->first_name,
                         'is_birthday' => $employee->date_of_birth?->isBirthday() ?? false,
                         'attendance_type' => $request->attendance_type,
+                    ],
+                    'employee' => [
+                        'id' => $employee->id,
+                        'employee_id' => $employee->employee_id,
+                        'first_name' => $employee->first_name,
+                        'last_name' => $employee->last_name,
+                        'position' => $employee->position,
+                        'branch' => $employee->branch,
                     ],
                 ]);
             }

@@ -29,6 +29,11 @@ class EmployeeForm
                                 ->relationship('department', 'name')
                                 ->required(),
 
+                            TextInput::make('branch')
+                                ->required()
+                                ->maxLength(255)
+                                ->datalist(Employee::BRANCHES),
+
                             TextInput::make('first_name')
                                 ->required(),
 
