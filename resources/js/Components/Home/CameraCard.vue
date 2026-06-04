@@ -1376,6 +1376,11 @@ const pollZktecoBridgeStatus = async (
         }
 
         if (status.state === 'success') {
+            window.dispatchEvent(
+                new CustomEvent('attendance:recorded', {
+                    detail: { payload: status },
+                }),
+            )
             toast.add({
                 severity: 'success',
                 summary: 'Success',

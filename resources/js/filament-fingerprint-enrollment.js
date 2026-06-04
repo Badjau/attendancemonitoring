@@ -334,7 +334,7 @@ window.fingerprintEnrollment = ({
                 this.enrollmentCaptured = true
                 this.enrollmentCommandId = commandId
                 this.message =
-                    'Fingerprint captured. Click Submit in the scanner window to save this registration.'
+                    'Fingerprint captured. Click Save fingerprint to finish this registration.'
                 continue
             }
 

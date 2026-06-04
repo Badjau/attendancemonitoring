@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { Head, Link } from '@inertiajs/vue3'
+import { Head, router } from '@inertiajs/vue3'
+import { onMounted, onUnmounted } from 'vue'
 import FeedAndStaff from '@/Components/Home/FeedAndStaff.vue'
 import PresentToday from '@/Components/Home/PresentToday.vue'
 import CameraCard from '@/Components/Home/CameraCard.vue'
@@ -19,6 +20,22 @@ const props = defineProps<{
     }
     zktecoBridgeUrl: string
 }>()
+
+const refreshAttendanceToday = () => {
+    router.reload({
+        only: ['attendanceToday'],
+        preserveScroll: true,
+        preserveState: true,
+    })
+}
+
+onMounted(() => {
+    window.addEventListener('attendance:recorded', refreshAttendanceToday)
+})
+
+onUnmounted(() => {
+    window.removeEventListener('attendance:recorded', refreshAttendanceToday)
+})
 </script>
 
 <template>

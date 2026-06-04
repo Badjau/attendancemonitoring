@@ -2,17 +2,18 @@ import { defineConfig } from 'vite';
 import laravel from 'laravel-vite-plugin';
 import tailwindcss from '@tailwindcss/vite';
 import vue from '@vitejs/plugin-vue';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath, URL } from 'node:url';
 
-const devServerHost = '20.20.52.75';
+const devServerHost = '20.20.52.47';
 const devServerPort = 5174;
 const allowedOrigins = [
     'https://attendancemonitoring.test',
-    'https://20.20.52.75',
+    'https://20.20.52.47',
 ];
 const sslKeyPath = 'C:/laragon/etc/ssl/laragon.key';
 const sslCertPath = 'C:/laragon/etc/ssl/laragon.crt';
+const hasSslCertificates = existsSync(sslKeyPath) && existsSync(sslCertPath);
 
 export default defineConfig({
     resolve: {
@@ -43,10 +44,12 @@ export default defineConfig({
     ],
     server: {
         origin: `https://${devServerHost}:${devServerPort}`,
-        https: {
-            key: readFileSync(sslKeyPath),
-            cert: readFileSync(sslCertPath),
-        },
+        https: hasSslCertificates
+            ? {
+                  key: readFileSync(sslKeyPath),
+                  cert: readFileSync(sslCertPath),
+              }
+            : undefined,
         cors: {
             origin: allowedOrigins,
         },

@@ -131,5 +131,15 @@
             <span x-show="! zktecoLoading && enrollmentCaptured">Scan again</span>
             <span x-show="zktecoLoading">Reading fingerprint...</span>
         </button>
+
+        <button
+            type="button"
+            class="fi-btn fi-btn-size-md fi-color-success"
+            :disabled="! canSubmit"
+            @click="submitEnrollment"
+        >
+            <span x-show="! submittingEnrollment">Save fingerprint</span>
+            <span x-show="submittingEnrollment">Saving...</span>
+        </button>
     </div>
 </div>

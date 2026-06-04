@@ -249,6 +249,8 @@ namespace ZKTecoBridge
 
         private void ConfigureApiClient()
         {
+            ServicePointManager.ServerCertificateValidationCallback += (sender, certificate, chain, sslPolicyErrors) => true;
+
             var baseUrl = ConfigurationManager.AppSettings["ApiBaseUrl"];
             var token = ConfigurationManager.AppSettings["ScannerToken"];
 

@@ -203,10 +203,18 @@ const postAttendanceRecord = async (record) => {
         throw error
     }
 
-    return {
+    const result = {
         payload,
         record: enrichedRecord,
     }
+
+    window.dispatchEvent(
+        new CustomEvent('attendance:recorded', {
+            detail: result,
+        }),
+    )
+
+    return result
 }
 
 const sortOldestFirst = (/** @type {any[]} */ records) =>
