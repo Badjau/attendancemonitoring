@@ -5,6 +5,7 @@ Laravel/Vue attendance monitoring system with RFID, face attendance, and ZKTeco 
 ## Documentation
 
 - [Test Server Installation Guide](docs/TEST_SERVER_INSTALLATION.md)
+- [Main Server Deployment Guide](docs/MAIN_SERVER_DEPLOYMENT.md)
 - [System Documentation](docs/SYSTEM_DOCUMENTATION.md)
 - [ZKTeco Fingerprint Setup](docs/ZKTECO_FINGERPRINT_SETUP.md)
 
