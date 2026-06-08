@@ -256,7 +256,7 @@ namespace ZKTecoBridge
 
             if (string.IsNullOrWhiteSpace(baseUrl))
             {
-                baseUrl = "http://timeclock-system.test/api/zkteco";
+                baseUrl = "http://attendancemonitoring.test/api/zkteco";
             }
 
             httpClient.BaseAddress = new Uri(baseUrl.TrimEnd('/') + "/");

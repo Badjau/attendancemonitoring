@@ -9,7 +9,7 @@ This WinForms bridge connects the ZKTeco ZKFinger SDK to the Laravel attendance 
 2. Set `ZKTECO_SCANNER_TOKEN` in Laravel `.env`.
 3. Put the same token in `tools/ZKTecoBridge/App.config` under `ScannerToken`.
 4. Confirm `ApiBaseUrl` points to the local Laravel app, for example:
-   `http://timeclock-system.test/api/zkteco`
+   `http://attendancemonitoring.test/api/zkteco`
 5. Build `ZKTecoBridge.csproj` as `x86`.
 6. Register the browser launcher protocol once:
    `powershell -ExecutionPolicy Bypass -File tools\ZKTecoBridge\RegisterProtocol.ps1`

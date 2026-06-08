@@ -25,7 +25,7 @@ Required software:
 Project path used by this guide:
 
 ```text
-C:\laragon\www\timeclock-system
+C:\laragon\www\attendancemonitoring
 ```
 
 SDK path used by this guide:
@@ -55,7 +55,7 @@ After installation:
 Open PowerShell:
 
 ```powershell
-cd C:\laragon\www\timeclock-system
+cd C:\laragon\www\attendancemonitoring
 ```
 
 Generate a scanner token:
@@ -104,13 +104,13 @@ That table stores:
 Open:
 
 ```text
-C:\laragon\www\timeclock-system\tools\ZKTecoBridge\App.config
+C:\laragon\www\attendancemonitoring\tools\ZKTecoBridge\App.config
 ```
 
 Confirm these values:
 
 ```xml
-<add key="ApiBaseUrl" value="http://timeclock-system.test/api/zkteco" />
+<add key="ApiBaseUrl" value="http://attendancemonitoring.test/api/zkteco" />
 <add key="ScannerToken" value="PASTE_GENERATED_TOKEN_HERE" />
 <add key="DeviceSerial" value="ZKTECO-LOCAL" />
 <add key="LocalBridgeUrl" value="http://127.0.0.1:8765/" />
@@ -129,7 +129,7 @@ Important:
 If you use Laragon virtual host, use:
 
 ```xml
-<add key="ApiBaseUrl" value="http://timeclock-system.test/api/zkteco" />
+<add key="ApiBaseUrl" value="http://attendancemonitoring.test/api/zkteco" />
 ```
 
 ## 5. Build The Bridge App
@@ -137,7 +137,7 @@ If you use Laragon virtual host, use:
 Run:
 
 ```powershell
-cd C:\laragon\www\timeclock-system
+cd C:\laragon\www\attendancemonitoring
 dotnet build .\tools\ZKTecoBridge\ZKTecoBridge.csproj -p:Configuration=Debug -p:Platform=x86
 ```
 
@@ -150,7 +150,7 @@ Build succeeded.
 The executable will be created here:
 
 ```text
-C:\laragon\www\timeclock-system\tools\ZKTecoBridge\bin\x86\Debug\ZKTecoBridge.exe
+C:\laragon\www\attendancemonitoring\tools\ZKTecoBridge\bin\x86\Debug\ZKTecoBridge.exe
 ```
 
 The build may show warnings from `BitmapFormat.cs`. Those warnings are from the SDK sample helper and do not block the bridge.
@@ -162,7 +162,7 @@ This lets the web app open the bridge automatically when you click the ZKTeco en
 Run this once:
 
 ```powershell
-cd C:\laragon\www\timeclock-system
+cd C:\laragon\www\attendancemonitoring
 powershell -ExecutionPolicy Bypass -File .\tools\ZKTecoBridge\RegisterProtocol.ps1
 ```
 
@@ -185,13 +185,13 @@ The browser may show a confirmation prompt. Click allow/open.
 If using Laragon virtual host, make sure Laragon is running and your site is accessible:
 
 ```text
-http://timeclock-system.test
+http://attendancemonitoring.test
 ```
 
 If using Laravel's built-in server:
 
 ```powershell
-cd C:\laragon\www\timeclock-system
+cd C:\laragon\www\attendancemonitoring
 php artisan serve
 ```
 
@@ -208,7 +208,7 @@ Make sure `ApiBaseUrl` in `App.config` matches the URL you are using.
 Run:
 
 ```powershell
-cd C:\laragon\www\timeclock-system
+cd C:\laragon\www\attendancemonitoring
 npm run build
 ```
 
@@ -222,7 +222,7 @@ Use the same token from `.env`.
 $token = "PASTE_GENERATED_TOKEN_HERE"
 
 Invoke-RestMethod `
-  -Uri "http://timeclock-system.test/api/zkteco/employees" `
+  -Uri "http://attendancemonitoring.test/api/zkteco/employees" `
   -Headers @{ Authorization = "Bearer $token" }
 ```
 
@@ -246,7 +246,7 @@ Test fingerprint list:
 
 ```powershell
 Invoke-RestMethod `
-  -Uri "http://timeclock-system.test/api/zkteco/fingerprints" `
+  -Uri "http://attendancemonitoring.test/api/zkteco/fingerprints" `
   -Headers @{ Authorization = "Bearer $token" }
 ```
 
@@ -257,7 +257,7 @@ It may return an empty `data` array before enrollment. That is normal.
 Before relying on automatic launch, test the bridge manually once.
 
 ```powershell
-cd C:\laragon\www\timeclock-system
+cd C:\laragon\www\attendancemonitoring
 .\tools\ZKTecoBridge\bin\x86\Debug\ZKTecoBridge.exe
 ```
 
@@ -278,7 +278,7 @@ If no scanner is connected, the bridge will show an error. Install the driver an
 Go to the admin panel:
 
 ```text
-http://timeclock-system.test/admin
+http://attendancemonitoring.test/admin
 ```
 
 Open:
@@ -440,7 +440,7 @@ Restart the bridge.
 Run the protocol registration command again:
 
 ```powershell
-cd C:\laragon\www\timeclock-system
+cd C:\laragon\www\attendancemonitoring
 powershell -ExecutionPolicy Bypass -File .\tools\ZKTecoBridge\RegisterProtocol.ps1
 ```
 
@@ -459,7 +459,7 @@ tools\ZKTecoBridge\App.config
 If Laravel is on Laragon virtual host:
 
 ```xml
-<add key="ApiBaseUrl" value="http://timeclock-system.test/api/zkteco" />
+<add key="ApiBaseUrl" value="http://attendancemonitoring.test/api/zkteco" />
 ```
 
 If Laravel is on `php artisan serve`:
