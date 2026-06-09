@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Enums\Attendance\AttendanceMethod;
+use App\Models\Employee;
 use App\Models\TimeclockAuthorizedUser;
 use App\Models\TimeclockUnlockLog;
 use Illuminate\Http\Request;
@@ -28,6 +29,8 @@ class TimeclockUnlockService
             ]);
         }
 
+        $authorizedUser->loadMissing('employee');
+
         $log = TimeclockUnlockLog::create([
             'timeclock_authorized_user_id' => $authorizedUser->id,
             'method' => $request['method'],
@@ -44,6 +47,14 @@ class TimeclockUnlockService
             'timeclock_unlocked_by' => $authorizedUser->id,
             'timeclock_unlocked_at' => now()->toDateTimeString(),
         ]);
+
+        if ($authorizedUser->employee?->role === Employee::ROLE_ADMIN) {
+            $request->session()->put([
+                'admin_unlocked_by' => $authorizedUser->employee->id,
+                'admin_unlocked_at' => now()->toDateTimeString(),
+            ]);
+        }
+
         $request->session()->save();
 
         return $authorizedUser;

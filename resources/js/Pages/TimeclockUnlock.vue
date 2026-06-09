@@ -24,6 +24,10 @@ type BridgeStatus = {
     score?: number | null
 }
 type UnlockMethod = 'keypad' | 'rfid' | 'fingerprint'
+type UnlockDestinations = {
+    timekeeping: string
+    admin: string
+}
 
 const videoRef = ref<HTMLVideoElement | null>(null)
 const canvasRef = ref<HTMLCanvasElement | null>(null)
@@ -35,13 +39,20 @@ const isCameraReady = ref(false)
 const isSubmitting = ref(false)
 const isFingerprintScanning = ref(false)
 const errorText = ref('')
+const unlockDestinations = ref<UnlockDestinations | null>(null)
 const statusText = ref(
     'Camera audit is required to unlock the attendance system.',
 )
 
 let stream: MediaStream | null = null
 let rfidTimeout: ReturnType<typeof setTimeout> | null = null
+let autoFingerprintTimeout: ReturnType<typeof setTimeout> | null = null
+let isAutoFingerprintScanActive = false
+let autoFingerprintScanVersion = 0
 let fingerprintPollAbort = false
+
+const AUTO_FINGERPRINT_RETRY_MS = 700
+const AUTO_FINGERPRINT_SCAN_WINDOW_MS = 120000
 
 const selectedCredential = computed(() =>
     method.value === 'keypad'
@@ -115,13 +126,25 @@ const focusRfid = async () => {
 }
 
 const switchMethod = async (nextMethod: UnlockMethod) => {
+    clearAutoFingerprintScan()
     fingerprintPollAbort = true
     isFingerprintScanning.value = false
     method.value = nextMethod
     errorText.value = ''
+    unlockDestinations.value = null
     rfidBuffer.value = ''
     password.value = ''
     await focusRfid()
+}
+
+const clearAutoFingerprintScan = () => {
+    if (autoFingerprintTimeout) {
+        clearTimeout(autoFingerprintTimeout)
+        autoFingerprintTimeout = null
+    }
+
+    isAutoFingerprintScanActive = false
+    autoFingerprintScanVersion++
 }
 
 const submitUnlock = async (
@@ -165,6 +188,12 @@ const submitUnlock = async (
         )
 
         statusText.value = response.data.message ?? 'Timeclock unlocked.'
+        if (response.data.destinations) {
+            unlockDestinations.value = response.data.destinations
+            statusText.value = 'Choose where to continue.'
+            return
+        }
+
         router.visit(response.data.redirect ?? '/')
     } catch (error: any) {
         errorText.value = error?.response?.data?.message ?? 'Unlock failed.'
@@ -176,6 +205,14 @@ const submitUnlock = async (
     } finally {
         isSubmitting.value = false
     }
+}
+
+const continueToTimekeeping = () => {
+    router.visit(unlockDestinations.value?.timekeeping ?? '/')
+}
+
+const continueToAdminDashboard = () => {
+    window.location.href = unlockDestinations.value?.admin ?? '/admin'
 }
 
 const onRfidInput = () => {
@@ -245,11 +282,20 @@ const getBridgeStatus = async (): Promise<BridgeStatus> => {
     return response.json().catch(() => ({}))
 }
 
-const startBridgeUnlockScan = async (commandId: string) => {
+const startBridgeUnlockScan = async (
+    commandId: string,
+    options: { launchBridge?: boolean } = {},
+) => {
+    const shouldLaunchBridge = options.launchBridge ?? true
+
     try {
         await postBridgeCommand('unlock', { command_id: commandId })
         return
     } catch (error) {
+        if (!shouldLaunchBridge) {
+            throw error
+        }
+
         window.location.href = `zkteco-bridge://unlock?payload=${encodeURIComponent(
             JSON.stringify({ command_id: commandId }),
         )}`
@@ -272,11 +318,19 @@ const startBridgeUnlockScan = async (commandId: string) => {
     throw lastError || new Error('Unable to connect to fingerprint scanner.')
 }
 
-const pollFingerprintUnlock = async (commandId: string) => {
+const pollFingerprintUnlock = async (
+    commandId: string,
+    timeoutMs = 30000,
+    shouldContinue: (() => boolean) | undefined = undefined,
+) => {
     const startedAt = Date.now()
 
-    while (!fingerprintPollAbort && Date.now() - startedAt < 30000) {
+    while (!fingerprintPollAbort && Date.now() - startedAt < timeoutMs) {
+        if (shouldContinue && !shouldContinue()) return
+
         const status = await getBridgeStatus()
+
+        if (shouldContinue && !shouldContinue()) return
 
         if (status.command_id === commandId && status.message) {
             statusText.value = status.message
@@ -305,16 +359,36 @@ const pollFingerprintUnlock = async (commandId: string) => {
     throw new Error('No fingerprint scan was received. Please try again.')
 }
 
-const startFingerprintUnlock = async () => {
+const runFingerprintUnlock = async (
+    automatic = false,
+    scanVersion = autoFingerprintScanVersion,
+) => {
+    if (
+        unlockDestinations.value ||
+        isSubmitting.value ||
+        isFingerprintScanning.value
+    ) {
+        return false
+    }
+
+    if (!automatic) {
+        clearAutoFingerprintScan()
+    }
+
     errorText.value = ''
     fingerprintPollAbort = true
-    await switchMethod('fingerprint')
+    method.value = 'fingerprint'
+    rfidBuffer.value = ''
+    password.value = ''
 
     const auditImage = captureAuditImage()
     if (!auditImage) {
-        errorText.value =
-            'Camera is not ready. Allow camera access before unlocking.'
-        return
+        if (!automatic) {
+            errorText.value =
+                'Camera is not ready. Allow camera access before unlocking.'
+        }
+
+        return false
     }
 
     const commandId = `unlock-${Date.now()}-${Math.random().toString(36).slice(2)}`
@@ -324,28 +398,85 @@ const startFingerprintUnlock = async () => {
         fingerprintPollAbort = false
         statusText.value = 'Connecting to fingerprint scanner...'
 
-        await startBridgeUnlockScan(commandId)
+        await startBridgeUnlockScan(commandId, {
+            launchBridge: !automatic,
+        })
 
         statusText.value = 'Scan an authorized fingerprint to unlock.'
-        await pollFingerprintUnlock(commandId)
+        await pollFingerprintUnlock(
+            commandId,
+            automatic ? AUTO_FINGERPRINT_SCAN_WINDOW_MS : 30000,
+            automatic
+                ? () => scanVersion === autoFingerprintScanVersion
+                : undefined,
+        )
+
+        return true
     } catch (error: any) {
         fingerprintPollAbort = true
-        errorText.value =
-            error?.response?.data?.message ||
-            error?.message ||
-            'Unable to scan fingerprint.'
+        if (!automatic) {
+            errorText.value =
+                error?.response?.data?.message ||
+                error?.message ||
+                'Unable to scan fingerprint.'
+        }
         statusText.value =
             'Enter PIN, scan RFID, or scan fingerprint to unlock.'
+
+        return false
     } finally {
         isFingerprintScanning.value = false
     }
 }
 
+const startFingerprintUnlock = async () => {
+    await runFingerprintUnlock(false)
+
+    if (!unlockDestinations.value) {
+        scheduleAutoFingerprintScan()
+    }
+}
+
+const scheduleAutoFingerprintScan = (delay = AUTO_FINGERPRINT_RETRY_MS) => {
+    if (autoFingerprintTimeout) {
+        clearTimeout(autoFingerprintTimeout)
+    }
+
+    autoFingerprintTimeout = setTimeout(async () => {
+        if (unlockDestinations.value || method.value !== 'fingerprint') {
+            return
+        }
+
+        if (
+            isAutoFingerprintScanActive ||
+            isSubmitting.value ||
+            isFingerprintScanning.value ||
+            !isCameraReady.value
+        ) {
+            scheduleAutoFingerprintScan()
+            return
+        }
+
+        isAutoFingerprintScanActive = true
+        const scanVersion = ++autoFingerprintScanVersion
+
+        try {
+            await runFingerprintUnlock(true, scanVersion)
+        } finally {
+            if (scanVersion === autoFingerprintScanVersion) {
+                isAutoFingerprintScanActive = false
+                scheduleAutoFingerprintScan()
+            }
+        }
+    }, delay)
+}
+
 onMounted(async () => {
     try {
         await startCamera()
-        statusText.value =
-            'Enter PIN, scan RFID, or scan fingerprint to unlock.'
+        method.value = 'fingerprint'
+        statusText.value = 'Scan an authorized fingerprint to unlock.'
+        scheduleAutoFingerprintScan(1000)
     } catch (error) {
         errorText.value =
             error instanceof Error ? error.message : 'Failed to start.'
@@ -353,6 +484,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+    clearAutoFingerprintScan()
     fingerprintPollAbort = true
     stopCamera()
     if (rfidTimeout) clearTimeout(rfidTimeout)
@@ -517,6 +649,29 @@ onUnmounted(() => {
                 >
                     <TriangleAlert class="mt-0.5 h-5 w-5 shrink-0" />
                     <p class="text-sm font-bold">{{ errorText }}</p>
+                </div>
+
+                <div
+                    v-if="unlockDestinations"
+                    class="mt-5 grid gap-3 sm:grid-cols-2"
+                >
+                    <button
+                        type="button"
+                        class="inline-flex items-center justify-center gap-2 rounded-2xl border-2 border-brand-stroke bg-brand-accent px-4 py-4 text-sm font-black uppercase tracking-widest shadow-[5px_5px_0px_0px_#001e1d] transition-all duration-200 hover:-translate-y-1 hover:shadow-[7px_7px_0px_0px_#001e1d] active:translate-x-1 active:translate-y-1 active:shadow-none"
+                        @click="continueToTimekeeping"
+                    >
+                        <LockKeyhole class="h-5 w-5" />
+                        Timekeeping
+                    </button>
+
+                    <button
+                        type="button"
+                        class="inline-flex items-center justify-center gap-2 rounded-2xl border-2 border-brand-stroke bg-brand-stroke px-4 py-4 text-sm font-black uppercase tracking-widest text-brand-headline shadow-[5px_5px_0px_0px_#abd1c6] transition-all duration-200 hover:-translate-y-1 hover:shadow-[7px_7px_0px_0px_#abd1c6] active:translate-x-1 active:translate-y-1 active:shadow-none"
+                        @click="continueToAdminDashboard"
+                    >
+                        <LockKeyhole class="h-5 w-5" />
+                        Admin dashboard
+                    </button>
                 </div>
             </div>
         </section>

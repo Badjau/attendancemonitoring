@@ -20,9 +20,16 @@ class UserResource extends Resource
 {
     protected static ?string $model = User::class;
 
+    protected static bool $shouldRegisterNavigation = false;
+
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedRectangleStack;
 
     protected static ?string $recordTitleAttribute = 'name';
+
+    public static function canAccess(): bool
+    {
+        return false;
+    }
 
     public static function form(Schema $schema): Schema
     {

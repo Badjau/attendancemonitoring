@@ -2,6 +2,7 @@
 
 namespace App\Filament\Admin\Resources\Employees\Schemas;
 
+use App\Models\Employee;
 use Filament\Infolists\Components\SpatieMediaLibraryImageEntry;
 use Filament\Infolists\Components\TextEntry;
 use Filament\Schemas\Schema;
@@ -49,6 +50,11 @@ class EmployeeInfolist
                 TextEntry::make('position')
                     ->label('Position')
                     ->placeholder('-'),
+
+                TextEntry::make('role')
+                    ->label('Employee Type')
+                    ->formatStateUsing(fn (?string $state): string => Employee::roleOptions()[$state] ?? 'User Employee')
+                    ->badge(),
 
                 TextEntry::make('department.name')
                     ->label('Department')

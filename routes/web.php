@@ -59,7 +59,7 @@ Route::controller(EmployeeWebAuthnController::class)
 
 // ROUTE FOR EMPLOYEE WEB AUTHN (ADMIN)
 Route::controller(EmployeeWebAuthnController::class)
-    ->middleware('auth')
+    ->middleware('admin.unlocked')
     ->prefix('admin/employees/{employee}/fingerprint')
     ->as('admin.employees.fingerprint.')
     ->group(function () {
@@ -75,5 +75,5 @@ Route::controller(FaceController::class)
         Route::post('/face/register', 'storeRegistration')->name('face.register.store');
         Route::get('/face/register', [FaceController::class, 'register'])->name('face.register');
         Route::post('/face/register', [FaceController::class, 'storeRegistration'])->name('face.register.store');
-        Route::post('/admin/employees/{employee}/face', 'storeEmployeeRegistration')->middleware('auth')->name('admin.employees.face.register');
+        Route::post('/admin/employees/{employee}/face', 'storeEmployeeRegistration')->middleware('admin.unlocked')->name('admin.employees.face.register');
     });

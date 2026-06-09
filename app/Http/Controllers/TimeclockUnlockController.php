@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Http\Requests\TimeclockUnlockRequest;
+use App\Models\Employee;
 use App\Services\TimeclockUnlockService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -28,11 +29,17 @@ class TimeclockUnlockController extends Controller
     public function store(TimeclockUnlockRequest $request): JsonResponse
     {
         try {
-            $this->timeclockUnlockService->store($request);
+            $authorizedUser = $this->timeclockUnlockService->store($request);
+            $authorizedUser->loadMissing('employee');
+            $isAdmin = $authorizedUser->employee?->role === Employee::ROLE_ADMIN;
 
             return response()->json([
                 'message' => 'Timeclock unlocked.',
-                'redirect' => route('home'),
+                'redirect' => $isAdmin ? null : route('home'),
+                'destinations' => $isAdmin ? [
+                    'timekeeping' => route('home'),
+                    'admin' => url('/admin'),
+                ] : null,
             ]);
         } catch (ValidationException $e) {
             return response()->json([
@@ -49,7 +56,12 @@ class TimeclockUnlockController extends Controller
 
     public function destroy(): RedirectResponse
     {
-        session()->forget(['timeclock_unlocked_by', 'timeclock_unlocked_at']);
+        session()->forget([
+            'admin_unlocked_by',
+            'admin_unlocked_at',
+            'timeclock_unlocked_by',
+            'timeclock_unlocked_at',
+        ]);
 
         return redirect()->route('timeclock.unlock');
     }

@@ -17,7 +17,7 @@ class EmployeesTable
     public static function configure(Table $table): Table
     {
         return $table
-            ->modifyQueryUsing(fn($query) => $query->with('latestZktecoFingerprintTemplate'))
+            ->modifyQueryUsing(fn ($query) => $query->with('latestZktecoFingerprintTemplate'))
             ->columns([
                 TextColumn::make('employee_id')
                     ->label('Employee ID')
@@ -30,16 +30,16 @@ class EmployeesTable
                         $image = $record->latestZktecoFingerprintTemplate?->fingerprint_image_base64;
 
                         return filled($image)
-                            ? 'data:image/png;base64,' . $image
+                            ? 'data:image/png;base64,'.$image
                             : null;
                     })
                     ->imageHeight(52)
                     ->imageWidth(52)
                     ->square()
-                    ->tooltip(fn(Employee $record): string => $record->latestZktecoFingerprintTemplate
+                    ->tooltip(fn (Employee $record): string => $record->latestZktecoFingerprintTemplate
                         ? 'Fingerprint enrolled'
                         : 'No Fingerprint enrolled')
-                    ->placeholder("Pending Enrollment."),
+                    ->placeholder('Pending Enrollment.'),
 
                 TextColumn::make('rfid_uid')
                     ->label('RFID UID')
@@ -71,6 +71,12 @@ class EmployeesTable
                     ->searchable()
                     ->sortable(),
 
+                TextColumn::make('role')
+                    ->label('Employee Type')
+                    ->formatStateUsing(fn (?string $state): string => Employee::roleOptions()[$state] ?? 'User Employee')
+                    ->badge()
+                    ->sortable(),
+
                 TextColumn::make('department.name')
                     ->label('Department')
                     ->searchable()
@@ -95,6 +101,10 @@ class EmployeesTable
                 SelectFilter::make('branch')
                     ->options(Employee::branchOptions())
                     ->searchable(),
+
+                SelectFilter::make('role')
+                    ->label('Employee Type')
+                    ->options(Employee::roleOptions()),
 
                 SelectFilter::make('position'),
             ])

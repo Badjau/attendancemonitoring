@@ -18,6 +18,10 @@ class Employee extends Model implements HasMedia, WebAuthnAuthenticatable
     use InteractsWithMedia;
     use WebAuthnAuthentication;
 
+    public const ROLE_ADMIN = 'admin';
+
+    public const ROLE_EMPLOYEE = 'employee';
+
     public const BRANCHES = [
         'Esquivel',
         'Apo',
@@ -35,6 +39,7 @@ class Employee extends Model implements HasMedia, WebAuthnAuthenticatable
         'middle_name',
         'date_of_birth',
         'position',
+        'role',
     ];
 
     protected $casts = [
@@ -61,6 +66,14 @@ class Employee extends Model implements HasMedia, WebAuthnAuthenticatable
         return collect(self::BRANCHES)
             ->mapWithKeys(fn (string $branch): array => [$branch => $branch])
             ->all();
+    }
+
+    public static function roleOptions(): array
+    {
+        return [
+            self::ROLE_EMPLOYEE => 'User Employee',
+            self::ROLE_ADMIN => 'Admin',
+        ];
     }
 
     public function webAuthnData(): WebAuthnData

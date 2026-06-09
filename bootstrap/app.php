@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Middleware\EnsureAdminDashboardUnlocked;
 use App\Http\Middleware\EnsureTimeclockUnlocked;
 use App\Http\Middleware\HandleInertiaRequests;
 use Illuminate\Foundation\Application;
@@ -38,6 +39,7 @@ return Application::configure(basePath: dirname(__DIR__))
         ]);
 
         $middleware->alias([
+            'admin.unlocked' => EnsureAdminDashboardUnlocked::class,
             'timeclock.unlocked' => EnsureTimeclockUnlocked::class,
         ]);
     })
