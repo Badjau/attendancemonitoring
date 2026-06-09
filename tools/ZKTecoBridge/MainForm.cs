@@ -39,14 +39,17 @@ namespace ZKTecoBridge
         private int fingerprintHeight;
         private bool shouldStopCapture = true;
         private bool isEnrolling;
+        private bool isHandlingCapture;
         private Thread captureThread;
         private Thread localServerThread;
         private bool shouldStopLocalServer;
         private readonly EmployeeDto launchEnrollmentEmployee;
         private readonly ZktecoAttendanceCommand launchAttendanceCommand;
+        private readonly ZktecoUnlockCommand launchUnlockCommand;
         private EmployeeDto pendingEnrollmentEmployee;
         private PendingEnrollmentPayload pendingEnrollmentPayload;
         private ZktecoAttendanceCommand pendingAttendanceCommand;
+        private ZktecoUnlockCommand pendingUnlockCommand;
         private FingerprintTemplateDto pendingMatchedTemplate;
         private int pendingMatchedScore;
         private BridgeStatus bridgeStatus = new BridgeStatus { state = "idle", message = "Bridge ready." };
@@ -77,7 +80,8 @@ namespace ZKTecoBridge
             StartPosition = FormStartPosition.CenterScreen;
             launchEnrollmentEmployee = ParseLaunchEnrollmentEmployee(args);
             launchAttendanceCommand = ParseLaunchAttendanceCommand(args);
-            hideWindowAfterStartup = launchAttendanceCommand != null && launchEnrollmentEmployee == null;
+            launchUnlockCommand = ParseLaunchUnlockCommand(args);
+            hideWindowAfterStartup = launchEnrollmentEmployee == null && (launchAttendanceCommand != null || launchUnlockCommand != null);
 
             if (hideWindowAfterStartup)
             {
@@ -110,6 +114,11 @@ namespace ZKTecoBridge
             if (launchAttendanceCommand != null)
             {
                 BeginAttendanceScan(launchAttendanceCommand);
+            }
+
+            if (launchUnlockCommand != null)
+            {
+                BeginUnlockScan(launchUnlockCommand);
             }
 
             if (hideWindowAfterStartup)
@@ -331,6 +340,13 @@ namespace ZKTecoBridge
 
         private async void HandleCapturedFingerprint()
         {
+            if (isHandlingCapture)
+            {
+                return;
+            }
+
+            isHandlingCapture = true;
+
             try
             {
                 ShowFingerprintImage();
@@ -341,12 +357,29 @@ namespace ZKTecoBridge
                     return;
                 }
 
+                if (pendingUnlockCommand != null)
+                {
+                    await IdentifyForUnlockAsync();
+                    return;
+                }
+
+                if (pendingAttendanceCommand == null)
+                {
+                    SetStatus("Bridge ready. Start fingerprint from the web timeclock first.");
+                    SetBridgeStatus("idle", "Bridge ready.");
+                    return;
+                }
+
                 await IdentifyAndRecordAttendanceAsync();
             }
             catch (Exception ex)
             {
                 SetBridgeStatus("error", ex.Message);
                 Log("Capture handling failed: " + ex.Message);
+            }
+            finally
+            {
+                isHandlingCapture = false;
             }
         }
 
@@ -469,6 +502,52 @@ namespace ZKTecoBridge
             SetEnrollmentConfirmationEnabled(false);
         }
 
+        private async Task IdentifyForUnlockAsync()
+        {
+            if (loadedTemplates.Count == 0)
+            {
+                SetStatus("No enrolled templates synced.");
+                SetBridgeStatus("error", "No enrolled fingerprint templates synced.");
+                return;
+            }
+
+            int fid = 0;
+            int score = 0;
+            int ret = zkfp2.DBIdentify(dbHandle, capturedTemplate, ref fid, ref score);
+            if (ret != zkfp.ZKFP_ERR_OK || !loadedTemplates.ContainsKey(fid))
+            {
+                var fallbackMatch = FindBestTemplateMatch();
+
+                if (fallbackMatch == null)
+                {
+                    SetStatus("Fingerprint not recognized.");
+                    SetBridgeStatus("waiting", "Fingerprint not recognized. Scan again.");
+                    return;
+                }
+
+                fid = fallbackMatch.id;
+                score = fallbackMatch.score;
+            }
+
+            var template = loadedTemplates[fid];
+            var command = pendingUnlockCommand;
+
+            Log("Unlock fingerprint matched for " + template.employee.name + ", score=" + score);
+            SetStatus("Matched " + template.employee.employee_id + " for unlock.");
+            SetBridgeStatus(
+                "matched",
+                "Fingerprint matched. Unlocking timeclock...",
+                template.employee,
+                null,
+                command == null ? null : command.command_id,
+                template.id,
+                score
+            );
+
+            pendingUnlockCommand = null;
+            await Task.CompletedTask;
+        }
+
         private async Task IdentifyAndRecordAttendanceAsync()
         {
             if (loadedTemplates.Count == 0)
@@ -518,7 +597,19 @@ namespace ZKTecoBridge
 
         private async Task RecordMatchedAttendanceAsync(FingerprintTemplateDto template, int score, ZktecoAttendanceCommand command)
         {
-            SetBridgeStatus("recording", "Recording fingerprint attendance...", template.employee, command == null ? null : command.attendance_type);
+            if (command == null)
+            {
+                SetStatus("No active attendance command.");
+                SetBridgeStatus("idle", "Bridge ready.");
+                return;
+            }
+
+            string commandId = command.command_id;
+            pendingAttendanceCommand = null;
+            pendingMatchedTemplate = null;
+            pendingMatchedScore = 0;
+
+            SetBridgeStatus("recording", "Recording fingerprint attendance...", template.employee, command.attendance_type, commandId);
 
             var attendance = await PostJsonAsync<AttendanceDto>("attendance", new
             {
@@ -526,19 +617,15 @@ namespace ZKTecoBridge
                 template_id = template.id,
                 score = score,
                 device_serial = DeviceSerial(),
-                attendance_type = command == null ? null : command.attendance_type,
-                occurred_at = command == null ? null : command.occurred_at,
-                offline_id = command == null ? null : command.offline_id,
-                attendance_image = command == null ? null : command.attendance_image,
-                location = command == null ? null : command.location,
-                location_source = command == null ? null : command.location_source,
-                latitude = command == null ? null : command.latitude,
-                longitude = command == null ? null : command.longitude,
+                attendance_type = command.attendance_type,
+                occurred_at = command.occurred_at,
+                offline_id = command.offline_id,
+                attendance_image = command.attendance_image,
+                location = command.location,
+                location_source = command.location_source,
+                latitude = command.latitude,
+                longitude = command.longitude,
             });
-
-            pendingAttendanceCommand = null;
-            pendingMatchedTemplate = null;
-            pendingMatchedScore = 0;
 
             SetStatus("Recorded " + attendance.employee.employee_id + " " + attendance.attendance_type);
             Log("Attendance recorded for " + attendance.employee.name + ", score=" + score);
@@ -546,7 +633,8 @@ namespace ZKTecoBridge
                 "success",
                 "Attendance recorded for " + attendance.employee.name + ".",
                 attendance.employee,
-                attendance.attendance_type
+                attendance.attendance_type,
+                commandId
             );
         }
 
@@ -693,6 +781,9 @@ namespace ZKTecoBridge
             }
 
             pendingAttendanceCommand = command;
+            pendingUnlockCommand = null;
+            pendingMatchedTemplate = null;
+            pendingMatchedScore = 0;
             isEnrolling = false;
             registerCount = 0;
             SetBridgeStatus("waiting", "Waiting for registered fingerprint scan.");
@@ -700,21 +791,53 @@ namespace ZKTecoBridge
             Log("Attendance requested from web timeclock. Scan a registered finger.");
         }
 
-        private void SetBridgeStatus(string state, string message, EmployeeDto employee = null, string attendanceType = null)
+        private void BeginUnlockScan(ZktecoUnlockCommand command)
+        {
+            if (InvokeRequired)
+            {
+                BeginInvoke(new Action<ZktecoUnlockCommand>(BeginUnlockScan), command);
+                return;
+            }
+
+            pendingUnlockCommand = command;
+            pendingAttendanceCommand = null;
+            pendingMatchedTemplate = null;
+            pendingMatchedScore = 0;
+            isEnrolling = false;
+            registerCount = 0;
+            SetBridgeStatus("waiting", "Waiting for unlock fingerprint scan.");
+            SetStatus("Waiting for unlock fingerprint scan.");
+            Log("Unlock requested from timeclock. Scan an authorized registered finger.");
+        }
+
+        private void SetBridgeStatus(
+            string state,
+            string message,
+            EmployeeDto employee = null,
+            string attendanceType = null,
+            string commandId = null,
+            int? templateId = null,
+            int? score = null
+        )
         {
             bridgeStatus = new BridgeStatus
             {
-                command_id = pendingAttendanceCommand == null
-                    ? (pendingEnrollmentEmployee == null ? bridgeStatus.command_id : pendingEnrollmentEmployee.command_id)
-                    : pendingAttendanceCommand.command_id,
+                command_id = commandId ?? (pendingUnlockCommand == null
+                    ? (pendingAttendanceCommand == null
+                        ? (pendingEnrollmentEmployee == null ? bridgeStatus.command_id : pendingEnrollmentEmployee.command_id)
+                        : pendingAttendanceCommand.command_id)
+                    : pendingUnlockCommand.command_id),
                 state = state,
                 message = message,
+                employee_database_id = employee == null ? (int?) null : employee.id,
                 employee_id = employee == null ? null : employee.employee_id,
                 employee_name = employee == null ? null : employee.name,
                 employee_first_name = employee == null ? null : employee.first_name,
                 employee_branch = employee == null ? null : employee.branch,
                 is_birthday = employee != null && employee.is_birthday,
                 attendance_type = attendanceType,
+                template_id = templateId,
+                score = score,
             };
         }
 
@@ -784,14 +907,15 @@ namespace ZKTecoBridge
 
         private void LocalCommandServerLoop()
         {
+            IPAddress address = LocalBridgeAddress();
             int port = LocalBridgePort();
 
             TcpListener listener = null;
             try
             {
-                listener = new TcpListener(IPAddress.Loopback, port);
+                listener = new TcpListener(address, port);
                 listener.Start();
-                Log("Local web bridge listening on http://127.0.0.1:" + port + "/");
+                Log("Local web bridge listening on http://" + (IPAddress.Any.Equals(address) ? "0.0.0.0" : address.ToString()) + ":" + port + "/");
             }
             catch (Exception ex)
             {
@@ -819,6 +943,29 @@ namespace ZKTecoBridge
             {
                 listener.Stop();
             }
+        }
+
+        private IPAddress LocalBridgeAddress()
+        {
+            string url = ConfigurationManager.AppSettings["LocalBridgeUrl"] ?? "http://127.0.0.1:8765/";
+            Uri uri;
+            if (!Uri.TryCreate(url, UriKind.Absolute, out uri))
+            {
+                return IPAddress.Loopback;
+            }
+
+            if (uri.Host == "0.0.0.0" || uri.Host == "*" || uri.Host == "+")
+            {
+                return IPAddress.Any;
+            }
+
+            IPAddress address;
+            if (IPAddress.TryParse(uri.Host, out address))
+            {
+                return address;
+            }
+
+            return IPAddress.Loopback;
         }
 
         private int LocalBridgePort()
@@ -857,7 +1004,7 @@ namespace ZKTecoBridge
                 return;
             }
 
-            if (method != "POST" || (path != "enroll" && path != "attendance" && path != "finalize-attendance" && path != "commit-enrollment"))
+            if (method != "POST" || (path != "enroll" && path != "attendance" && path != "unlock" && path != "finalize-attendance" && path != "commit-enrollment"))
             {
                 WriteLocalJson(stream, 404, "{\"message\":\"Endpoint not found.\"}");
                 return;
@@ -903,15 +1050,23 @@ namespace ZKTecoBridge
                     return;
                 }
 
+                var activeCommand = pendingAttendanceCommand;
+                var matchedTemplate = pendingMatchedTemplate;
+                int matchedScore = pendingMatchedScore;
+
                 if (!string.IsNullOrWhiteSpace(command.command_id) &&
-                    !string.Equals(command.command_id, pendingAttendanceCommand.command_id, StringComparison.Ordinal))
+                    !string.Equals(command.command_id, activeCommand.command_id, StringComparison.Ordinal))
                 {
                     WriteLocalJson(stream, 409, "{\"message\":\"Fingerprint command does not match the pending scan.\"}");
                     return;
                 }
 
-                pendingAttendanceCommand.attendance_image = command.attendance_image;
-                RecordMatchedAttendanceAsync(pendingMatchedTemplate, pendingMatchedScore, pendingAttendanceCommand).GetAwaiter().GetResult();
+                activeCommand.attendance_image = command.attendance_image;
+                pendingAttendanceCommand = null;
+                pendingMatchedTemplate = null;
+                pendingMatchedScore = 0;
+
+                RecordMatchedAttendanceAsync(matchedTemplate, matchedScore, activeCommand).GetAwaiter().GetResult();
                 WriteLocalJson(stream, 200, "{\"message\":\"Attendance recorded successfully.\"}");
                 return;
             }
@@ -928,6 +1083,21 @@ namespace ZKTecoBridge
 
                 BeginAttendanceScan(command);
                 WriteLocalJson(stream, 200, "{\"message\":\"Fingerprint Scanner Bridge is ready. Scan a registered finger.\"}");
+                return;
+            }
+
+            if (path == "unlock")
+            {
+                var command = json.Deserialize<ZktecoUnlockCommand>(body);
+
+                if (command == null || string.IsNullOrWhiteSpace(command.command_id))
+                {
+                    WriteLocalJson(stream, 422, "{\"message\":\"Invalid unlock payload.\"}");
+                    return;
+                }
+
+                BeginUnlockScan(command);
+                WriteLocalJson(stream, 200, "{\"message\":\"Fingerprint Scanner Bridge is ready. Scan an authorized finger.\"}");
                 return;
             }
 
@@ -951,6 +1121,11 @@ namespace ZKTecoBridge
         private ZktecoAttendanceCommand ParseLaunchAttendanceCommand(string[] args)
         {
             return ParseLaunchCommand<ZktecoAttendanceCommand>(args, "attendance");
+        }
+
+        private ZktecoUnlockCommand ParseLaunchUnlockCommand(string[] args)
+        {
+            return ParseLaunchCommand<ZktecoUnlockCommand>(args, "unlock");
         }
 
         private T ParseLaunchCommand<T>(string[] args, string command) where T : class
@@ -1051,7 +1226,8 @@ namespace ZKTecoBridge
                 "Content-Length: " + bodyBytes.Length + "\r\n" +
                 "Access-Control-Allow-Origin: *\r\n" +
                 "Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n" +
-                "Access-Control-Allow-Headers: Content-Type, Accept\r\n" +
+                "Access-Control-Allow-Headers: Content-Type, Accept, X-CSRF-TOKEN, X-Requested-With, Access-Control-Request-Private-Network\r\n" +
+                "Access-Control-Allow-Private-Network: true\r\n" +
                 "Connection: close\r\n\r\n";
             byte[] headerBytes = Encoding.UTF8.GetBytes(header);
             stream.Write(headerBytes, 0, headerBytes.Length);

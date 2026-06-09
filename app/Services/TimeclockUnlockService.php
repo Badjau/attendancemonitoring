@@ -13,12 +13,14 @@ class TimeclockUnlockService
 {
     public function store(Request $request)
     {
-        $authorizedUser = $request['method'] === AttendanceMethod::RFID->value
-            ? TimeclockAuthorizedUser::query()
+        $authorizedUser = match ($request['method']) {
+            AttendanceMethod::RFID->value => TimeclockAuthorizedUser::query()
                 ->whereHas('employee', fn ($query) => $query->where('rfid_uid', $request->credential))
                 ->where('is_active', true)
-                ->first()
-            : $this->findByPassword($request->credential);
+                ->first(),
+            AttendanceMethod::FINGERPRINT->value => $this->findByFingerprintCredential($request->credential),
+            default => $this->findByPassword($request->credential),
+        };
 
         if (! $authorizedUser) {
             throw ValidationException::withMessages([
@@ -64,5 +66,28 @@ class TimeclockUnlockService
                     ? Hash::check($password, $employeePassword)
                     : hash_equals($employeePassword, $password);
             });
+    }
+
+    private function findByFingerprintCredential(string $credential): ?TimeclockAuthorizedUser
+    {
+        $payload = json_decode($credential, true);
+
+        if (! is_array($payload)) {
+            return null;
+        }
+
+        $employeeId = (int) ($payload['employee_id'] ?? 0);
+        $templateId = (int) ($payload['template_id'] ?? 0);
+
+        if ($employeeId <= 0 || $templateId <= 0) {
+            return null;
+        }
+
+        return TimeclockAuthorizedUser::query()
+            ->with('employee')
+            ->where('employee_id', $employeeId)
+            ->where('is_active', true)
+            ->whereHas('employee.zktecoFingerprintTemplates', fn ($query) => $query->whereKey($templateId))
+            ->first();
     }
 }

@@ -73,6 +73,11 @@ namespace ZKTecoBridge
         public string command_id { get; set; }
     }
 
+    public class ZktecoUnlockCommand
+    {
+        public string command_id { get; set; }
+    }
+
     public class PendingEnrollmentPayload
     {
         public string command_id { get; set; }
@@ -92,10 +97,13 @@ namespace ZKTecoBridge
         public string message { get; set; }
         public string employee_name { get; set; }
         public string employee_first_name { get; set; }
+        public int? employee_database_id { get; set; }
         public string employee_id { get; set; }
         public string employee_branch { get; set; }
         public bool is_birthday { get; set; }
         public string attendance_type { get; set; }
+        public int? template_id { get; set; }
+        public int? score { get; set; }
     }
 
     public class TemplateMatch

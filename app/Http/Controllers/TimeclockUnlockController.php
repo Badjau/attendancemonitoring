@@ -20,7 +20,9 @@ class TimeclockUnlockController extends Controller
             return redirect()->route('home');
         }
 
-        return Inertia::render('TimeclockUnlock');
+        return Inertia::render('TimeclockUnlock', [
+            'zktecoBridgeUrl' => config('services.zkteco.bridge_url'),
+        ]);
     }
 
     public function store(TimeclockUnlockRequest $request): JsonResponse

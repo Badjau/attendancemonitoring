@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { Head, router } from '@inertiajs/vue3'
 import {
+    Fingerprint,
     IdCard,
     KeyRound,
     LoaderCircle,
@@ -10,7 +11,19 @@ import {
 import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import axios from 'axios'
 
-type UnlockMethod = 'keypad' | 'rfid'
+const props = defineProps<{
+    zktecoBridgeUrl: string
+}>()
+
+type BridgeStatus = {
+    command_id?: string | null
+    state?: string | null
+    message?: string | null
+    employee_database_id?: number | null
+    template_id?: number | null
+    score?: number | null
+}
+type UnlockMethod = 'keypad' | 'rfid' | 'fingerprint'
 
 const videoRef = ref<HTMLVideoElement | null>(null)
 const canvasRef = ref<HTMLCanvasElement | null>(null)
@@ -20,6 +33,7 @@ const rfidBuffer = ref('')
 const method = ref<UnlockMethod>('keypad')
 const isCameraReady = ref(false)
 const isSubmitting = ref(false)
+const isFingerprintScanning = ref(false)
 const errorText = ref('')
 const statusText = ref(
     'Camera audit is required to unlock the attendance system.',
@@ -27,9 +41,14 @@ const statusText = ref(
 
 let stream: MediaStream | null = null
 let rfidTimeout: ReturnType<typeof setTimeout> | null = null
+let fingerprintPollAbort = false
 
 const selectedCredential = computed(() =>
-    method.value === 'keypad' ? password.value.trim() : rfidBuffer.value.trim(),
+    method.value === 'keypad'
+        ? password.value.trim()
+        : method.value === 'rfid'
+          ? rfidBuffer.value.trim()
+          : '',
 )
 
 const csrfToken = (): string =>
@@ -96,6 +115,8 @@ const focusRfid = async () => {
 }
 
 const switchMethod = async (nextMethod: UnlockMethod) => {
+    fingerprintPollAbort = true
+    isFingerprintScanning.value = false
     method.value = nextMethod
     errorText.value = ''
     rfidBuffer.value = ''
@@ -103,14 +124,19 @@ const switchMethod = async (nextMethod: UnlockMethod) => {
     await focusRfid()
 }
 
-const submitUnlock = async () => {
+const submitUnlock = async (
+    unlockMethod: UnlockMethod = method.value,
+    credential: string = selectedCredential.value,
+) => {
     errorText.value = ''
 
-    if (!selectedCredential.value) {
+    if (!credential) {
         errorText.value =
-            method.value === 'rfid'
+            unlockMethod === 'rfid'
                 ? 'Scan an RFID card first.'
-                : 'Enter your unlock PIN first.'
+                : unlockMethod === 'fingerprint'
+                  ? 'Scan an authorized fingerprint first.'
+                  : 'Enter your unlock PIN first.'
         return
     }
 
@@ -128,8 +154,8 @@ const submitUnlock = async () => {
         const response = await axios.post(
             '/unlock',
             {
-                method: method.value,
-                credential: selectedCredential.value,
+                method: unlockMethod,
+                credential,
                 audit_image: auditImage,
                 _token: csrfToken(),
             },
@@ -170,10 +196,156 @@ const onRfidKeydown = (event: KeyboardEvent) => {
     submitUnlock()
 }
 
+const fingerprintCredential = (status: BridgeStatus): string | null => {
+    if (!status.employee_database_id || !status.template_id) return null
+
+    return JSON.stringify({
+        employee_id: status.employee_database_id,
+        template_id: status.template_id,
+        score: status.score ?? null,
+    })
+}
+
+const bridgeBaseUrl = (): string => props.zktecoBridgeUrl.replace(/\/$/, '')
+
+const postBridgeCommand = async (
+    path: string,
+    payload: Record<string, unknown>,
+) => {
+    const response = await fetch(`${bridgeBaseUrl()}/${path}`, {
+        method: 'POST',
+        headers: {
+            Accept: 'application/json',
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+    })
+
+    const bridgePayload = await response.json().catch(() => ({}))
+
+    if (!response.ok) {
+        throw new Error(
+            bridgePayload.message ||
+                'Unable to connect to fingerprint scanner.',
+        )
+    }
+}
+
+const getBridgeStatus = async (): Promise<BridgeStatus> => {
+    const response = await fetch(`${bridgeBaseUrl()}/status`, {
+        headers: {
+            Accept: 'application/json',
+        },
+    })
+
+    if (!response.ok) {
+        throw new Error('Unable to connect to fingerprint scanner.')
+    }
+
+    return response.json().catch(() => ({}))
+}
+
+const startBridgeUnlockScan = async (commandId: string) => {
+    try {
+        await postBridgeCommand('unlock', { command_id: commandId })
+        return
+    } catch (error) {
+        window.location.href = `zkteco-bridge://unlock?payload=${encodeURIComponent(
+            JSON.stringify({ command_id: commandId }),
+        )}`
+    }
+
+    let lastError: any = null
+    const startedAt = Date.now()
+
+    while (Date.now() - startedAt < 12000) {
+        await new Promise((resolve) => setTimeout(resolve, 700))
+
+        try {
+            await postBridgeCommand('unlock', { command_id: commandId })
+            return
+        } catch (error) {
+            lastError = error
+        }
+    }
+
+    throw lastError || new Error('Unable to connect to fingerprint scanner.')
+}
+
+const pollFingerprintUnlock = async (commandId: string) => {
+    const startedAt = Date.now()
+
+    while (!fingerprintPollAbort && Date.now() - startedAt < 30000) {
+        const status = await getBridgeStatus()
+
+        if (status.command_id === commandId && status.message) {
+            statusText.value = status.message
+        }
+
+        if (status.command_id === commandId && status.state === 'matched') {
+            const credential = fingerprintCredential(status)
+
+            if (!credential) {
+                throw new Error(
+                    'Fingerprint match did not include unlock credentials.',
+                )
+            }
+
+            await submitUnlock('fingerprint', credential)
+            return
+        }
+
+        if (status.command_id === commandId && status.state === 'error') {
+            throw new Error(status.message || 'Fingerprint scan failed.')
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, 700))
+    }
+
+    throw new Error('No fingerprint scan was received. Please try again.')
+}
+
+const startFingerprintUnlock = async () => {
+    errorText.value = ''
+    fingerprintPollAbort = true
+    await switchMethod('fingerprint')
+
+    const auditImage = captureAuditImage()
+    if (!auditImage) {
+        errorText.value =
+            'Camera is not ready. Allow camera access before unlocking.'
+        return
+    }
+
+    const commandId = `unlock-${Date.now()}-${Math.random().toString(36).slice(2)}`
+
+    try {
+        isFingerprintScanning.value = true
+        fingerprintPollAbort = false
+        statusText.value = 'Connecting to fingerprint scanner...'
+
+        await startBridgeUnlockScan(commandId)
+
+        statusText.value = 'Scan an authorized fingerprint to unlock.'
+        await pollFingerprintUnlock(commandId)
+    } catch (error: any) {
+        fingerprintPollAbort = true
+        errorText.value =
+            error?.response?.data?.message ||
+            error?.message ||
+            'Unable to scan fingerprint.'
+        statusText.value =
+            'Enter PIN, scan RFID, or scan fingerprint to unlock.'
+    } finally {
+        isFingerprintScanning.value = false
+    }
+}
+
 onMounted(async () => {
     try {
         await startCamera()
-        statusText.value = 'Enter PIN or scan RFID to unlock.'
+        statusText.value =
+            'Enter PIN, scan RFID, or scan fingerprint to unlock.'
     } catch (error) {
         errorText.value =
             error instanceof Error ? error.message : 'Failed to start.'
@@ -181,6 +353,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+    fingerprintPollAbort = true
     stopCamera()
     if (rfidTimeout) clearTimeout(rfidTimeout)
 })
@@ -222,7 +395,7 @@ onUnmounted(() => {
                     </p>
                 </div>
 
-                <div class="mb-5 grid grid-cols-2 gap-3">
+                <div class="mb-5 grid grid-cols-3 gap-3">
                     <button
                         type="button"
                         class="inline-flex items-center justify-center gap-2 rounded-2xl border-2 border-brand-stroke px-4 py-3 text-sm font-black transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[4px_4px_0px_0px_#001e1d]"
@@ -244,6 +417,19 @@ onUnmounted(() => {
                     >
                         <IdCard class="h-4 w-4" />
                         RFID
+                    </button>
+                    <button
+                        type="button"
+                        class="inline-flex items-center justify-center gap-2 rounded-2xl border-2 border-brand-stroke px-4 py-3 text-sm font-black transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[4px_4px_0px_0px_#001e1d]"
+                        :class="
+                            method === 'fingerprint'
+                                ? 'bg-brand-accent'
+                                : 'bg-white'
+                        "
+                        @click="switchMethod('fingerprint')"
+                    >
+                        <Fingerprint class="h-4 w-4" />
+                        Finger
                     </button>
                 </div>
 
@@ -275,7 +461,7 @@ onUnmounted(() => {
                     </button>
                 </form>
 
-                <div v-else class="space-y-4">
+                <div v-else-if="method === 'rfid'" class="space-y-4">
                     <input
                         ref="rfidInput"
                         type="text"
@@ -292,6 +478,35 @@ onUnmounted(() => {
                         <IdCard class="mx-auto mb-2 h-8 w-8" />
                         <p class="text-sm font-black uppercase tracking-widest">
                             Waiting for RFID scan
+                        </p>
+                    </div>
+                </div>
+
+                <div v-else class="space-y-4">
+                    <button
+                        type="button"
+                        class="inline-flex w-full items-center justify-center gap-2 rounded-2xl border-2 border-brand-stroke bg-brand-stroke px-4 py-4 text-sm font-black uppercase tracking-widest text-brand-headline shadow-[5px_5px_0px_0px_#abd1c6] transition-all duration-200 hover:-translate-y-1 hover:shadow-[7px_7px_0px_0px_#abd1c6] active:translate-x-1 active:translate-y-1 active:shadow-none disabled:cursor-not-allowed disabled:opacity-70"
+                        :disabled="isSubmitting || isFingerprintScanning"
+                        @click="startFingerprintUnlock"
+                    >
+                        <LoaderCircle
+                            v-if="isFingerprintScanning || isSubmitting"
+                            class="h-5 w-5 animate-spin"
+                        />
+                        <Fingerprint v-else class="h-5 w-5" />
+                        Scan fingerprint
+                    </button>
+
+                    <div
+                        class="rounded-2xl border-2 border-dashed border-brand-stroke bg-white/60 p-5 text-center"
+                    >
+                        <Fingerprint class="mx-auto mb-2 h-8 w-8" />
+                        <p class="text-sm font-black uppercase tracking-widest">
+                            {{
+                                isFingerprintScanning
+                                    ? 'Waiting for fingerprint scan'
+                                    : 'Ready for manual fingerprint unlock'
+                            }}
                         </p>
                     </div>
                 </div>

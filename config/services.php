@@ -38,6 +38,7 @@ return [
     'zkteco' => [
         'scanner_token' => env('ZKTECO_SCANNER_TOKEN'),
         'bridge_url' => env('ZKTECO_BRIDGE_URL', 'http://127.0.0.1:8765'),
+        'local_bridge_url' => env('ZKTECO_LOCAL_BRIDGE_URL', 'http://127.0.0.1:8765'),
     ],
 
 ];
