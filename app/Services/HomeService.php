@@ -43,11 +43,11 @@ class HomeService
     public function getAnnouncements(): Collection
     {
         // Cache announcements for 1 hour to reduce database queries
-        return Cache::remember('announcements_pinned_published', 3600, function () {
+        return Cache::remember(Announcement::HOME_CACHE_KEY, 3600, function () {
             return Announcement::with('media')
-                ->isPinned()
                 ->published()
                 ->isNotExpired()
+                ->orderByDesc('is_pinned')
                 ->latest()
                 ->take(2)
                 ->get();

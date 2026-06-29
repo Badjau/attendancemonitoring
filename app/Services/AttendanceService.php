@@ -8,6 +8,7 @@ use App\Enums\Attendance\Status;
 use App\Enums\Attendance\Type;
 use App\Models\Attendance;
 use App\Models\Employee;
+use App\Models\User;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -35,17 +36,19 @@ class AttendanceService
         }
 
         $now = $request->filled('occurred_at')
-            ? Carbon::parse($request->string('occurred_at')->toString())->setTimezone('Asia/Manila')
+            ? Carbon::parse($request->string('occurred_at')->toString(), 'Asia/Manila')
             : Carbon::now('Asia/Manila');
-        $attendanceType = $request->attendance_type ?: $this->inferAttendanceType($now);
+        $employee = $this->findEmployee($request->rfid);
+        $this->finalizePreviousAttendanceDays($employee, $now);
+        $attendanceType = $this->inferAttendanceTypeForEmployee($employee, $now);
         $request->merge(['attendance_type' => $attendanceType]);
 
         if ($attendanceType == Type::TimeIn->value) {
-            return $this->timeIn($request, $now);
+            return $this->timeIn($request, $now, $employee);
         }
 
         if ($attendanceType == Type::TimeOut->value) {
-            return $this->timeOut($request, $now);
+            return $this->timeOut($request, $now, $employee);
         }
 
         throw new \Exception('Invalid attendance type.');
@@ -65,6 +68,8 @@ class AttendanceService
             ]);
         }
 
+        $this->ensureEmployeeCanRecordAttendance($employee);
+
         $profileUrl = $employee->getFirstMediaUrl('employee-profile');
         $requiresFaceProfile = in_array($request->attendance_method, [
             AttendanceMethod::KEYPAD->value,
@@ -83,9 +88,37 @@ class AttendanceService
         ];
     }
 
-    private function inferAttendanceType(Carbon $now): string
+    private function inferAttendanceTypeForEmployee(Employee $employee, Carbon $now): string
     {
-        return $this->attendanceScheduleSettings->inferAttendanceType($now);
+        return Type::TimeIn->value;
+    }
+
+    private function attendanceWindowStart(Carbon $now): Carbon
+    {
+        return $now->copy()->subHours(24);
+    }
+
+    private function latestOpenTimeInWithinWindow(Employee $employee, Carbon $now): ?Attendance
+    {
+        return $this->model
+            ->where('employee_id', $employee->id)
+            ->whereNotNull('time_in')
+            ->whereNull('time_out')
+            ->whereBetween('time_in', [$this->attendanceWindowStart($now), $now])
+            ->orderByDesc('time_in')
+            ->orderByDesc('id')
+            ->first();
+    }
+
+    private function finalizePreviousAttendanceDays(Employee $employee, Carbon $now): void
+    {
+        $this->model
+            ->where('employee_id', $employee->id)
+            ->whereNotNull('time_in')
+            ->whereDate('attendance_date', '<', $now->toDateString())
+            ->distinct()
+            ->pluck('attendance_date')
+            ->each(fn ($date): ?float => $this->markDailyLastTimeInAsTimeOut($employee, Carbon::parse($date)));
     }
 
     private function attendanceMethod(Request $request): ?string
@@ -103,12 +136,39 @@ class AttendanceService
             throw new \Exception('Employee is not existing.');
         }
 
+        $this->ensureEmployeeCanRecordAttendance($employee);
+
         return $employee;
     }
 
-    private function timeIn(Request $request, Carbon $now): Attendance
+    private function ensureEmployeeCanRecordAttendance(Employee $employee): void
     {
-        $employee = $this->findEmployee($request->rfid);
+        $hasHrLogin = User::query()
+            ->where('employee_id', $employee->id)
+            ->where('is_admin', true)
+            ->where('is_hr', true)
+            ->where('is_it_admin', false)
+            ->exists();
+
+        if ($hasHrLogin) {
+            return;
+        }
+
+        $hasBlockedAdminLogin = User::query()
+            ->where('employee_id', $employee->id)
+            ->where('is_admin', true)
+            ->exists();
+
+        if ($hasBlockedAdminLogin || $employee->role === Employee::ROLE_ADMIN) {
+            throw ValidationException::withMessages([
+                'employee_id' => 'Admin accounts do not use Time In or Time Out. Use Admin login instead.',
+            ]);
+        }
+    }
+
+    private function timeIn(Request $request, Carbon $now, ?Employee $employee = null): Attendance
+    {
+        $employee ??= $this->findEmployee($request->rfid);
         $locationData = $this->validateLocation($request, $employee);
 
         // TODO: Make it the shift start time dynamic
@@ -124,7 +184,7 @@ class AttendanceService
             'attendance_method' => $this->attendanceMethod($request),
             'offline_id' => $request->offline_id,
             'attendance_date' => $now->toDateString(),
-            'time_in' => $now,
+            'time_in' => $now->format('Y-m-d H:i:s'),
             'status' => $isLate ? Status::Late->value : Status::Present->value,
             'is_late' => $isLate,
             'late_minutes' => $lateMinutes,
@@ -133,24 +193,17 @@ class AttendanceService
         ]);
 
         $this->attachAttendanceImage($request, $attendance, 'time-in-image');
-        $this->syncDailyTotalHours($employee, $now);
+        $this->markDailyLastTimeInAsTimeOut($employee, $now);
 
-        return $attendance;
+        return $attendance->refresh();
     }
 
-    private function timeOut(Request $request, Carbon $now): Attendance
+    private function timeOut(Request $request, Carbon $now, ?Employee $employee = null): Attendance
     {
-        $employee = $this->findEmployee($request->rfid);
+        $employee ??= $this->findEmployee($request->rfid);
         $locationData = $this->validateLocation($request, $employee);
 
-        $firstTimeInAttendance = $this->model
-            ->where('attendance_date', $now->toDateString())
-            ->where('employee_id', $employee->id)
-            ->whereNotNull('time_in')
-            ->where('time_in', '<=', $now)
-            ->orderBy('time_in')
-            ->orderBy('id')
-            ->first();
+        $firstTimeInAttendance = $this->latestOpenTimeInWithinWindow($employee, $now);
 
         if (! $firstTimeInAttendance) {
             throw new \Exception('Please time in first.');
@@ -158,7 +211,7 @@ class AttendanceService
 
         // TODO: Make it the shift end time dynamic
         $shiftEnd = $now->copy()->setTimeFromTimeString('18:00:00');
-        $timeIn = Carbon::parse($firstTimeInAttendance->time_in);
+        $timeIn = $this->storedDateTime($firstTimeInAttendance, 'time_in');
         $workedMinutes = $timeIn->diffInMinutes($now);
 
         $isUndertime = $now->lt($shiftEnd);
@@ -167,14 +220,10 @@ class AttendanceService
         $isOvertime = $now->gt($shiftEnd);
         $overtimeMinutes = $isOvertime ? $shiftEnd->diffInMinutes($now) : 0;
 
-        $attendance = $this->model->create([
-            'employee_id' => $employee->id,
-            'rfid_uid' => $request->rfid,
+        $firstTimeInAttendance->fill([
             'attendance_type' => Type::TimeOut->value,
             'attendance_method' => $this->attendanceMethod($request),
-            'offline_id' => $request->offline_id,
-            'attendance_date' => $now->toDateString(),
-            'time_out' => $now,
+            'time_out' => $now->format('Y-m-d H:i:s'),
             'total_hours' => round($workedMinutes / 60, 2),
             'status' => Status::Present->value,
             'is_undertime' => $isUndertime,
@@ -184,18 +233,17 @@ class AttendanceService
             'overtime_status' => $isOvertime ? OvertimeStatus::Pending->value : null,
             'recorded_by' => Auth::id(),
             ...$locationData,
-        ]);
+        ])->save();
 
-        $this->attachAttendanceImage($request, $attendance, 'time-out-image');
-        $attendance->total_hours = $this->syncDailyTotalHours($employee, $now);
+        $this->attachAttendanceImage($request, $firstTimeInAttendance, 'time-out-image');
 
-        return $attendance;
+        return $firstTimeInAttendance->refresh();
     }
 
     private function syncDailyTotalHours(Employee $employee, Carbon $date): ?float
     {
         $query = $this->model
-            ->where('attendance_date', $date->toDateString())
+            ->whereDate('attendance_date', $date->toDateString())
             ->where('employee_id', $employee->id);
 
         $firstTimeIn = (clone $query)
@@ -213,6 +261,62 @@ class AttendanceService
         (clone $query)->update(['total_hours' => $totalHours]);
 
         return $totalHours;
+    }
+
+    private function markDailyLastTimeInAsTimeOut(Employee $employee, Carbon $date): ?float
+    {
+        $attendances = $this->model
+            ->whereDate('attendance_date', $date->toDateString())
+            ->where('employee_id', $employee->id)
+            ->whereNotNull('time_in')
+            ->get()
+            ->sortBy(fn (Attendance $attendance): int => $this->storedDateTime($attendance, 'time_in')->getTimestamp())
+            ->values();
+
+        if ($attendances->count() < 2) {
+            return null;
+        }
+
+        $firstTimeIn = $this->storedDateTime($attendances->first(), 'time_in');
+        $lastAttendance = $attendances->last();
+
+        if (! $firstTimeIn || ! $lastAttendance) {
+            return null;
+        }
+
+        $lastTimeIn = $this->storedDateTime($lastAttendance, 'time_in');
+        $totalHours = round($firstTimeIn->diffInMinutes($lastTimeIn) / 60, 2);
+
+        $this->model
+            ->whereKey($attendances->pluck('id')->all())
+            ->whereKeyNot($lastAttendance->id)
+            ->update([
+            'attendance_type' => Type::TimeIn->value,
+            'time_out' => null,
+            'total_hours' => $totalHours,
+            'is_overtime' => false,
+            'overtime_minutes' => 0,
+            'overtime_status' => null,
+        ]);
+
+        $lastAttendance->fill([
+            'attendance_type' => Type::TimeOut->value,
+            'time_out' => $lastTimeIn->format('Y-m-d H:i:s'),
+            'total_hours' => $totalHours,
+            'status' => Status::Present->value,
+            'is_undertime' => false,
+            'undertime_minutes' => 0,
+            'is_overtime' => false,
+            'overtime_minutes' => 0,
+            'overtime_status' => null,
+        ])->save();
+
+        return $totalHours;
+    }
+
+    private function storedDateTime(Attendance $attendance, string $column): Carbon
+    {
+        return Carbon::parse($attendance->getRawOriginal($column) ?? $attendance->{$column});
     }
 
     private function attachAttendanceImage(Request $request, Attendance $attendance, string $collection): void

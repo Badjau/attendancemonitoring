@@ -8,6 +8,7 @@ use App\Filament\Admin\Resources\Departments\Pages\ListDepartments;
 use App\Filament\Admin\Resources\Departments\Schemas\DepartmentForm;
 use App\Filament\Admin\Resources\Departments\Tables\DepartmentsTable;
 use App\Models\Department;
+use App\Support\AdminAccess;
 use BackedEnum;
 use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
@@ -48,6 +49,21 @@ class DepartmentResource extends Resource
             'create' => CreateDepartment::route('/create'),
             'edit' => EditDepartment::route('/{record}/edit'),
         ];
+    }
+
+    public static function canAccess(): bool
+    {
+        return AdminAccess::canAccessResource('departments');
+    }
+
+    public static function canViewAny(): bool
+    {
+        return static::canAccess();
+    }
+
+    public static function shouldRegisterNavigation(): bool
+    {
+        return static::canAccess();
     }
 
     public static function getRecordRouteBindingEloquentQuery(): Builder

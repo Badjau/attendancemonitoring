@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Head, router } from '@inertiajs/vue3'
+import { Head, Link, router } from '@inertiajs/vue3'
 import { onMounted, onUnmounted, ref } from 'vue'
 import FeedAndStaff from '@/Components/Home/FeedAndStaff.vue'
 import PresentToday from '@/Components/Home/PresentToday.vue'
@@ -47,10 +47,12 @@ const branchFromAttendance = (employeeId?: string) => {
     return attendance?.employee?.branch?.trim() || ''
 }
 
-const refreshAttendanceToday = (employeeId?: string) => {
+const refreshAttendanceToday = (employeeId?: string, branch?: string) => {
+    const requestedBranch = branch?.trim() || activeBranch.value
+
     router.reload({
         only: ['attendanceToday'],
-        data: activeBranch.value ? { branch: activeBranch.value } : {},
+        data: requestedBranch ? { branch: requestedBranch } : {},
         preserveScroll: true,
         preserveState: true,
         onSuccess: () => {
@@ -71,7 +73,7 @@ const handleAttendanceRecorded = (event: Event) => {
     const branch = branchFromPayload(payload)
 
     setActiveBranch({ branch })
-    refreshAttendanceToday(employeeId)
+    refreshAttendanceToday(employeeId, branch)
 }
 
 onMounted(() => {
@@ -98,6 +100,13 @@ onUnmounted(() => {
                 />
             </div>
         </header>
+
+        <Link
+            href="/unlock?locked=1"
+            class="fixed right-3 top-3 z-20 inline-flex items-center justify-center rounded-2xl border-2 border-brand-stroke bg-brand-stroke px-4 py-3 text-xs font-black uppercase tracking-widest text-brand-headline shadow-[4px_4px_0px_0px_#abd1c6] transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[6px_6px_0px_0px_#abd1c6] active:translate-x-1 active:translate-y-1 active:shadow-none md:right-5 md:top-5"
+        >
+            Admin
+        </Link>
 
         <!-- Toast Notification Container -->
         <main

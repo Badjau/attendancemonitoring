@@ -2,7 +2,7 @@
 
 namespace App\Http\Middleware;
 
-use App\Models\Employee;
+use App\Support\AdminAccess;
 use Closure;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -11,22 +11,14 @@ class EnsureAdminDashboardUnlocked
 {
     public function handle(Request $request, Closure $next): Response
     {
-        $employeeId = session('admin_unlocked_by');
-
-        $isAdmin = $employeeId
-            && Employee::query()
-                ->whereKey($employeeId)
-                ->where('role', Employee::ROLE_ADMIN)
-                ->exists();
-
-        if (! $isAdmin) {
+        if (! AdminAccess::hasAnyAdminAccess($request)) {
             if ($request->expectsJson()) {
                 return response()->json([
-                    'message' => 'Unlock as an admin employee first.',
+                    'message' => 'Unlock as an admin employee or sign in with an admin account first.',
                 ], 403);
             }
 
-            return redirect()->route('timeclock.unlock');
+            return redirect()->route('admin.access.login');
         }
 
         return $next($request);

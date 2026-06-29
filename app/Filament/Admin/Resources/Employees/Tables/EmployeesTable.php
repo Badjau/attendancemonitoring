@@ -3,6 +3,7 @@
 namespace App\Filament\Admin\Resources\Employees\Tables;
 
 use App\Models\Employee;
+use App\Support\AdminAccess;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
@@ -71,12 +72,6 @@ class EmployeesTable
                     ->searchable()
                     ->sortable(),
 
-                TextColumn::make('role')
-                    ->label('Employee Type')
-                    ->formatStateUsing(fn (?string $state): string => Employee::roleOptions()[$state] ?? 'User Employee')
-                    ->badge()
-                    ->sortable(),
-
                 TextColumn::make('department.name')
                     ->label('Department')
                     ->searchable()
@@ -102,10 +97,6 @@ class EmployeesTable
                     ->options(Employee::branchOptions())
                     ->searchable(),
 
-                SelectFilter::make('role')
-                    ->label('Employee Type')
-                    ->options(Employee::roleOptions()),
-
                 SelectFilter::make('position'),
             ])
             ->recordActions([
@@ -114,8 +105,10 @@ class EmployeesTable
             ])
             ->toolbarActions([
                 BulkActionGroup::make([
-                    DeleteBulkAction::make(),
-                ]),
+                    DeleteBulkAction::make()
+                        ->visible(fn (): bool => AdminAccess::hasAnyAdminAccess()),
+                ])
+                    ->visible(fn (): bool => AdminAccess::hasAnyAdminAccess()),
             ]);
     }
 }

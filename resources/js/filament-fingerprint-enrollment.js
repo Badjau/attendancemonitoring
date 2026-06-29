@@ -50,6 +50,33 @@ window.fingerprintEnrollment = ({
             .replaceAll('ZKTeco', 'Fingerprint')
     },
 
+    shouldLaunchBridgeProtocol() {
+        return /^https?:\/\/(?:127\.0\.0\.1|localhost)(?::8765)?(?:\/|$)/i.test(
+            this.zktecoBridgeUrl,
+        )
+    },
+
+    bridgeRequestOptions(body) {
+        const headers = {
+            Accept: 'application/json',
+            'Content-Type': 'application/json',
+        }
+
+        if (!this.shouldLaunchBridgeProtocol()) {
+            headers['X-CSRF-TOKEN'] = this.csrfToken()
+            headers['X-Requested-With'] = 'XMLHttpRequest'
+        }
+
+        return {
+            method: 'POST',
+            credentials: this.shouldLaunchBridgeProtocol()
+                ? 'omit'
+                : 'same-origin',
+            headers,
+            body: JSON.stringify(body),
+        }
+    },
+
     get busy() {
         return this.zktecoLoading || this.submittingEnrollment
     },
@@ -209,14 +236,7 @@ window.fingerprintEnrollment = ({
         try {
             const response = await fetch(
                 `${this.zktecoBridgeUrl.replace(/\/$/, '')}/enroll`,
-                {
-                    method: 'POST',
-                    headers: {
-                        Accept: 'application/json',
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify(employeePayload),
-                },
+                this.bridgeRequestOptions(employeePayload),
             )
 
             const payload = await response.json().catch(() => ({}))
@@ -235,6 +255,15 @@ window.fingerprintEnrollment = ({
 
             await this.pollEnrollmentStatus(commandId)
         } catch (error) {
+            if (!this.shouldLaunchBridgeProtocol()) {
+                this.message =
+                    error instanceof Error
+                        ? error.message
+                        : 'Unable to connect to the fingerprint scanner.'
+                this.success = false
+                return
+            }
+
             const launchUrl = `zkteco-bridge://enroll?payload=${encodeURIComponent(JSON.stringify(employeePayload))}`
 
             window.location.href = launchUrl
@@ -257,16 +286,9 @@ window.fingerprintEnrollment = ({
         try {
             const response = await fetch(
                 `${this.zktecoBridgeUrl.replace(/\/$/, '')}/commit-enrollment`,
-                {
-                    method: 'POST',
-                    headers: {
-                        Accept: 'application/json',
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        command_id: this.enrollmentCommandId,
-                    }),
-                },
+                this.bridgeRequestOptions({
+                    command_id: this.enrollmentCommandId,
+                }),
             )
 
             const payload = await response.json().catch(() => ({}))

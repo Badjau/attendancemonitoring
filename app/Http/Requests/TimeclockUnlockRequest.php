@@ -24,7 +24,8 @@ class TimeclockUnlockRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'method' => ['required', Rule::in(['keypad', 'rfid', 'fingerprint'])],
+            'method' => ['required', Rule::in(['keypad', 'rfid', 'fingerprint', 'admin'])],
+            'username' => ['required_if:method,admin', 'nullable', 'string'],
             'credential' => ['required', 'string'],
             'audit_image' => ['required', 'string'],
         ];

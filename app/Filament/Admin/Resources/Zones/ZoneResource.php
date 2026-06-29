@@ -8,6 +8,7 @@ use App\Filament\Admin\Resources\Zones\Pages\ListZones;
 use App\Filament\Admin\Resources\Zones\Schemas\ZoneForm;
 use App\Filament\Admin\Resources\Zones\Tables\ZonesTable;
 use App\Models\Zone;
+use App\Support\AdminAccess;
 use BackedEnum;
 use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
@@ -46,5 +47,20 @@ class ZoneResource extends Resource
             'create' => CreateZone::route('/create'),
             'edit' => EditZone::route('/{record}/edit'),
         ];
+    }
+
+    public static function canAccess(): bool
+    {
+        return AdminAccess::canAccessResource('zones');
+    }
+
+    public static function canViewAny(): bool
+    {
+        return static::canAccess();
+    }
+
+    public static function shouldRegisterNavigation(): bool
+    {
+        return static::canAccess();
     }
 }

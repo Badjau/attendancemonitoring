@@ -11,11 +11,13 @@ use App\Filament\Admin\Resources\Employees\Schemas\EmployeeForm;
 use App\Filament\Admin\Resources\Employees\Schemas\EmployeeInfolist;
 use App\Filament\Admin\Resources\Employees\Tables\EmployeesTable;
 use App\Models\Employee;
+use App\Support\AdminAccess;
 use BackedEnum;
 use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Model;
 
 class EmployeeResource extends Resource
 {
@@ -55,5 +57,30 @@ class EmployeeResource extends Resource
             'view' => ViewEmployee::route('/{record}'),
             'edit' => EditEmployee::route('/{record}/edit'),
         ];
+    }
+
+    public static function canAccess(): bool
+    {
+        return AdminAccess::canAccessResource('employees');
+    }
+
+    public static function canViewAny(): bool
+    {
+        return static::canAccess();
+    }
+
+    public static function shouldRegisterNavigation(): bool
+    {
+        return static::canAccess();
+    }
+
+    public static function canDelete(Model $record): bool
+    {
+        return AdminAccess::hasAnyAdminAccess();
+    }
+
+    public static function canDeleteAny(): bool
+    {
+        return AdminAccess::hasAnyAdminAccess();
     }
 }

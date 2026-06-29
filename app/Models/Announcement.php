@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Support\Facades\Cache;
 use Spatie\MediaLibrary\HasMedia;
 use Spatie\MediaLibrary\InteractsWithMedia;
 
@@ -16,6 +17,8 @@ class Announcement extends Model implements HasMedia
 {
     use InteractsWithMedia;
     use SoftDeletes;
+
+    public const HOME_CACHE_KEY = 'announcements_pinned_published';
 
     protected $fillable = [
         'title',
@@ -36,14 +39,31 @@ class Announcement extends Model implements HasMedia
         'status' => Status::class,
     ];
 
+    protected static function booted(): void
+    {
+        $forgetHomeCache = fn (): bool => Cache::forget(self::HOME_CACHE_KEY);
+
+        static::saved($forgetHomeCache);
+        static::deleted($forgetHomeCache);
+        static::restored($forgetHomeCache);
+        static::forceDeleted($forgetHomeCache);
+    }
+
     public function registerMediaCollections(): void
     {
-        $this->addMediaCollection('announcement_attachments');
+        $this->addMediaCollection('announcement_attachments')
+            ->useDisk('public');
     }
 
     public function scopePublished(Builder $query): Builder
     {
-        return $query->where('status', Status::PUBLISHED->value);
+        return $query
+            ->where('status', Status::PUBLISHED->value)
+            ->where(function (Builder $query): void {
+                $query
+                    ->whereNull('published_at')
+                    ->orWhere('published_at', '<=', Carbon::now());
+            });
     }
 
     public function scopeIsPinned(Builder $query): Builder
@@ -53,7 +73,11 @@ class Announcement extends Model implements HasMedia
 
     public function scopeIsNotExpired(Builder $query): Builder
     {
-        return $query->whereDate('expires_at', '>', Carbon::now());
+        return $query->where(function (Builder $query): void {
+            $query
+                ->whereNull('expires_at')
+                ->orWhereDate('expires_at', '>=', Carbon::today());
+        });
     }
 
     public function createdBy(): BelongsTo

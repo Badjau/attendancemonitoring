@@ -76,7 +76,7 @@ const csrfHeaders = () => {
  * @property {string} employeeIdentifier
  * @property {string} [employeeName]
  * @property {string} attendanceMethod
- * @property {string} attendanceType
+ * @property {string} [attendanceType]
  * @property {number} latitude
  * @property {number} longitude
  * @property {string} [location]
@@ -138,7 +138,9 @@ const buildAttendanceFormData = (record) => {
     formData.append('occurred_at', record.occurredAt)
     formData.append('rfid', record.employeeIdentifier)
     formData.append('attendance_method', record.attendanceMethod)
-    formData.append('attendance_type', record.attendanceType)
+    if (record.attendanceType) {
+        formData.append('attendance_type', record.attendanceType)
+    }
     formData.append('latitude', String(record.latitude))
     formData.append('longitude', String(record.longitude))
     formData.append('location', record.location || '')

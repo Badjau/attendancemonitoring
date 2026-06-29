@@ -6,6 +6,7 @@ use App\Enums\Attendance\AttendanceMethod;
 use App\Models\Employee;
 use App\Models\TimeclockAuthorizedUser;
 use App\Models\TimeclockUnlockLog;
+use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\ValidationException;
@@ -15,10 +16,7 @@ class TimeclockUnlockService
     public function store(Request $request)
     {
         $authorizedUser = match ($request['method']) {
-            AttendanceMethod::RFID->value => TimeclockAuthorizedUser::query()
-                ->whereHas('employee', fn ($query) => $query->where('rfid_uid', $request->credential))
-                ->where('is_active', true)
-                ->first(),
+            AttendanceMethod::RFID->value => $this->findByRfidCredential($request->credential),
             AttendanceMethod::FINGERPRINT->value => $this->findByFingerprintCredential($request->credential),
             default => $this->findByPassword($request->credential),
         };
@@ -79,6 +77,25 @@ class TimeclockUnlockService
             });
     }
 
+    private function findByRfidCredential(string $credential): ?TimeclockAuthorizedUser
+    {
+        $authorizedUser = TimeclockAuthorizedUser::query()
+            ->with('employee')
+            ->whereHas('employee', fn ($query) => $query->where('rfid_uid', $credential))
+            ->where('is_active', true)
+            ->first();
+
+        if ($authorizedUser) {
+            return $authorizedUser;
+        }
+
+        $employee = Employee::query()
+            ->where('rfid_uid', $credential)
+            ->first();
+
+        return $this->authorizeLinkedAdminEmployee($employee);
+    }
+
     private function findByFingerprintCredential(string $credential): ?TimeclockAuthorizedUser
     {
         $payload = json_decode($credential, true);
@@ -94,11 +111,43 @@ class TimeclockUnlockService
             return null;
         }
 
-        return TimeclockAuthorizedUser::query()
+        $authorizedUser = TimeclockAuthorizedUser::query()
             ->with('employee')
             ->where('employee_id', $employeeId)
             ->where('is_active', true)
             ->whereHas('employee.zktecoFingerprintTemplates', fn ($query) => $query->whereKey($templateId))
             ->first();
+
+        if ($authorizedUser) {
+            return $authorizedUser;
+        }
+
+        $employee = Employee::query()
+            ->whereKey($employeeId)
+            ->whereHas('zktecoFingerprintTemplates', fn ($query) => $query->whereKey($templateId))
+            ->first();
+
+        return $this->authorizeLinkedAdminEmployee($employee);
+    }
+
+    private function authorizeLinkedAdminEmployee(?Employee $employee): ?TimeclockAuthorizedUser
+    {
+        if (! $employee) {
+            return null;
+        }
+
+        $hasLinkedAdminUser = User::query()
+            ->where('employee_id', $employee->id)
+            ->where('is_admin', true)
+            ->exists();
+
+        if (! $hasLinkedAdminUser) {
+            return null;
+        }
+
+        return TimeclockAuthorizedUser::query()->updateOrCreate(
+            ['employee_id' => $employee->id],
+            ['is_active' => true],
+        )->load('employee');
     }
 }

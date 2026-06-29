@@ -8,11 +8,13 @@ use App\Filament\Admin\Resources\TimeclockAuthorizedUsers\Pages\ListTimeclockAut
 use App\Filament\Admin\Resources\TimeclockAuthorizedUsers\Schemas\TimeclockAuthorizedUserForm;
 use App\Filament\Admin\Resources\TimeclockAuthorizedUsers\Tables\TimeclockAuthorizedUsersTable;
 use App\Models\TimeclockAuthorizedUser;
+use App\Support\AdminAccess;
 use BackedEnum;
 use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Model;
 use UnitEnum;
 
 class TimeclockAuthorizedUserResource extends Resource
@@ -48,5 +50,40 @@ class TimeclockAuthorizedUserResource extends Resource
             'create' => CreateTimeclockAuthorizedUser::route('/create'),
             'edit' => EditTimeclockAuthorizedUser::route('/{record}/edit'),
         ];
+    }
+
+    public static function canAccess(): bool
+    {
+        return AdminAccess::canAccessResource('timeclock-authorized-users');
+    }
+
+    public static function canViewAny(): bool
+    {
+        return static::canAccess();
+    }
+
+    public static function shouldRegisterNavigation(): bool
+    {
+        return static::canAccess();
+    }
+
+    public static function canCreate(): bool
+    {
+        return static::canAccess();
+    }
+
+    public static function canEdit(Model $record): bool
+    {
+        return static::canAccess();
+    }
+
+    public static function canDelete(Model $record): bool
+    {
+        return static::canAccess();
+    }
+
+    public static function canDeleteAny(): bool
+    {
+        return static::canAccess();
     }
 }

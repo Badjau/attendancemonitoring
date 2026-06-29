@@ -7,11 +7,13 @@ use App\Filament\Admin\Resources\TimeclockUnlockLogs\Pages\ViewTimeclockUnlockLo
 use App\Filament\Admin\Resources\TimeclockUnlockLogs\Schemas\TimeclockUnlockLogInfolist;
 use App\Filament\Admin\Resources\TimeclockUnlockLogs\Tables\TimeclockUnlockLogsTable;
 use App\Models\TimeclockUnlockLog;
+use App\Support\AdminAccess;
 use BackedEnum;
 use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Model;
 use UnitEnum;
 
 class TimeclockUnlockLogResource extends Resource
@@ -44,5 +46,25 @@ class TimeclockUnlockLogResource extends Resource
             'index' => ListTimeclockUnlockLogs::route('/'),
             'view' => ViewTimeclockUnlockLog::route('/{record}'),
         ];
+    }
+
+    public static function canAccess(): bool
+    {
+        return AdminAccess::canAccessResource('timeclock-unlock-logs');
+    }
+
+    public static function canViewAny(): bool
+    {
+        return static::canAccess();
+    }
+
+    public static function shouldRegisterNavigation(): bool
+    {
+        return static::canAccess();
+    }
+
+    public static function canView(Model $record): bool
+    {
+        return static::canAccess();
     }
 }

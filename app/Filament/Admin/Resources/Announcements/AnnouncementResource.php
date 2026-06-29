@@ -10,6 +10,7 @@ use App\Filament\Admin\Resources\Announcements\Schemas\AnnouncementForm;
 use App\Filament\Admin\Resources\Announcements\Schemas\AnnouncementInfolist;
 use App\Filament\Admin\Resources\Announcements\Tables\AnnouncementsTable;
 use App\Models\Announcement;
+use App\Support\AdminAccess;
 use BackedEnum;
 use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
@@ -54,5 +55,20 @@ class AnnouncementResource extends Resource
             'view' => ViewAnnouncement::route('/{record}'),
             'edit' => EditAnnouncement::route('/{record}/edit'),
         ];
+    }
+
+    public static function canAccess(): bool
+    {
+        return AdminAccess::canAccessResource('announcements');
+    }
+
+    public static function canViewAny(): bool
+    {
+        return static::canAccess();
+    }
+
+    public static function shouldRegisterNavigation(): bool
+    {
+        return static::canAccess();
     }
 }

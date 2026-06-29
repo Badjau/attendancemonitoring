@@ -1,9 +1,11 @@
 <?php
 
 use App\Http\Controllers\AnnouncementController;
+use App\Http\Controllers\AdminAccessController;
 use App\Http\Controllers\AttendanceController;
 use App\Http\Controllers\EmployeeWebAuthnController;
 use App\Http\Controllers\FaceController;
+use App\Http\Controllers\Api\LocalZktecoBridgeController;
 use App\Http\Controllers\HomeController;
 use App\Http\Controllers\TimeclockUnlockController;
 use Illuminate\Support\Facades\Route;
@@ -18,15 +20,27 @@ Route::controller(TimeclockUnlockController::class)
         Route::post('/lock', 'destroy')->name('lock');
     });
 
+Route::controller(AdminAccessController::class)
+    ->prefix('admin')
+    ->as('admin.access.')
+    ->group(function () {
+        Route::get('/login', 'showLogin')->name('login');
+        Route::post('/login', 'login')->name('login.store');
+        Route::get('/register', 'showRegister')->name('register');
+        Route::post('/register', 'register')->name('register.store');
+        Route::match(['get', 'post'], '/password-logout', 'logout')->name('logout');
+    });
+
 Route::get('/face', [FaceController::class, 'index'])->name('face');
 
 Route::get('/', [HomeController::class, 'home'])
-    ->middleware('timeclock.unlocked')
     ->name('home');
 
 Route::get('/offline-attendance', fn () => Inertia::render('OfflineAttendance/Index'))
-    ->middleware('timeclock.unlocked')
     ->name('offline-attendance.index');
+
+Route::match(['get', 'post'], '/local-zkteco-bridge/{endpoint}', [LocalZktecoBridgeController::class, 'handle'])
+    ->name('local-zkteco-bridge');
 
 // ROUTE FOR ANNOUNCEMENT
 Route::controller(AnnouncementController::class)
@@ -38,7 +52,6 @@ Route::controller(AnnouncementController::class)
 
 // ROUTE FOR ATTENDANCE
 Route::controller(AttendanceController::class)
-    ->middleware('timeclock.unlocked')
     ->prefix('attendance')
     ->as('attendance.')
     ->group(function () {
@@ -49,7 +62,6 @@ Route::controller(AttendanceController::class)
 
 // ROUTE FOR EMPLOYEE WEB AUTHN (FINGERPRINT)
 Route::controller(EmployeeWebAuthnController::class)
-    ->middleware('timeclock.unlocked')
     ->prefix('attendance/fingerprint')
     ->as('attendance.fingerprint.')
     ->group(function () {

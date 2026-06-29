@@ -12,6 +12,7 @@ class AnnouncementController extends Controller
     {
         $announcements = Announcement::with('media')
             ->published()
+            ->isNotExpired()
             ->latest('published_at')
             ->latest()
             ->paginate(10)

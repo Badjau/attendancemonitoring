@@ -49,11 +49,6 @@ class EmployeeForm
                             TextInput::make('position')
                                 ->required(),
 
-                            Select::make('role')
-                                ->label('Employee Type')
-                                ->options(Employee::roleOptions())
-                                ->default(Employee::ROLE_EMPLOYEE)
-                                ->required(),
                         ])
                         ->afterValidation(function ($livewire): void {
                             if (! method_exists($livewire, 'createFromEmployeeInformationStep')) {

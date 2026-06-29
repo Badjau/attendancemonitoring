@@ -16,6 +16,7 @@ use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Malzariey\FilamentDaterangepickerFilter\Filters\DateRangeFilter;
+use pxlrbt\FilamentExcel\Actions\ExportAction;
 use pxlrbt\FilamentExcel\Actions\ExportBulkAction;
 use pxlrbt\FilamentExcel\Exports\ExcelExport;
 
@@ -159,11 +160,21 @@ class AttendancesTable
             ->recordActions([
                 ViewAction::make(),
             ])
+            ->headerActions([
+                ExportAction::make('exportFiltered')
+                    ->label('Export Excel')
+                    ->exports([
+                        ExcelExport::make('filtered_attendances')
+                            ->askForFilename()
+                            ->fromTable(),
+                    ]),
+            ])
             ->toolbarActions([
                 BulkActionGroup::make([
                     // DeleteBulkAction::make(),
 
                     ExportBulkAction::make()
+                        ->label('Export selected')
                         ->exports([
                             ExcelExport::make()
                                 ->askForFilename()

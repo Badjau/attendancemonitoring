@@ -4,6 +4,7 @@ namespace App\Providers\Filament;
 
 use App\Filament\Admin\Pages\Dashboard;
 use App\Http\Middleware\EnsureAdminDashboardUnlocked;
+use App\Support\AdminAccess;
 use Filament\Http\Middleware\DisableBladeIconComponents;
 use Filament\Http\Middleware\DispatchServingFilamentEvent;
 use Filament\Panel;
@@ -53,6 +54,10 @@ class AdminPanelProvider extends PanelProvider
                     'resources/js/filament-fingerprint-enrollment.js',
                 ])")
             )
+            ->renderHook(
+                PanelsRenderHook::TOPBAR_END,
+                fn (): string => view('filament.admin.logout-button')->render()
+            )
             ->colors([
                 'primary' => '#004643',
                 'gray' => Color::Slate,
@@ -76,7 +81,7 @@ class AdminPanelProvider extends PanelProvider
             ])
             ->plugins([
                 FilamentGeneralSettingsPlugin::make()
-                    // ->canAccess(fn() => auth()->user()->id === 1)
+                    ->canAccess(fn (): bool => AdminAccess::canAccessResource('general-settings'))
                     ->setSort(3)
                     ->setIcon('heroicon-o-cog')
                     ->setNavigationGroup('Settings')

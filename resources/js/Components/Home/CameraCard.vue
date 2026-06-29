@@ -1022,40 +1022,20 @@ const verifyEmployeeFaceAndSubmit = async (
     const employee = await verifyEmployeeIdentifier(employeeIdentifier, method)
     if (!employee) return
 
-    if (method === 'rfid') {
-        faceStatusText.value = `Recording attendance for ${employeeFullName(employee)}...`
-        await openCameraForCapture({
-            loadFaceVerification: false,
-            silent: true,
-        })
-
-        const image = captureAttendanceImage()
-        if (!image) {
-            isLoading.value = false
-            return
-        }
-
-        await submitAttendance(
-            employee.employee_id,
-            method,
-            employeeFullName(employee),
-            image,
-        )
-        return
-    }
-
-    await openCameraForCapture({ loadFaceVerification: true })
+    await Promise.all([
+        openCameraForCapture({ loadFaceVerification: true }),
+        getRegisteredFaceDescriptor(employee),
+    ])
 
     const matchedFace = await verifyLiveFaceMatchesEmployee(employee)
     if (!matchedFace) {
-        isLoading.value = false
-        setTimeout(() => forceRFIDFocus(), 50)
+        resetAttendanceSelection()
         return
     }
 
     const image = captureAttendanceImage(matchedFace)
     if (!image) {
-        isLoading.value = false
+        resetAttendanceSelection()
         return
     }
 
@@ -1163,13 +1143,13 @@ const submitFaceAttendance = async () => {
 
         const matchedFace = await recognizeLiveFaceEmployee()
         if (!matchedFace) {
-            stopProcessing()
+            resetAttendanceSelection()
             return
         }
 
         const image = captureAttendanceImage(matchedFace)
         if (!image) {
-            stopProcessing()
+            resetAttendanceSelection()
             return
         }
 
@@ -1196,10 +1176,10 @@ const submitFaceAttendance = async () => {
 
 const fingerprintAttendancePayload = (
     commandId: string,
-    attendanceAction: AttendanceAction,
+    attendanceAction?: AttendanceAction | '',
 ) => ({
     command_id: commandId,
-    attendance_type: attendanceAction,
+    attendance_type: attendanceAction || undefined,
     occurred_at: new Date().toISOString(),
     offline_id: commandId,
     latitude: coords.value.latitude,
@@ -1212,11 +1192,9 @@ const runFingerprintAttendance = async (
     automatic = false,
     scanVersion = autoFingerprintScanVersion,
 ): Promise<boolean> => {
-    const attendanceAction = attendanceType.value || inferredAttendanceType()
+    const attendanceAction = attendanceType.value
 
-    if (automatic) {
-        attendanceType.value = attendanceAction
-    } else {
+    if (!automatic) {
         await ensureAttendanceFlowReady(attendanceAction)
     }
 
@@ -1361,12 +1339,37 @@ const pollZktecoBridgeStatus = async (
 
         if (status.state === 'matched' && !attendancePhotoSent) {
             attendancePhotoSent = true
-            faceStatusText.value = 'Fingerprint matched. Recording attendance...'
-            await openCameraForCapture({
-                loadFaceVerification: false,
-                silent: true,
-            })
-            const image = captureAttendanceImage()
+            faceStatusText.value = 'Fingerprint matched. Verifying face...'
+
+            const employeeIdentifier =
+                status.employee_id || status.data?.employee?.employee_id
+
+            if (!employeeIdentifier) {
+                throw new Error('Fingerprint match did not include an employee.')
+            }
+
+            const employee = await verifyEmployeeIdentifier(
+                employeeIdentifier,
+                'fingerprint',
+            )
+
+            if (!employee) {
+                throw new Error('Fingerprint employee could not be verified.')
+            }
+
+            await Promise.all([
+                openCameraForCapture({ loadFaceVerification: true }),
+                getRegisteredFaceDescriptor(employee),
+            ])
+
+            const matchedFace = await verifyLiveFaceMatchesEmployee(employee)
+
+            if (!matchedFace) {
+                resetAttendanceSelection()
+                throw new Error('Face verification failed for fingerprint match.')
+            }
+
+            const image = captureAttendanceImage(matchedFace)
 
             if (!image) {
                 throw new Error('Camera photo could not be captured.')
@@ -1505,7 +1508,7 @@ const submitAttendance = async (
     employeeName?: string,
     image?: string,
 ): Promise<void> => {
-    const attendanceAction = attendanceType.value || inferredAttendanceType()
+    const attendanceAction = attendanceType.value
 
     if (
         locationLoading.value ||
@@ -1530,7 +1533,7 @@ const submitAttendance = async (
         employeeIdentifier,
         employeeName: employeeName || employeeIdentifier,
         attendanceMethod: method,
-        attendanceType: attendanceAction,
+        attendanceType: attendanceAction || undefined,
         latitude: coords.value.latitude,
         longitude: coords.value.longitude,
         location: locationLabel(),
@@ -1587,6 +1590,9 @@ onMounted(async () => {
     updateTime()
     interval = setInterval(updateTime, 1000)
     getLocation().catch(() => null)
+    loadFaceModels().catch((error) => {
+        console.error('Face model preload failed:', error)
+    })
 
     ensureRFIDFocus()
 

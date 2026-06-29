@@ -10,10 +10,10 @@ use Joaopaulolndev\FilamentGeneralSettings\Models\GeneralSetting;
 class AttendanceScheduleSettings
 {
     private const DEFAULTS = [
-        'time_in_start' => '00:00', // 12:00 AM
-        'time_in_end' => '16:00', // 04:00 PM
-        'time_out_start' => '16:01', // 04:01 PM
-        'time_out_end' => '23:59', // 11:59 PM
+        'time_in_start' => '00:01', // 12:01 AM
+        'time_in_end' => '23:59', // 11:59 PM
+        'time_out_start' => '00:00', // 12:00 AM
+        'time_out_end' => '00:00', // 12:00 AM
     ];
 
     private static ?array $cachedSettings = null;

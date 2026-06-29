@@ -10,6 +10,7 @@ use App\Filament\Admin\Resources\Attendances\Schemas\AttendanceForm;
 use App\Filament\Admin\Resources\Attendances\Schemas\AttendanceInfolist;
 use App\Filament\Admin\Resources\Attendances\Tables\AttendancesTable;
 use App\Models\Attendance;
+use App\Support\AdminAccess;
 use BackedEnum;
 use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
@@ -53,6 +54,21 @@ class AttendanceResource extends Resource
             'view' => ViewAttendance::route('/{record}'),
             'edit' => EditAttendance::route('/{record}/edit'),
         ];
+    }
+
+    public static function canAccess(): bool
+    {
+        return AdminAccess::canAccessResource('attendances');
+    }
+
+    public static function canViewAny(): bool
+    {
+        return static::canAccess();
+    }
+
+    public static function shouldRegisterNavigation(): bool
+    {
+        return static::canAccess();
     }
 
     public static function canCreate(): bool
