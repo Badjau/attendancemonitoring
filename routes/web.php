@@ -1,11 +1,10 @@
 <?php
 
-use App\Http\Controllers\AnnouncementController;
 use App\Http\Controllers\AdminAccessController;
+use App\Http\Controllers\AnnouncementController;
+use App\Http\Controllers\Api\LocalZktecoBridgeController;
 use App\Http\Controllers\AttendanceController;
 use App\Http\Controllers\EmployeeWebAuthnController;
-use App\Http\Controllers\FaceController;
-use App\Http\Controllers\Api\LocalZktecoBridgeController;
 use App\Http\Controllers\HomeController;
 use App\Http\Controllers\TimeclockUnlockController;
 use Illuminate\Support\Facades\Route;
@@ -31,7 +30,8 @@ Route::controller(AdminAccessController::class)
         Route::match(['get', 'post'], '/password-logout', 'logout')->name('logout');
     });
 
-Route::get('/face', [FaceController::class, 'index'])->name('face');
+Route::get('/face', fn () => redirect()->route('home'))->name('face');
+Route::get('/face/register', fn () => redirect()->route('home'))->name('face.register');
 
 Route::get('/', [HomeController::class, 'home'])
     ->name('home');
@@ -79,13 +79,4 @@ Route::controller(EmployeeWebAuthnController::class)
         Route::post('/', 'register')->name('register');
         Route::delete('/finger', 'destroyFinger')->name('destroy-finger');
         Route::delete('/scanner-finger', 'destroyScannerFinger')->name('destroy-scanner-finger');
-    });
-
-// ROUTE FOR FACE RECOGNITION
-Route::controller(FaceController::class)
-    ->group(function () {
-        Route::post('/face/register', 'storeRegistration')->name('face.register.store');
-        Route::get('/face/register', [FaceController::class, 'register'])->name('face.register');
-        Route::post('/face/register', [FaceController::class, 'storeRegistration'])->name('face.register.store');
-        Route::post('/admin/employees/{employee}/face', 'storeEmployeeRegistration')->middleware('admin.unlocked')->name('admin.employees.face.register');
     });

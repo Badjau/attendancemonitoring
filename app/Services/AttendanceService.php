@@ -40,7 +40,10 @@ class AttendanceService
             : Carbon::now('Asia/Manila');
         $employee = $this->findEmployee($request->rfid);
         $this->finalizePreviousAttendanceDays($employee, $now);
-        $attendanceType = $this->inferAttendanceTypeForEmployee($employee, $now);
+        $requestedAttendanceType = $request->string('attendance_type')->toString();
+        $attendanceType = in_array($requestedAttendanceType, [Type::TimeIn->value, Type::TimeOut->value], true)
+            ? $requestedAttendanceType
+            : $this->inferAttendanceTypeForEmployee($employee, $now);
         $request->merge(['attendance_type' => $attendanceType]);
 
         if ($attendanceType == Type::TimeIn->value) {
@@ -70,18 +73,7 @@ class AttendanceService
 
         $this->ensureEmployeeCanRecordAttendance($employee);
 
-        $profileUrl = $employee->getFirstMediaUrl('employee-profile');
-        $requiresFaceProfile = in_array($request->attendance_method, [
-            AttendanceMethod::KEYPAD->value,
-            AttendanceMethod::FACE->value,
-        ], true);
-
-        if ($requiresFaceProfile && blank($profileUrl)) {
-            throw ValidationException::withMessages([
-                'employee_id' => 'No registered face found for this employee.',
-            ]);
-        }
-
+        $profileUrl = $employee->employeeProfileUrl();
         return [
             'profile_url' => $profileUrl,
             'employee' => $employee,
@@ -291,13 +283,13 @@ class AttendanceService
             ->whereKey($attendances->pluck('id')->all())
             ->whereKeyNot($lastAttendance->id)
             ->update([
-            'attendance_type' => Type::TimeIn->value,
-            'time_out' => null,
-            'total_hours' => $totalHours,
-            'is_overtime' => false,
-            'overtime_minutes' => 0,
-            'overtime_status' => null,
-        ]);
+                'attendance_type' => Type::TimeIn->value,
+                'time_out' => null,
+                'total_hours' => $totalHours,
+                'is_overtime' => false,
+                'overtime_minutes' => 0,
+                'overtime_status' => null,
+            ]);
 
         $lastAttendance->fill([
             'attendance_type' => Type::TimeOut->value,

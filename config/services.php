@@ -41,4 +41,8 @@ return [
         'local_bridge_url' => env('ZKTECO_LOCAL_BRIDGE_URL', 'http://127.0.0.1:8765'),
     ],
 
+    'face' => [
+        'url' => env('FACE_SERVICE_URL', 'https://127.0.0.1:8001'),
+    ],
+
 ];

@@ -69,33 +69,29 @@ class HomeService
                 'last_name' => $employee->last_name,
                 'position' => $employee->position,
                 'branch' => $employee->branch,
-                'profile_url' => $employee->getFirstMediaUrl('employee-profile'),
+                'profile_url' => $employee->employeeProfileUrl(),
             ])
-            ->filter(fn (array $employee): bool => filled($employee['profile_url']))
             ->values();
     }
 
     public function getRegisteredEmployeeFacesExcept(?int $employeeId = null): array
     {
-        // Cache per request to avoid repeated database queries during same request
-        return Cache::remember("registered_faces_{$employeeId}", 3600, function () use ($employeeId) {
-            $query = Employee::with('media')
-                ->select(['id', 'employee_id', 'first_name', 'last_name', 'branch']);
+        $query = Employee::with('media')
+            ->select(['id', 'employee_id', 'first_name', 'last_name', 'branch']);
 
-            if ($employeeId) {
-                $query->whereKeyNot($employeeId);
-            }
+        if ($employeeId) {
+            $query->whereKeyNot($employeeId);
+        }
 
-            return $query->get()
-                ->map(fn (Employee $employee): array => [
-                    'employee_id' => $employee->employee_id,
-                    'name' => $employee->first_name . ' ' . $employee->last_name,
-                    'branch' => $employee->branch,
-                    'profile_url' => $employee->getFirstMediaUrl('employee-profile'),
-                ])
-                ->filter(fn (array $employee): bool => filled($employee['profile_url']))
-                ->values()
-                ->toArray();
-        });
+        return $query->get()
+            ->map(fn (Employee $employee): array => [
+                'employee_id' => $employee->employee_id,
+                'name' => $employee->first_name.' '.$employee->last_name,
+                'branch' => $employee->branch,
+                'profile_url' => $employee->employeeProfileUrl(),
+            ])
+            ->filter(fn (array $employee): bool => filled($employee['profile_url']))
+            ->values()
+            ->toArray();
     }
 }

@@ -98,6 +98,40 @@ class Attendance24HourWindowTest extends TestCase
         $this->assertSame(2, Attendance::query()->count());
     }
 
+    public function test_explicit_time_out_request_is_respected(): void
+    {
+        $employee = Employee::query()->create([
+            'employee_id' => 'EMP-001',
+            'rfid_uid' => 'RFID-001',
+            'first_name' => 'Ada',
+            'last_name' => 'Lovelace',
+            'middle_name' => 'Byron',
+            'date_of_birth' => '1990-01-01',
+            'position' => 'Developer',
+            'role' => Employee::ROLE_EMPLOYEE,
+        ]);
+
+        $timeIn = Attendance::query()->create([
+            'employee_id' => $employee->id,
+            'rfid_uid' => $employee->rfid_uid,
+            'attendance_type' => Type::TimeIn->value,
+            'attendance_date' => '2026-06-17',
+            'time_in' => '2026-06-17 08:00:00',
+        ]);
+
+        $attendance = app(AttendanceService::class)->recordAttendance(new Request([
+            'rfid' => $employee->rfid_uid,
+            'attendance_type' => Type::TimeOut->value,
+            'latitude' => 0,
+            'longitude' => 0,
+            'occurred_at' => '2026-06-17 18:00:00',
+        ]));
+
+        $this->assertSame($timeIn->id, $attendance->id);
+        $this->assertSame(Type::TimeOut->value, $attendance->attendance_type->value);
+        $this->assertSame('2026-06-17 18:00:00', Carbon::parse($attendance->getRawOriginal('time_out'))->format('Y-m-d H:i:s'));
+    }
+
     public function test_late_next_day_scan_closes_previous_time_in_at_midnight_and_records_new_time_in(): void
     {
         $employee = Employee::query()->create([

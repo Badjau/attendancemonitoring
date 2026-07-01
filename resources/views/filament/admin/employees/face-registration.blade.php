@@ -1,13 +1,7 @@
-@php
-    $homeService = app(\App\Services\HomeService::class);
-    $existingFaces = $homeService->getRegisteredEmployeeFacesExcept($employee->getKey());
-@endphp
-
 <div
     class="space-y-4"
     x-data="faceRegistration({
-        registerUrl: @js(route('admin.employees.face.register', $employee)),
-        existingFaces: @js($existingFaces),
+        employeeId: @js($employee->employee_id),
     })"
 >
     <div
@@ -37,11 +31,6 @@
                     :class="isCameraReady && ! isReviewingCapture ? 'opacity-100' : 'opacity-0'"
                 ></video>
 
-                <canvas
-                    x-ref="overlay"
-                    class="absolute inset-0 h-full w-full"
-                    x-show="! isReviewingCapture"
-                ></canvas>
                 <div
                     x-show="captureCountdown > 0 && ! isReviewingCapture"
                     x-transition.opacity
@@ -106,22 +95,22 @@
                 <div class="text-xs font-semibold uppercase text-gray-500 dark:text-gray-400">Status</div>
                 <div class="mt-1 font-medium text-gray-950 dark:text-white" x-text="statusText"></div>
                 <div class="mt-2 text-xs font-medium text-warning-600 dark:text-warning-400">
-                    Remove eyeglasses, shades, masks, or any object covering the face before saving.
+                    FastAPI validates face count, blur, brightness, and face size before saving each capture.
                 </div>
             </div>
 
             <div class="grid grid-cols-2 gap-3">
                 <div class="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-900">
-                    <div class="text-2xl font-bold text-gray-950 dark:text-white" x-text="faceCount"></div>
-                    <div class="text-xs font-semibold uppercase text-gray-500 dark:text-gray-400">Faces</div>
+                    <div class="text-2xl font-bold text-gray-950 dark:text-white" x-text="`${enrollmentCount}/${requiredCount}`"></div>
+                    <div class="text-xs font-semibold uppercase text-gray-500 dark:text-gray-400">Captures</div>
                 </div>
                 <div class="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-900">
                     <div
                         class="text-2xl font-bold"
-                        :class="faceClear ? 'text-success-600 dark:text-success-400' : 'text-gray-950 dark:text-white'"
-                        x-text="faceClear ? 'Clear' : 'Check'"
+                        :class="ready ? 'text-success-600 dark:text-success-400' : 'text-gray-950 dark:text-white'"
+                        x-text="ready ? 'Ready' : 'Pending'"
                     ></div>
-                    <div class="text-xs font-semibold uppercase text-gray-500 dark:text-gray-400">Face</div>
+                    <div class="text-xs font-semibold uppercase text-gray-500 dark:text-gray-400">Enrollment</div>
                 </div>
             </div>
 
@@ -143,6 +132,17 @@
                     Choose retake if the photo is blurry, cropped badly, or the employee is not looking straight.
                 </div>
             </div>
+
+            <button
+                type="button"
+                x-show="! isReviewingCapture"
+                class="fi-btn fi-btn-size-lg fi-color-primary w-full"
+                :disabled="! isCameraReady || isCapturing || isSubmitting"
+                @click="prepareCaptureForReview"
+            >
+                <span x-show="! isCapturing">Capture enrollment image</span>
+                <span x-show="isCapturing">Capturing...</span>
+            </button>
 
             <div x-show="isReviewingCapture" x-transition.opacity class="grid grid-cols-2 gap-3">
                 <button

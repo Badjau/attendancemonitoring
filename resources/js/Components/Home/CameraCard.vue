@@ -13,7 +13,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useToast } from 'primevue'
 import { useGeolocator } from '@/Composables/useGeolocator.js'
 import { useSyncStore } from '@/Stores/sync.js'
-import { mapFaceBoxToObjectCover } from '@/Utils/faceOverlay.js'
+import { recognizeFace } from '@/Services/faceService.js'
 
 type AttendanceAction = 'time-in' | 'time-out'
 type AttendanceMethod = 'rfid' | 'keypad' | 'fingerprint' | 'face'
@@ -33,8 +33,6 @@ type VerifiedEmployee = {
 }
 type LiveFaceMatch = {
     employee: VerifiedEmployee
-    detection: any
-    detectedFaceCount: number
 }
 type AttendanceSchedule = {
     time_in_start: string
@@ -76,7 +74,6 @@ const isError = ref(false)
 const isVideoReady = ref(false)
 const isCameraActive = ref(false)
 const isSilentCameraCapture = ref(false)
-const isFaceModelReady = ref(false)
 const faceStatusText = ref('Face verification ready.')
 
 const currentTime = ref('')
@@ -96,24 +93,14 @@ let focusInterval: ReturnType<typeof setInterval>
 let faceDetectionInterval: ReturnType<typeof setInterval> | null = null
 let autoFingerprintTimeout: ReturnType<typeof setTimeout> | null = null
 let rfidTimeout: any = null
-let isDrawingFaceDetectorOverlay = false
+let isFaceRecognitionInFlight = false
 let isAutoFingerprintScanActive = false
 let autoFingerprintScanVersion = 0
-let faceapi: typeof import('face-api.js') | null = null
-let faceApiLoadPromise: Promise<typeof import('face-api.js')> | null = null
-let faceDetectorOptions: any = null
-const registeredFaceDescriptors = new Map<string, Float32Array>()
-const registeredFaceDescriptorPromises = new Map<
-    string,
-    Promise<Float32Array | null>
->()
 
 const lastScannedTime = ref(0)
 const SCAN_COOLDOWN_MS = 1000
 const AUTO_FINGERPRINT_RETRY_MS = 500
 const AUTO_FINGERPRINT_SCAN_WINDOW_MS = 120000
-const FACE_MODEL_PATH = '/models/face-api'
-const FACE_MATCH_THRESHOLD = 0.52
 const ATTENDANCE_IMAGE_MAX_WIDTH = 960
 const isLocationReady = computed(
     () =>
@@ -135,22 +122,6 @@ const processingLabel = computed(() =>
 const employeeFullName = (employee: VerifiedEmployee): string =>
     `${employee.first_name} ${employee.last_name}`.trim()
 
-const loadFaceApi = async (): Promise<typeof import('face-api.js')> => {
-    if (faceapi) return faceapi
-
-    faceApiLoadPromise ??= import('face-api.js').then((module) => {
-        faceapi = module
-        faceDetectorOptions = new module.TinyFaceDetectorOptions({
-            inputSize: 320,
-            scoreThreshold: 0.5,
-        })
-
-        return module
-    })
-
-    return faceApiLoadPromise
-}
-
 const locationLabel = (): string => {
     const currentCoords = coords.value as any
 
@@ -166,24 +137,6 @@ const locationLabel = (): string => {
     }
 
     return ''
-}
-
-const loadFaceModels = async (): Promise<typeof import('face-api.js')> => {
-    const api = await loadFaceApi()
-    if (isFaceModelReady.value) return api
-
-    faceStatusText.value = 'Loading face verification...'
-
-    await Promise.all([
-        api.nets.tinyFaceDetector.loadFromUri(FACE_MODEL_PATH),
-        api.nets.faceLandmark68Net.loadFromUri(FACE_MODEL_PATH),
-        api.nets.faceRecognitionNet.loadFromUri(FACE_MODEL_PATH),
-    ])
-
-    isFaceModelReady.value = true
-    faceStatusText.value = 'Face verification ready.'
-
-    return api
 }
 
 const initializeCamera = async () => {
@@ -284,72 +237,8 @@ const pauseAutoFingerprintScan = () => {
     isAutoFingerprintScanActive = false
 }
 
-const drawFaceDetectorOverlay = async () => {
-    const api = faceapi
-
-    if (isDrawingFaceDetectorOverlay) return
-    if (
-        !api ||
-        !faceDetectorOptions ||
-        !videoRef.value ||
-        !overlayRef.value ||
-        !isVideoReady.value ||
-        !isFaceModelReady.value
-    )
-        return
-    if (videoRef.value.paused || videoRef.value.ended) return
-
-    isDrawingFaceDetectorOverlay = true
-
-    try {
-        const video = videoRef.value
-        const canvas = overlayRef.value
-        const displaySize = {
-            width: video.clientWidth,
-            height: video.clientHeight,
-        }
-
-        if (!displaySize.width || !displaySize.height) return
-
-        api.matchDimensions(canvas, displaySize)
-
-        const detections = await api.detectAllFaces(
-            video,
-            faceDetectorOptions,
-        )
-
-        const context = canvas.getContext('2d')
-        context?.clearRect(0, 0, canvas.width, canvas.height)
-
-        detections.forEach((detection, index) => {
-            const box = mapFaceBoxToObjectCover(detection.box, video)
-            if (!box) return
-
-            const drawBox = new api.draw.DrawBox(box, {
-                label:
-                    detections.length === 1
-                        ? 'Face detected'
-                        : `Face ${index + 1}`,
-                boxColor: '#f9bc60',
-                lineWidth: 3,
-            })
-
-            drawBox.draw(canvas)
-        })
-    } finally {
-        isDrawingFaceDetectorOverlay = false
-    }
-}
-
 const startFaceDetectorOverlay = () => {
     clearFaceDetectorOverlay()
-
-    faceDetectionInterval = setInterval(() => {
-        drawFaceDetectorOverlay().catch((error) => {
-            console.error('Face detector overlay failed:', error)
-            clearFaceDetectorOverlay()
-        })
-    }, 1200)
 }
 
 const captureImage = (): string | null => {
@@ -368,55 +257,6 @@ const captureImage = (): string | null => {
     if (!ctx) return null
 
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
-
-    return canvas.toDataURL('image/jpeg', 0.72)
-}
-
-const cropFaceFromVideo = (
-    detection: any,
-    paddingRatio = 0.25,
-): string | null => {
-    if (!videoRef.value || !canvasRef.value || !isVideoReady.value) return null
-
-    const video = videoRef.value
-    const canvas = canvasRef.value
-    const { x, y, width, height } = detection.box
-
-    if (video.videoWidth <= 0 || video.videoHeight <= 0) return null
-
-    const paddingX = width * paddingRatio
-    const paddingY = height * paddingRatio
-
-    const sourceX = Math.max(0, x - paddingX)
-    const sourceY = Math.max(0, y - paddingY)
-    const sourceWidth = Math.min(
-        video.videoWidth - sourceX,
-        width + paddingX * 2,
-    )
-    const sourceHeight = Math.min(
-        video.videoHeight - sourceY,
-        height + paddingY * 2,
-    )
-
-    if (sourceWidth <= 0 || sourceHeight <= 0) return null
-
-    canvas.width = Math.round(sourceWidth)
-    canvas.height = Math.round(sourceHeight)
-
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return null
-
-    ctx.drawImage(
-        video,
-        sourceX,
-        sourceY,
-        sourceWidth,
-        sourceHeight,
-        0,
-        0,
-        canvas.width,
-        canvas.height,
-    )
 
     return canvas.toDataURL('image/jpeg', 0.72)
 }
@@ -518,11 +358,8 @@ const openCameraForCapture = async (
         return
     }
 
-    await loadFaceModels().catch((error) => {
-        console.error('Face model load failed:', error)
-        faceStatusText.value = 'Face verification failed to load.'
-    })
-    if (isFaceModelReady.value) startFaceDetectorOverlay()
+    faceStatusText.value = 'Face camera ready.'
+    startFaceDetectorOverlay()
 }
 
 const handleTimeAction = async (actionName: AttendanceAction) => {
@@ -730,12 +567,7 @@ const postWebAuthnJson = async (
 const captureAttendanceImage = (
     matchedFace?: LiveFaceMatch | null,
 ): string | null => {
-    const shouldCropMatchedEmployeeFace = Boolean(
-        matchedFace && matchedFace.detectedFaceCount > 1,
-    )
-    const image = shouldCropMatchedEmployeeFace
-        ? cropFaceFromVideo(matchedFace!.detection.detection)
-        : captureImage()
+    const image = captureImage()
 
     if (!image) {
         toast.add({
@@ -788,42 +620,6 @@ const verifyEmployeeIdentifier = async (
     }
 }
 
-const getRegisteredFaceDescriptor = async (
-    employee: VerifiedEmployee,
-): Promise<Float32Array | null> => {
-    const cachedDescriptor = registeredFaceDescriptors.get(employee.employee_id)
-    if (cachedDescriptor) return cachedDescriptor
-
-    const cachedPromise = registeredFaceDescriptorPromises.get(
-        employee.employee_id,
-    )
-    if (cachedPromise) return cachedPromise
-
-    if (!employee.profile_url) return null
-
-    const descriptorPromise = (async () => {
-        const api = await loadFaceModels()
-        const image = await api.fetchImage(employee.profile_url!)
-        const detection = await api
-            .detectSingleFace(image, faceDetectorOptions)
-            .withFaceLandmarks()
-            .withFaceDescriptor()
-
-        if (!detection) return null
-
-        registeredFaceDescriptors.set(employee.employee_id, detection.descriptor)
-
-        return detection.descriptor
-    })()
-
-    registeredFaceDescriptorPromises.set(
-        employee.employee_id,
-        descriptorPromise,
-    )
-
-    return descriptorPromise
-}
-
 const verifyLiveFaceMatchesEmployee = async (
     employee: VerifiedEmployee,
 ): Promise<LiveFaceMatch | null> => {
@@ -838,77 +634,27 @@ const verifyLiveFaceMatchesEmployee = async (
     }
 
     try {
-        const api = await loadFaceModels()
-
         faceStatusText.value = `Checking face for ${employeeFullName(employee)}...`
-
-        const registeredDescriptor = await getRegisteredFaceDescriptor(employee)
-        if (!registeredDescriptor) {
-            toast.add({
-                severity: 'error',
-                summary: 'Face Verification',
-                detail: 'The registered face photo cannot be read. Please register this face again.',
-                life: 6000,
-            })
-            faceStatusText.value = 'Registered face cannot be read.'
-            return null
+        const image = captureImage()
+        if (!image) {
+            throw new Error('Camera photo could not be captured.')
         }
 
-        const detections = await api
-            .detectAllFaces(videoRef.value, faceDetectorOptions)
-            .withFaceLandmarks()
-            .withFaceDescriptors()
-
-        if (!detections.length) {
-            const detail = 'No face detected. Look straight at the camera.'
-            toast.add({
-                severity: 'warn',
-                summary: 'Face Verification',
-                detail,
-                life: 5000,
-            })
-            faceStatusText.value = detail
-            return null
-        }
-
-        const bestDetection = detections.reduce(
-            (best, detection) => {
-                const distance = api.euclideanDistance(
-                    registeredDescriptor,
-                    detection.descriptor,
-                )
-
-                return !best || distance < best.distance
-                    ? { detection, distance }
-                    : best
-            },
-            null as {
-                detection: (typeof detections)[number]
-                distance: number
-            } | null,
-        )
-
-        const distance = bestDetection?.distance ?? Number.POSITIVE_INFINITY
-        const isMatch = Boolean(
-            bestDetection && distance <= FACE_MATCH_THRESHOLD,
-        )
-
-        if (!isMatch) {
+        const result = await recognizeFace(base64ToBlob(image, 'image/jpeg'))
+        if (!result.matched || result.employee_id !== employee.employee_id) {
             toast.add({
                 severity: 'error',
                 summary: 'Face Verification',
                 detail: `Face does not match ${employeeFullName(employee)}.`,
                 life: 6000,
             })
-            faceStatusText.value = `Face mismatch. Distance: ${distance.toFixed(2)}.`
+            faceStatusText.value = result.message || 'Face mismatch.'
             return null
         }
 
         faceStatusText.value = `Face matched ${employeeFullName(employee)}.`
         return {
             employee,
-            detection: bestDetection!.detection,
-            detectedFaceCount: detections.length,
         }
     } catch (error) {
         console.error('Face verification failed:', error)
@@ -934,6 +680,8 @@ const recognizeLiveFaceEmployee = async (): Promise<LiveFaceMatch | null> => {
         return null
     }
 
+    if (isFaceRecognitionInFlight) return null
+
     if (!props.employees.length) {
         toast.add({
             severity: 'warn',
@@ -945,73 +693,55 @@ const recognizeLiveFaceEmployee = async (): Promise<LiveFaceMatch | null> => {
         return null
     }
 
-    const api = await loadFaceModels()
     faceStatusText.value = 'Recognizing face...'
 
-    const detections = await api
-        .detectAllFaces(videoRef.value, faceDetectorOptions)
-        .withFaceLandmarks()
-        .withFaceDescriptors()
-
-    if (!detections.length) {
-        toast.add({
-            severity: 'warn',
-            summary: 'Face Recognition',
-            detail: 'No face detected. Look straight at the camera.',
-            life: 5000,
-        })
-        faceStatusText.value = 'No face detected.'
-        return null
-    }
-
-    let bestMatch: {
-        employee: VerifiedEmployee
-        detection: (typeof detections)[number]
-        distance: number
-    } | null = null
-
-    const employeeDescriptors = await Promise.all(
-        props.employees.map(async (employee) => ({
-            employee,
-            descriptor: await getRegisteredFaceDescriptor(employee),
-        })),
-    )
-
-    for (const { employee, descriptor: registeredDescriptor } of employeeDescriptors) {
-        if (!registeredDescriptor) continue
-
-        for (const detection of detections) {
-            const distance = api.euclideanDistance(
-                registeredDescriptor,
-                detection.descriptor,
-            )
-
-            if (!bestMatch || distance < bestMatch.distance) {
-                bestMatch = { employee, detection, distance }
-            }
-        }
-    }
-
-    if (!bestMatch || bestMatch.distance > FACE_MATCH_THRESHOLD) {
+    const image = captureImage()
+    if (!image) {
         toast.add({
             severity: 'error',
-            summary: 'Face Recognition',
-            detail: 'Face not recognized.',
+            summary: 'Camera',
+            detail: 'Camera image is not ready.',
             life: 5000,
         })
-        faceStatusText.value = bestMatch
-            ? `Face not recognized. Distance: ${bestMatch.distance.toFixed(2)}.`
-            : 'Face not recognized.'
         return null
     }
 
-    faceStatusText.value = `Recognized ${employeeFullName(bestMatch.employee)}.`
-    emit('employeeVerified', bestMatch.employee)
+    isFaceRecognitionInFlight = true
 
-    return {
-        employee: bestMatch.employee,
-        detection: bestMatch.detection,
-        detectedFaceCount: detections.length,
+    try {
+        const result = await recognizeFace(base64ToBlob(image, 'image/jpeg'))
+        if (!result.matched || !result.employee_id) {
+            toast.add({
+                severity: 'error',
+                summary: 'Face Recognition',
+                detail: result.message || 'Face not recognized.',
+                life: 5000,
+            })
+            faceStatusText.value = result.message || 'Face not recognized.'
+            return null
+        }
+
+        const employee =
+            props.employees.find(
+                (item) => item.employee_id === result.employee_id,
+            ) ?? {
+                id: 0,
+                employee_id: result.employee_id,
+                first_name: result.employee_id,
+                last_name: '',
+                position: '',
+                branch: null,
+                profile_url: null,
+            }
+
+        faceStatusText.value = `Recognized ${employeeFullName(employee)}.`
+        emit('employeeVerified', employee)
+
+        return {
+            employee,
+        }
+    } finally {
+        isFaceRecognitionInFlight = false
     }
 }
 
@@ -1022,10 +752,7 @@ const verifyEmployeeFaceAndSubmit = async (
     const employee = await verifyEmployeeIdentifier(employeeIdentifier, method)
     if (!employee) return
 
-    await Promise.all([
-        openCameraForCapture({ loadFaceVerification: true }),
-        getRegisteredFaceDescriptor(employee),
-    ])
+    await openCameraForCapture({ loadFaceVerification: true })
 
     const matchedFace = await verifyLiveFaceMatchesEmployee(employee)
     if (!matchedFace) {
@@ -1357,10 +1084,7 @@ const pollZktecoBridgeStatus = async (
                 throw new Error('Fingerprint employee could not be verified.')
             }
 
-            await Promise.all([
-                openCameraForCapture({ loadFaceVerification: true }),
-                getRegisteredFaceDescriptor(employee),
-            ])
+            await openCameraForCapture({ loadFaceVerification: true })
 
             const matchedFace = await verifyLiveFaceMatchesEmployee(employee)
 
@@ -1590,9 +1314,6 @@ onMounted(async () => {
     updateTime()
     interval = setInterval(updateTime, 1000)
     getLocation().catch(() => null)
-    loadFaceModels().catch((error) => {
-        console.error('Face model preload failed:', error)
-    })
 
     ensureRFIDFocus()
 

@@ -1,4 +1,4 @@
-@php($profileUrl = $employee->getFirstMediaUrl('employee-profile'))
+@php($profileUrl = $employee->employeeProfileUrl())
 
 <div class="rounded-lg border border-gray-200 bg-white p-4 text-sm dark:border-gray-700 dark:bg-gray-900">
     <div class="text-xs font-semibold uppercase text-gray-500 dark:text-gray-400">Registered face</div>
