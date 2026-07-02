@@ -31,5 +31,4 @@ VITE_FACE_SERVICE_URL=https://127.0.0.1:8001
 ```
 
 Embeddings are stored in `data/faces.sqlite` with model, detector, pose, quality,
-and timestamp metadata. Keep Laravel and Vue pointed at the FastAPI endpoints so
-SQLite can later be swapped for FAISS, Qdrant, or ChromaDB inside this service.
+and timestamp metadata. 

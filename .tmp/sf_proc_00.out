@@ -1,0 +1,8 @@
+  
+   PASS  Tests\Feature\ZktecoFingerprintApiTest
+  ✓ it returns a fingerprint manifest revision for the local agent                                               0.51s  
+  ✓ it returns paginated fingerprint fields needed for local cache rebuilds                                      0.04s  
+
+  Tests:    2 passed (21 assertions)
+  Duration: 0.73s
+

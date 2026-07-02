@@ -1,0 +1,452 @@
+using System.Text.Json;
+using System.Threading.Channels;
+using Microsoft.Extensions.Options;
+using ZktecoLocalAgent.Data;
+using ZktecoLocalAgent.Sdk;
+
+namespace ZktecoLocalAgent.Services;
+
+public sealed class CommandCoordinator : IDisposable
+{
+    private const int RegisterFingerCount = 3;
+    private readonly IZkFingerprintSdk sdk;
+    private readonly LaravelApiClient laravel;
+    private readonly TemplateCache cache;
+    private readonly AgentOptions options;
+    private readonly ILogger<CommandCoordinator> logger;
+    private readonly object gate = new();
+    private readonly List<Channel<CommandEvent>> subscribers = [];
+    private readonly List<byte[]> enrollmentTemplates = [];
+
+    private ActiveCommand? activeCommand;
+    private CommandEvent currentEvent = new(null, AgentStates.Idle, "Fingerprint agent starting.");
+    private TemplateMatch? pendingAttendanceMatch;
+    private byte[]? pendingEnrollmentTemplate;
+
+    public CommandCoordinator(
+        IZkFingerprintSdk sdk,
+        LaravelApiClient laravel,
+        TemplateCache cache,
+        IOptions<AgentOptions> options,
+        ILogger<CommandCoordinator> logger)
+    {
+        this.sdk = sdk;
+        this.laravel = laravel;
+        this.cache = cache;
+        this.options = options.Value;
+        this.logger = logger;
+        this.sdk.FingerprintCaptured += OnFingerprintCaptured;
+    }
+
+    public CommandEvent Current => currentEvent;
+
+    public HealthPayload Health(string? revision)
+    {
+        var ok = sdk.IsInitialized && sdk.ScannerAvailable && currentEvent.State != AgentStates.Error;
+        return new HealthPayload(
+            ok,
+            currentEvent.State,
+            sdk.ScannerAvailable,
+            sdk.IsInitialized,
+            sdk.MissingDependency,
+            sdk.LastError ?? currentEvent.Message,
+            revision
+        );
+    }
+
+    public async Task<IResult> StartEnrollmentAsync(StartEnrollRequest request, CancellationToken cancellationToken)
+    {
+        if (request.EmployeeDatabaseId <= 0)
+        {
+            return Results.UnprocessableEntity(new { message = "Employee id is required." });
+        }
+
+        var commandId = string.IsNullOrWhiteSpace(request.CommandId) ? NewCommandId("enroll") : request.CommandId!;
+        var command = ActiveCommand.CreateEnrollment(commandId, request);
+
+        if (!TryStart(command, out var conflict))
+        {
+            return conflict;
+        }
+
+        enrollmentTemplates.Clear();
+        pendingEnrollmentTemplate = null;
+        await PublishAsync(Event(commandId, AgentStates.WaitingForScan, "Scan the same finger 3 times.", request), cancellationToken);
+        return Results.Ok(new { command_id = commandId, message = "Fingerprint agent is ready. Scan the same finger 3 times." });
+    }
+
+    public async Task<IResult> StartAttendanceAsync(AttendanceCommandRequest request, CancellationToken cancellationToken)
+    {
+        var commandId = string.IsNullOrWhiteSpace(request.CommandId) ? NewCommandId("attendance") : request.CommandId!;
+        var command = ActiveCommand.CreateAttendance(commandId, request);
+
+        if (!TryStart(command, out var conflict))
+        {
+            return conflict;
+        }
+
+        pendingAttendanceMatch = null;
+        await PublishAsync(Event(commandId, AgentStates.WaitingForScan, "Waiting for registered fingerprint scan."), cancellationToken);
+        return Results.Ok(new { command_id = commandId, message = "Fingerprint agent is ready. Scan a registered finger." });
+    }
+
+    public async Task<IResult> StartUnlockAsync(UnlockCommandRequest request, CancellationToken cancellationToken)
+    {
+        var commandId = string.IsNullOrWhiteSpace(request.CommandId) ? NewCommandId("unlock") : request.CommandId!;
+        var command = ActiveCommand.CreateUnlock(commandId, request);
+
+        if (!TryStart(command, out var conflict))
+        {
+            return conflict;
+        }
+
+        await PublishAsync(Event(commandId, AgentStates.WaitingForScan, "Waiting for unlock fingerprint scan."), cancellationToken);
+        return Results.Ok(new { command_id = commandId, message = "Fingerprint agent is ready. Scan an authorized finger." });
+    }
+
+    public async Task<IResult> CommitEnrollmentAsync(string commandId, CancellationToken cancellationToken)
+    {
+        ActiveCommand? command;
+        byte[]? template;
+
+        lock (gate)
+        {
+            command = activeCommand;
+            template = pendingEnrollmentTemplate;
+        }
+
+        if (command is null || command.Kind != CommandKind.Enrollment || command.CommandId != commandId || template is null)
+        {
+            return Results.Conflict(new { message = "Fingerprint command does not match a pending enrollment." });
+        }
+
+        var request = command.Enrollment!;
+        await PublishAsync(Event(commandId, AgentStates.Recording, "Saving fingerprint enrollment...", request), cancellationToken);
+        await laravel.EnrollAsync(new
+        {
+            employee_id = request.EmployeeDatabaseId,
+            finger_index = request.FingerIndex <= 0 ? 1 : request.FingerIndex,
+            template_base64 = Convert.ToBase64String(template),
+            template_size = template.Length,
+            device_serial = options.DeviceSerial,
+            fingerprint_image_base64 = sdk.LastFingerprintImageBase64(),
+        }, cancellationToken);
+
+        ClearActive();
+        await PublishAsync(Event(commandId, AgentStates.Success, "Fingerprint successfully Registered!", request), cancellationToken);
+        return Results.Ok(new { message = "Fingerprint successfully Registered!" });
+    }
+
+    public async Task<IResult> FinalizeAttendanceAsync(string commandId, AttendanceCommandRequest request, CancellationToken cancellationToken)
+    {
+        ActiveCommand? command;
+        TemplateMatch? match;
+
+        lock (gate)
+        {
+            command = activeCommand;
+            match = pendingAttendanceMatch;
+        }
+
+        if (command is null || command.Kind != CommandKind.Attendance || command.CommandId != commandId || match is null)
+        {
+            return Results.Conflict(new { message = "Fingerprint command does not match a pending attendance scan." });
+        }
+
+        if (string.IsNullOrWhiteSpace(request.AttendanceImage))
+        {
+            return Results.UnprocessableEntity(new { message = "Attendance photo is required." });
+        }
+
+        await PublishAsync(Event(commandId, AgentStates.Recording, "Recording fingerprint attendance...", match.Template, command.Attendance?.AttendanceType, match.Score), cancellationToken);
+        var attendance = await laravel.RecordAttendanceAsync(new
+        {
+            employee_id = match.Template.EmployeeDatabaseId,
+            template_id = match.Template.ServerTemplateId,
+            score = match.Score,
+            device_serial = options.DeviceSerial,
+            attendance_type = command.Attendance?.AttendanceType,
+            occurred_at = command.Attendance?.OccurredAt,
+            offline_id = command.Attendance?.OfflineId,
+            attendance_image = request.AttendanceImage,
+            location = request.Location ?? command.Attendance?.Location,
+            location_source = request.LocationSource ?? command.Attendance?.LocationSource,
+            latitude = request.Latitude ?? command.Attendance?.Latitude,
+            longitude = request.Longitude ?? command.Attendance?.Longitude,
+        }, cancellationToken);
+
+        ClearActive();
+        await PublishAsync(Event(commandId, AgentStates.Success, $"Attendance recorded for {attendance?.Employee?.Name ?? match.Template.EmployeeName ?? match.Template.EmployeeCode}.", match.Template, attendance?.AttendanceType, match.Score), cancellationToken);
+        return Results.Ok(new { message = "Attendance recorded successfully." });
+    }
+
+    public async Task<IResult> CancelAsync(string commandId, CancellationToken cancellationToken)
+    {
+        ActiveCommand? command;
+        lock (gate)
+        {
+            command = activeCommand;
+            if (command is null || command.CommandId != commandId)
+            {
+                return Results.NotFound(new { message = "Command not found." });
+            }
+        }
+
+        ClearActive();
+        await PublishAsync(new CommandEvent(commandId, AgentStates.Idle, "Command cancelled."), cancellationToken);
+        return Results.Ok(new { message = "Command cancelled." });
+    }
+
+    public async IAsyncEnumerable<CommandEvent> SubscribeAsync(string? commandId, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        var channel = Channel.CreateUnbounded<CommandEvent>();
+        lock (subscribers)
+        {
+            subscribers.Add(channel);
+        }
+
+        try
+        {
+            if (commandId is null || currentEvent.CommandId == commandId)
+            {
+                yield return currentEvent;
+            }
+
+            while (await channel.Reader.WaitToReadAsync(cancellationToken))
+            {
+                while (channel.Reader.TryRead(out var commandEvent))
+                {
+                    if (commandId is null || commandEvent.CommandId == commandId)
+                    {
+                        yield return commandEvent;
+                    }
+                }
+            }
+        }
+        finally
+        {
+            lock (subscribers)
+            {
+                subscribers.Remove(channel);
+            }
+        }
+    }
+
+    public async Task PublishAsync(CommandEvent commandEvent, CancellationToken cancellationToken)
+    {
+        currentEvent = commandEvent with { CreatedAt = DateTimeOffset.UtcNow };
+        var json = JsonSerializer.Serialize(currentEvent);
+        await cache.AppendEventAsync(currentEvent, json, cancellationToken);
+
+        lock (subscribers)
+        {
+            foreach (var subscriber in subscribers.ToArray())
+            {
+                subscriber.Writer.TryWrite(currentEvent);
+            }
+        }
+
+        logger.LogInformation("Command {CommandId} state {State}: {Message}", currentEvent.CommandId, currentEvent.State, currentEvent.Message);
+    }
+
+    public void Dispose()
+    {
+        sdk.FingerprintCaptured -= OnFingerprintCaptured;
+    }
+
+    private void OnFingerprintCaptured(object? sender, FingerprintCapturedEventArgs args)
+    {
+        _ = Task.Run(async () =>
+        {
+            ActiveCommand? command;
+            lock (gate)
+            {
+                command = activeCommand;
+            }
+
+            if (command is null)
+            {
+                return;
+            }
+
+            try
+            {
+                switch (command.Kind)
+                {
+                    case CommandKind.Enrollment:
+                        await HandleEnrollmentCaptureAsync(command, args.Template);
+                        break;
+                    case CommandKind.Attendance:
+                        await HandleAttendanceCaptureAsync(command, args.Template);
+                        break;
+                    case CommandKind.Unlock:
+                        await HandleUnlockCaptureAsync(command, args.Template);
+                        break;
+                }
+            }
+            catch (Exception ex)
+            {
+                ClearActive();
+                await PublishAsync(new CommandEvent(command.CommandId, AgentStates.Error, ex.Message, ErrorCode: ex.GetType().Name), CancellationToken.None);
+            }
+        });
+    }
+
+    private async Task HandleEnrollmentCaptureAsync(ActiveCommand command, byte[] capturedTemplate)
+    {
+        if (enrollmentTemplates.Count > 0 && sdk.Match(capturedTemplate, enrollmentTemplates[^1]) <= 0)
+        {
+            await PublishAsync(Event(command.CommandId, AgentStates.WaitingForScan, "Please scan the same finger for enrollment.", command.Enrollment!), CancellationToken.None);
+            return;
+        }
+
+        enrollmentTemplates.Add(capturedTemplate);
+
+        if (enrollmentTemplates.Count < RegisterFingerCount)
+        {
+            await PublishAsync(Event(command.CommandId, AgentStates.WaitingForScan, $"{RegisterFingerCount - enrollmentTemplates.Count} scan(s) remaining.", command.Enrollment!), CancellationToken.None);
+            return;
+        }
+
+        pendingEnrollmentTemplate = sdk.MergeEnrollmentTemplates(enrollmentTemplates[0], enrollmentTemplates[1], enrollmentTemplates[2]);
+        enrollmentTemplates.Clear();
+        await PublishAsync(Event(command.CommandId, AgentStates.Captured, "Fingerprint captured. Review and submit to save.", command.Enrollment!, sdk.LastFingerprintImageBase64()), CancellationToken.None);
+    }
+
+    private async Task HandleAttendanceCaptureAsync(ActiveCommand command, byte[] capturedTemplate)
+    {
+        var match = sdk.Identify(capturedTemplate);
+        if (match is null)
+        {
+            await PublishAsync(new CommandEvent(command.CommandId, AgentStates.WaitingForScan, "Fingerprint not recognized. Scan again."), CancellationToken.None);
+            return;
+        }
+
+        pendingAttendanceMatch = match;
+        await PublishAsync(Event(command.CommandId, AgentStates.Matched, "Fingerprint matched. Capturing attendance photo...", match.Template, command.Attendance?.AttendanceType, match.Score), CancellationToken.None);
+        await PublishAsync(Event(command.CommandId, AgentStates.AwaitingBrowserPhoto, "Fingerprint matched. Waiting for browser attendance photo.", match.Template, command.Attendance?.AttendanceType, match.Score), CancellationToken.None);
+    }
+
+    private async Task HandleUnlockCaptureAsync(ActiveCommand command, byte[] capturedTemplate)
+    {
+        var match = sdk.Identify(capturedTemplate);
+        if (match is null)
+        {
+            await PublishAsync(new CommandEvent(command.CommandId, AgentStates.WaitingForScan, "Fingerprint not recognized. Scan again."), CancellationToken.None);
+            return;
+        }
+
+        ClearActive();
+        await PublishAsync(Event(command.CommandId, AgentStates.Matched, "Fingerprint matched. Unlocking timeclock...", match.Template, null, match.Score), CancellationToken.None);
+    }
+
+    private bool TryStart(ActiveCommand command, out IResult conflict)
+    {
+        lock (gate)
+        {
+            if (activeCommand is not null)
+            {
+                conflict = Results.Conflict(new
+                {
+                    message = "Another fingerprint command is already running.",
+                    command_id = activeCommand.CommandId,
+                    state = currentEvent.State,
+                });
+                return false;
+            }
+
+            activeCommand = command;
+            conflict = Results.NoContent();
+            return true;
+        }
+    }
+
+    private void ClearActive()
+    {
+        lock (gate)
+        {
+            activeCommand = null;
+            pendingAttendanceMatch = null;
+            pendingEnrollmentTemplate = null;
+            enrollmentTemplates.Clear();
+        }
+    }
+
+    private static string NewCommandId(string prefix) => $"{prefix}-{Guid.NewGuid():N}";
+
+    private static CommandEvent Event(string commandId, string state, string message, StartEnrollRequest employee, string? fingerprintImage = null)
+    {
+        return new CommandEvent(
+            commandId,
+            state,
+            message,
+            employee.EmployeeDatabaseId,
+            employee.EmployeeCode,
+            employee.Name,
+            employee.FirstName,
+            employee.Branch,
+            employee.IsBirthday,
+            FingerprintImageBase64: fingerprintImage
+        );
+    }
+
+    private static CommandEvent Event(string commandId, string state, string message, LocalFingerprintTemplate template, string? attendanceType, int score)
+    {
+        return new CommandEvent(
+            commandId,
+            state,
+            message,
+            template.EmployeeDatabaseId,
+            template.EmployeeCode,
+            template.EmployeeName,
+            template.EmployeeFirstName,
+            template.EmployeeBranch,
+            template.IsBirthday,
+            attendanceType,
+            template.ServerTemplateId,
+            score
+        );
+    }
+
+    private static CommandEvent Event(string commandId, string state, string message)
+    {
+        return new CommandEvent(commandId, state, message);
+    }
+}
+
+internal enum CommandKind
+{
+    Enrollment,
+    Attendance,
+    Unlock,
+}
+
+internal sealed class ActiveCommand
+{
+    private ActiveCommand(string commandId, CommandKind kind)
+    {
+        CommandId = commandId;
+        Kind = kind;
+    }
+
+    public string CommandId { get; }
+    public CommandKind Kind { get; }
+    public StartEnrollRequest? Enrollment { get; private init; }
+    public AttendanceCommandRequest? Attendance { get; private init; }
+    public UnlockCommandRequest? Unlock { get; private init; }
+
+    public static ActiveCommand CreateEnrollment(string commandId, StartEnrollRequest request)
+    {
+        return new ActiveCommand(commandId, CommandKind.Enrollment) { Enrollment = request };
+    }
+
+    public static ActiveCommand CreateAttendance(string commandId, AttendanceCommandRequest request)
+    {
+        return new ActiveCommand(commandId, CommandKind.Attendance) { Attendance = request };
+    }
+
+    public static ActiveCommand CreateUnlock(string commandId, UnlockCommandRequest request)
+    {
+        return new ActiveCommand(commandId, CommandKind.Unlock) { Unlock = request };
+    }
+}

@@ -51,6 +51,7 @@ let autoFingerprintTimeout: ReturnType<typeof setTimeout> | null = null
 let isAutoFingerprintScanActive = false
 let autoFingerprintScanVersion = 0
 let fingerprintPollAbort = false
+let fingerprintEvents: EventSource | null = null
 
 const AUTO_FINGERPRINT_RETRY_MS = 700
 const AUTO_FINGERPRINT_SCAN_WINDOW_MS = 120000
@@ -312,6 +313,11 @@ const fingerprintCredential = (status: BridgeStatus): string | null => {
 
 const bridgeBaseUrl = (): string => props.zktecoBridgeUrl.replace(/\/$/, '')
 
+const closeFingerprintEvents = () => {
+    fingerprintEvents?.close()
+    fingerprintEvents = null
+}
+
 const postBridgeCommand = async (
     path: string,
     payload: Record<string, unknown>,
@@ -335,20 +341,6 @@ const postBridgeCommand = async (
     }
 }
 
-const getBridgeStatus = async (): Promise<BridgeStatus> => {
-    const response = await fetch(`${bridgeBaseUrl()}/status`, {
-        headers: {
-            Accept: 'application/json',
-        },
-    })
-
-    if (!response.ok) {
-        throw new Error('Unable to connect to fingerprint scanner.')
-    }
-
-    return response.json().catch(() => ({}))
-}
-
 const startBridgeUnlockScan = async (
     commandId: string,
     options: { launchBridge?: boolean } = {},
@@ -356,7 +348,7 @@ const startBridgeUnlockScan = async (
     const shouldLaunchBridge = options.launchBridge ?? true
 
     try {
-        await postBridgeCommand('unlock', { command_id: commandId })
+        await postBridgeCommand('commands/unlock', { command_id: commandId })
         return
     } catch (error) {
         if (!shouldLaunchBridge) {
@@ -375,7 +367,7 @@ const startBridgeUnlockScan = async (
         await new Promise((resolve) => setTimeout(resolve, 700))
 
         try {
-            await postBridgeCommand('unlock', { command_id: commandId })
+            await postBridgeCommand('commands/unlock', { command_id: commandId })
             return
         } catch (error) {
             lastError = error
@@ -390,40 +382,70 @@ const pollFingerprintUnlock = async (
     timeoutMs = 30000,
     shouldContinue: (() => boolean) | undefined = undefined,
 ) => {
-    const startedAt = Date.now()
+    closeFingerprintEvents()
 
-    while (!fingerprintPollAbort && Date.now() - startedAt < timeoutMs) {
-        if (shouldContinue && !shouldContinue()) return
+    await new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(() => {
+            closeFingerprintEvents()
+            reject(new Error('No fingerprint scan was received. Please try again.'))
+        }, timeoutMs)
 
-        const status = await getBridgeStatus()
+        fingerprintEvents = new EventSource(
+            `${bridgeBaseUrl()}/events?command_id=${encodeURIComponent(commandId)}`,
+        )
 
-        if (shouldContinue && !shouldContinue()) return
-
-        if (status.command_id === commandId && status.message) {
-            statusText.value = status.message
-        }
-
-        if (status.command_id === commandId && status.state === 'matched') {
-            const credential = fingerprintCredential(status)
-
-            if (!credential) {
-                throw new Error(
-                    'Fingerprint match did not include unlock credentials.',
-                )
+        const finish = async (status: BridgeStatus) => {
+            if (fingerprintPollAbort || (shouldContinue && !shouldContinue())) {
+                clearTimeout(timeout)
+                closeFingerprintEvents()
+                resolve()
+                return
             }
 
-            await submitUnlock('fingerprint', credential)
-            return
+            if (status.command_id && status.command_id !== commandId) return
+
+            if (status.message) {
+                statusText.value = status.message
+            }
+
+            if (status.state === 'matched') {
+                const credential = fingerprintCredential(status)
+
+                if (!credential) {
+                    clearTimeout(timeout)
+                    closeFingerprintEvents()
+                    reject(
+                        new Error(
+                            'Fingerprint match did not include unlock credentials.',
+                        ),
+                    )
+                    return
+                }
+
+                clearTimeout(timeout)
+                closeFingerprintEvents()
+                await submitUnlock('fingerprint', credential)
+                resolve()
+                return
+            }
+
+            if (status.state === 'error') {
+                clearTimeout(timeout)
+                closeFingerprintEvents()
+                reject(new Error(status.message || 'Fingerprint scan failed.'))
+            }
         }
 
-        if (status.command_id === commandId && status.state === 'error') {
-            throw new Error(status.message || 'Fingerprint scan failed.')
+        fingerprintEvents.onmessage = (event) => {
+            finish(JSON.parse(event.data || '{}')).catch(reject)
         }
 
-        await new Promise((resolve) => setTimeout(resolve, 700))
-    }
-
-    throw new Error('No fingerprint scan was received. Please try again.')
+        ;['waiting_for_scan', 'matched', 'error'].forEach((state) => {
+            fingerprintEvents?.addEventListener(state, (event) => {
+                finish(JSON.parse(event.data || '{}')).catch(reject)
+            })
+        })
+    })
 }
 
 const runFingerprintUnlock = async (
@@ -443,6 +465,7 @@ const runFingerprintUnlock = async (
 
     errorText.value = ''
     fingerprintPollAbort = true
+    closeFingerprintEvents()
     method.value = 'fingerprint'
     rfidBuffer.value = ''
     password.value = ''
@@ -555,6 +578,7 @@ onUnmounted(() => {
     window.removeEventListener('keydown', onAutoRfidKeydown)
     clearAutoFingerprintScan()
     fingerprintPollAbort = true
+    closeFingerprintEvents()
     stopCamera()
     if (rfidTimeout) clearTimeout(rfidTimeout)
     if (autoRfidTimeout) clearTimeout(autoRfidTimeout)

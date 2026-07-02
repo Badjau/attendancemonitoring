@@ -2,7 +2,6 @@
 
 use App\Http\Controllers\AdminAccessController;
 use App\Http\Controllers\AnnouncementController;
-use App\Http\Controllers\Api\LocalZktecoBridgeController;
 use App\Http\Controllers\AttendanceController;
 use App\Http\Controllers\EmployeeWebAuthnController;
 use App\Http\Controllers\HomeController;
@@ -42,9 +41,6 @@ Route::get('/', [HomeController::class, 'home'])
 
 Route::get('/offline-attendance', fn () => Inertia::render('OfflineAttendance/Index'))
     ->name('offline-attendance.index');
-
-Route::match(['get', 'post'], '/local-zkteco-bridge/{endpoint}', [LocalZktecoBridgeController::class, 'handle'])
-    ->name('local-zkteco-bridge');
 
 // ROUTE FOR ANNOUNCEMENT
 Route::controller(AnnouncementController::class)

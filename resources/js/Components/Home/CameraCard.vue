@@ -93,6 +93,7 @@ let autoFingerprintTimeout: ReturnType<typeof setTimeout> | null = null
 let rfidTimeout: any = null
 let isAutoFingerprintScanActive = false
 let autoFingerprintScanVersion = 0
+let zktecoEvents: EventSource | null = null
 
 const lastScannedTime = ref(0)
 const SCAN_COOLDOWN_MS = 1000
@@ -230,9 +231,15 @@ const clearAutoFingerprintScan = () => {
     }
 }
 
+const closeZktecoEvents = () => {
+    zktecoEvents?.close()
+    zktecoEvents = null
+}
+
 const pauseAutoFingerprintScan = () => {
     autoFingerprintScanVersion++
     clearAutoFingerprintScan()
+    closeZktecoEvents()
     isAutoFingerprintScanActive = false
 }
 
@@ -950,128 +957,166 @@ const pollZktecoBridgeStatus = async (
     timeoutMs = 30000,
     shouldContinue: (() => boolean) | undefined = undefined,
 ): Promise<void> => {
-    const statusUrl = `${props.zktecoBridgeUrl.replace(/\/$/, '')}/status`
-    const startedAt = Date.now()
     let lastMessage = ''
     let attendancePhotoSent = false
 
-    while (Date.now() - startedAt < timeoutMs) {
-        if (shouldContinue && !shouldContinue()) return
+    closeZktecoEvents()
 
-        await new Promise((resolve) => setTimeout(resolve, 250))
+    await new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(() => {
+            closeZktecoEvents()
+            reject(new Error('No fingerprint scan was received. Please try again.'))
+        }, timeoutMs)
 
-        if (shouldContinue && !shouldContinue()) return
-
-        const status = await fetch(statusUrl, {
-            headers: {
-                Accept: 'application/json',
-            },
-        })
-            .then((response) =>
-                response.ok ? response.json().catch(() => ({})) : null,
-            )
-            .catch(() => null)
-
-        if (!status) continue
-        if (status.command_id && status.command_id !== commandId) continue
-
-        if (status.message && status.message !== lastMessage) {
-            lastMessage = status.message
-            faceStatusText.value = status.message
+        const finish = () => {
+            clearTimeout(timeout)
+            closeZktecoEvents()
+            resolve()
         }
 
-        if (status.state === 'matched' && !attendancePhotoSent) {
-            attendancePhotoSent = true
-            faceStatusText.value = 'Fingerprint matched. Verifying face...'
+        const fail = (error: Error) => {
+            clearTimeout(timeout)
+            closeZktecoEvents()
+            reject(error)
+        }
 
-            const employeeIdentifier =
-                status.employee_id || status.data?.employee?.employee_id
-
-            if (!employeeIdentifier) {
-                throw new Error('Fingerprint match did not include an employee.')
+        const handleStatus = async (status: any) => {
+            if (shouldContinue && !shouldContinue()) {
+                finish()
+                return
             }
 
-            const employee = await verifyEmployeeIdentifier(
-                employeeIdentifier,
-                'fingerprint',
-            )
-
-            if (!employee) {
-                throw new Error('Fingerprint employee could not be verified.')
+            if (!status || (status.command_id && status.command_id !== commandId)) {
+                return
             }
 
-            await openCameraForCapture({ loadFaceVerification: true })
+            if (status.message && status.message !== lastMessage) {
+                lastMessage = status.message
+                faceStatusText.value = status.message
+            }
 
-            const matchedFace = await verifyLiveFaceMatchesEmployee(employee)
+            if (
+                (status.state === 'matched' ||
+                    status.state === 'awaiting_browser_photo') &&
+                !attendancePhotoSent
+            ) {
+                attendancePhotoSent = true
+                faceStatusText.value = 'Fingerprint matched. Verifying face...'
 
-            if (!matchedFace) {
+                const employeeIdentifier =
+                    status.employee_id || status.data?.employee?.employee_id
+
+                if (!employeeIdentifier) {
+                    fail(new Error('Fingerprint match did not include an employee.'))
+                    return
+                }
+
+                const employee = await verifyEmployeeIdentifier(
+                    employeeIdentifier,
+                    'fingerprint',
+                )
+
+                if (!employee) {
+                    fail(new Error('Fingerprint employee could not be verified.'))
+                    return
+                }
+
+                await openCameraForCapture({ loadFaceVerification: true })
+
+                const matchedFace = await verifyLiveFaceMatchesEmployee(employee)
+
+                if (!matchedFace) {
+                    resetAttendanceSelection()
+                    fail(new Error('Face verification failed for fingerprint match.'))
+                    return
+                }
+
+                const image = captureAttendanceImage(matchedFace)
+
+                if (!image) {
+                    fail(new Error('Camera photo could not be captured.'))
+                    return
+                }
+
+                await postZktecoBridgeCommand(
+                    `${props.zktecoBridgeUrl.replace(/\/$/, '')}/commands/${encodeURIComponent(commandId)}/finalize-attendance`,
+                    {
+                        attendance_image: image,
+                        latitude: coords.value.latitude,
+                        longitude: coords.value.longitude,
+                        location: locationLabel(),
+                        location_source: locationSource.value || 'live',
+                    },
+                )
+
+                faceStatusText.value = 'Recording fingerprint attendance...'
+                return
+            }
+
+            if (status.state === 'success') {
+                if (status.employee || status.data?.employee) {
+                    emit('employeeVerified', status.employee || status.data.employee)
+                }
+
+                window.dispatchEvent(
+                    new CustomEvent('attendance:recorded', {
+                        detail: { payload: status },
+                    }),
+                )
+                toast.add({
+                    severity: 'success',
+                    summary: 'Success',
+                    detail:
+                        status.message ?? 'Attendance recorded successfully.',
+                    life: 5000,
+                })
+                announceAttendanceGreeting({
+                    first_name:
+                        status.employee_first_name ||
+                        status.employee_name?.split(' ')?.[0] ||
+                        '',
+                    is_birthday: Boolean(status.is_birthday),
+                    attendance_type:
+                        status.attendance_type ||
+                        attendanceType.value ||
+                        inferredAttendanceType(),
+                })
                 resetAttendanceSelection()
-                throw new Error('Face verification failed for fingerprint match.')
+                finish()
+                return
             }
 
-            const image = captureAttendanceImage(matchedFace)
-
-            if (!image) {
-                throw new Error('Camera photo could not be captured.')
+            if (status.state === 'error') {
+                fail(new Error(status.message || 'Fingerprint attendance failed.'))
             }
-
-            await postZktecoBridgeCommand(
-                `${props.zktecoBridgeUrl.replace(/\/$/, '')}/finalize-attendance`,
-                {
-                    command_id: commandId,
-                    attendance_image: image,
-                },
-            )
-
-            faceStatusText.value = 'Recording fingerprint attendance...'
-            continue
         }
 
-        if (status.state === 'success') {
-            if (status.employee || status.data?.employee) {
-                emit('employeeVerified', status.employee || status.data.employee)
-            }
-
-            window.dispatchEvent(
-                new CustomEvent('attendance:recorded', {
-                    detail: { payload: status },
-                }),
-            )
-            toast.add({
-                severity: 'success',
-                summary: 'Success',
-                detail:
-                    status.message ?? 'Attendance recorded successfully.',
-                life: 5000,
+        zktecoEvents = new EventSource(
+            `${props.zktecoBridgeUrl.replace(/\/$/, '')}/events?command_id=${encodeURIComponent(commandId)}`,
+        )
+        zktecoEvents.onmessage = (event) => {
+            handleStatus(JSON.parse(event.data || '{}')).catch(fail)
+        }
+        ;[
+            'waiting_for_scan',
+            'matched',
+            'awaiting_browser_photo',
+            'recording',
+            'success',
+            'error',
+        ].forEach((state) => {
+            zktecoEvents?.addEventListener(state, (event) => {
+                handleStatus(JSON.parse(event.data || '{}')).catch(fail)
             })
-            announceAttendanceGreeting({
-                first_name:
-                    status.employee_first_name ||
-                    status.employee_name?.split(' ')?.[0] ||
-                    '',
-                is_birthday: Boolean(status.is_birthday),
-                attendance_type:
-                    status.attendance_type ||
-                    attendanceType.value ||
-                    inferredAttendanceType(),
-            })
-            resetAttendanceSelection()
-            return
-        }
-
-        if (status.state === 'error') {
-            throw new Error(status.message || 'Fingerprint attendance failed.')
-        }
-    }
-
-    throw new Error('No fingerprint scan was received. Please try again.')
+        })
+    })
 }
 
 const startZktecoAttendanceScan = async (
     payload: Record<string, unknown>,
     options: { launchBridge?: boolean } = {},
 ): Promise<void> => {
-    const attendanceUrl = `${props.zktecoBridgeUrl.replace(/\/$/, '')}/attendance`
+    const attendanceUrl = `${props.zktecoBridgeUrl.replace(/\/$/, '')}/commands/attendance`
     const shouldLaunchBridge = options.launchBridge ?? true
 
     try {
@@ -1251,6 +1296,7 @@ onUnmounted(() => {
     clearInterval(interval)
     clearInterval(focusInterval)
     clearAutoFingerprintScan()
+    closeZktecoEvents()
     stopCamera()
 
     document.removeEventListener('click', onDocumentClick)

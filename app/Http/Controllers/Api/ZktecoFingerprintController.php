@@ -45,8 +45,6 @@ class ZktecoFingerprintController extends Controller
     {
         $this->authorizeScanner($request);
 
-        // Paginate fingerprint templates to avoid loading all templates at once
-        // This is important for systems with thousands of fingerprints
         $templates = ZktecoFingerprintTemplate::query()
             ->with('employee:id,employee_id,first_name,last_name,position,branch')
             ->orderBy('employee_id')
@@ -54,13 +52,34 @@ class ZktecoFingerprintController extends Controller
             ->paginate(500, ['*'], 'page', $request->query('page', 1));
 
         return response()->json([
-            'data' => $templates->items(),
+            'data' => collect($templates->items())
+                ->map(fn (ZktecoFingerprintTemplate $template): array => $this->fingerprintPayload($template))
+                ->values(),
             'pagination' => [
                 'current_page' => $templates->currentPage(),
                 'total' => $templates->total(),
                 'last_page' => $templates->lastPage(),
                 'per_page' => $templates->perPage(),
             ],
+        ]);
+    }
+
+    public function fingerprintsManifest(Request $request): JsonResponse
+    {
+        $this->authorizeScanner($request);
+
+        $latestUpdatedAt = ZktecoFingerprintTemplate::query()->max('updated_at');
+        $count = ZktecoFingerprintTemplate::query()->count();
+
+        return response()->json([
+            'revision' => hash('sha256', implode('|', [
+                $count,
+                $latestUpdatedAt ? Carbon::parse($latestUpdatedAt)->toIso8601String() : '',
+            ])),
+            'count' => $count,
+            'last_updated_at' => $latestUpdatedAt
+                ? Carbon::parse($latestUpdatedAt)->toIso8601String()
+                : null,
         ]);
     }
 
@@ -228,6 +247,24 @@ class ZktecoFingerprintController extends Controller
             'position' => $employee->position,
             'branch' => $employee->branch,
             'is_birthday' => $employee->date_of_birth?->isBirthday() ?? false,
+        ];
+    }
+
+    private function fingerprintPayload(ZktecoFingerprintTemplate $template): array
+    {
+        return [
+            'id' => $template->id,
+            'employee_id' => $template->employee_id,
+            'employee_code' => $template->employee?->employee_id,
+            'employee' => $this->employeePayload($template->employee),
+            'finger_index' => $template->finger_index,
+            'template_base64' => $template->template_base64,
+            'template_hash' => hash('sha256', $template->template_base64),
+            'template_format' => $template->template_format,
+            'template_size' => $template->template_size,
+            'device_serial' => $template->device_serial,
+            'enrolled_at' => $template->enrolled_at?->toIso8601String(),
+            'updated_at' => $template->updated_at?->toIso8601String(),
         ];
     }
 }

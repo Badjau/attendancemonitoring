@@ -13,6 +13,7 @@ window.fingerprintEnrollment = ({
     removingFingerIndex: null,
     enrollmentCaptured: false,
     enrollmentCommandId: '',
+    enrollmentEvents: null,
     message: '',
     success: false,
     selectedFinger: null,
@@ -126,6 +127,92 @@ window.fingerprintEnrollment = ({
     resetPendingEnrollment() {
         this.enrollmentCaptured = false
         this.enrollmentCommandId = ''
+        this.closeEnrollmentEvents()
+    },
+
+    closeEnrollmentEvents() {
+        if (this.enrollmentEvents) {
+            this.enrollmentEvents.close()
+            this.enrollmentEvents = null
+        }
+    },
+
+    listenToEnrollmentEvents(commandId) {
+        this.closeEnrollmentEvents()
+
+        const eventsUrl = `${this.zktecoBridgeUrl.replace(/\/$/, '')}/events?command_id=${encodeURIComponent(commandId)}`
+        this.enrollmentEvents = new EventSource(eventsUrl)
+
+        this.enrollmentEvents.onmessage = (event) => {
+            this.handleEnrollmentEvent(JSON.parse(event.data || '{}'), commandId)
+        }
+
+        ;[
+            'waiting_for_scan',
+            'captured',
+            'recording',
+            'success',
+            'error',
+        ].forEach((state) => {
+            this.enrollmentEvents.addEventListener(state, (event) => {
+                this.handleEnrollmentEvent(
+                    JSON.parse(event.data || '{}'),
+                    commandId,
+                )
+            })
+        })
+    },
+
+    handleEnrollmentEvent(status, commandId) {
+        if (!status || (status.command_id && status.command_id !== commandId)) {
+            return
+        }
+
+        if (status.message) {
+            this.message = this.scannerMessage(status.message)
+        }
+
+        if (status.state === 'captured' && !this.enrollmentCaptured) {
+            this.success = true
+            this.enrollmentCaptured = true
+            this.enrollmentCommandId = commandId
+            this.zktecoLoading = false
+            this.message =
+                'Fingerprint captured. Click Save fingerprint to finish this registration.'
+            return
+        }
+
+        if (status.state === 'success') {
+            this.success = true
+            this.zktecoLoading = false
+            this.submittingEnrollment = false
+            this.message = 'Fingerprint successfully Registered!'
+            this.registeredTemplates = [
+                ...this.registeredTemplates,
+                {
+                    finger_index: Number(this.selectedFinger),
+                    label: this.selectedFingerLabel,
+                    enrolled_at: new Intl.DateTimeFormat('en-US', {
+                        month: 'short',
+                        day: '2-digit',
+                        year: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                    }).format(new Date()),
+                },
+            ]
+            this.selectedFinger = null
+            this.resetPendingEnrollment()
+            return
+        }
+
+        if (status.state === 'error') {
+            this.success = false
+            this.zktecoLoading = false
+            this.submittingEnrollment = false
+            this.message = status.message || 'Fingerprint enrollment failed.'
+            this.closeEnrollmentEvents()
+        }
     },
 
     selectFinger(finger) {
@@ -235,7 +322,7 @@ window.fingerprintEnrollment = ({
 
         try {
             const response = await fetch(
-                `${this.zktecoBridgeUrl.replace(/\/$/, '')}/enroll`,
+                `${this.zktecoBridgeUrl.replace(/\/$/, '')}/commands/enroll`,
                 this.bridgeRequestOptions(employeePayload),
             )
 
@@ -252,8 +339,7 @@ window.fingerprintEnrollment = ({
                 payload.message ||
                     `Waiting for ${this.selectedFingerLabel}. Scan the same finger 3 times.`,
             )
-
-            await this.pollEnrollmentStatus(commandId)
+            this.listenToEnrollmentEvents(commandId)
         } catch (error) {
             if (!this.shouldLaunchBridgeProtocol()) {
                 this.message =
@@ -269,10 +355,11 @@ window.fingerprintEnrollment = ({
             window.location.href = launchUrl
 
             this.message = `Opening the fingerprint scanner. Scan ${this.selectedFingerLabel} 3 times when it is ready.`
-
-            await this.pollEnrollmentStatus(commandId)
+            this.listenToEnrollmentEvents(commandId)
         } finally {
-            this.zktecoLoading = false
+            if (!this.enrollmentEvents) {
+                this.zktecoLoading = false
+            }
         }
     },
 
@@ -285,10 +372,8 @@ window.fingerprintEnrollment = ({
 
         try {
             const response = await fetch(
-                `${this.zktecoBridgeUrl.replace(/\/$/, '')}/commit-enrollment`,
-                this.bridgeRequestOptions({
-                    command_id: this.enrollmentCommandId,
-                }),
+                `${this.zktecoBridgeUrl.replace(/\/$/, '')}/commands/${encodeURIComponent(this.enrollmentCommandId)}/commit-enrollment`,
+                this.bridgeRequestOptions({}),
             )
 
             const payload = await response.json().catch(() => ({}))
@@ -299,24 +384,7 @@ window.fingerprintEnrollment = ({
                 )
             }
 
-            this.success = true
-            this.message = payload.message || 'Fingerprint successfully Registered!'
-            this.registeredTemplates = [
-                ...this.registeredTemplates,
-                {
-                    finger_index: Number(this.selectedFinger),
-                    label: this.selectedFingerLabel,
-                    enrolled_at: new Intl.DateTimeFormat('en-US', {
-                        month: 'short',
-                        day: '2-digit',
-                        year: 'numeric',
-                        hour: '2-digit',
-                        minute: '2-digit',
-                    }).format(new Date()),
-                },
-            ]
-            this.selectedFinger = null
-            this.resetPendingEnrollment()
+            this.message = payload.message || 'Saving fingerprint...'
         } catch (error) {
             this.message =
                 error instanceof Error
@@ -327,74 +395,4 @@ window.fingerprintEnrollment = ({
         }
     },
 
-    async pollEnrollmentStatus(commandId) {
-        const statusUrl = `${this.zktecoBridgeUrl.replace(/\/$/, '')}/status`
-        const startedAt = Date.now()
-
-        while (Date.now() - startedAt < 300000) {
-            await new Promise((resolve) => setTimeout(resolve, 1000))
-
-            const status = await fetch(statusUrl, {
-                headers: {
-                    Accept: 'application/json',
-                },
-            })
-                .then((response) =>
-                    response.ok ? response.json().catch(() => ({})) : null,
-                )
-                .catch(() => null)
-
-            if (!status) continue
-            if (status.command_id && status.command_id !== commandId) continue
-
-            if (status.message) {
-                this.message = this.scannerMessage(status.message)
-            }
-
-            if (status.state === 'captured' && !this.enrollmentCaptured) {
-                this.success = true
-                this.enrollmentCaptured = true
-                this.enrollmentCommandId = commandId
-                this.message =
-                    'Fingerprint captured. Click Save fingerprint to finish this registration.'
-                continue
-            }
-
-            if (status.state === 'success') {
-                this.success = true
-                this.message = 'Fingerprint successfully Registered!'
-                this.registeredTemplates = [
-                    ...this.registeredTemplates,
-                    {
-                        finger_index: Number(this.selectedFinger),
-                        label: this.selectedFingerLabel,
-                        enrolled_at: new Intl.DateTimeFormat('en-US', {
-                            month: 'short',
-                            day: '2-digit',
-                            year: 'numeric',
-                            hour: '2-digit',
-                            minute: '2-digit',
-                        }).format(new Date()),
-                    },
-                ]
-                this.selectedFinger = null
-                this.resetPendingEnrollment()
-                setTimeout(() => {
-                    document.dispatchEvent(
-                        new KeyboardEvent('keydown', {
-                            key: 'Escape',
-                            bubbles: true,
-                        }),
-                    )
-                }, 900)
-                return
-            }
-
-            if (status.state === 'error') {
-                throw new Error(status.message || 'Fingerprint enrollment failed.')
-            }
-        }
-
-        throw new Error('Fingerprint enrollment timed out.')
-    },
 })
