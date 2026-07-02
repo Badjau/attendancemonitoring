@@ -57,6 +57,30 @@ class Attendance24HourWindowTest extends TestCase
         $this->assertSame(2, Attendance::query()->count());
     }
 
+    public function test_iso_utc_occurred_at_is_saved_as_manila_time(): void
+    {
+        $employee = Employee::query()->create([
+            'employee_id' => 'EMP-001',
+            'rfid_uid' => 'RFID-001',
+            'first_name' => 'Ada',
+            'last_name' => 'Lovelace',
+            'middle_name' => 'Byron',
+            'date_of_birth' => '1990-01-01',
+            'position' => 'Developer',
+            'role' => Employee::ROLE_EMPLOYEE,
+        ]);
+
+        $attendance = app(AttendanceService::class)->recordAttendance(new Request([
+            'rfid' => $employee->rfid_uid,
+            'latitude' => 0,
+            'longitude' => 0,
+            'occurred_at' => '2026-06-17T09:53:00.000Z',
+        ]));
+
+        $this->assertSame('2026-06-17', $attendance->attendance_date->format('Y-m-d'));
+        $this->assertSame('2026-06-17 17:53:00', Carbon::parse($attendance->getRawOriginal('time_in'))->format('Y-m-d H:i:s'));
+    }
+
     public function test_newer_same_day_scan_becomes_the_time_out_marker(): void
     {
         $employee = Employee::query()->create([

@@ -35,9 +35,7 @@ class AttendanceService
             }
         }
 
-        $now = $request->filled('occurred_at')
-            ? Carbon::parse($request->string('occurred_at')->toString(), 'Asia/Manila')
-            : Carbon::now('Asia/Manila');
+        $now = $this->attendanceTimestamp($request);
         $employee = $this->findEmployee($request->rfid);
         $this->finalizePreviousAttendanceDays($employee, $now);
         $requestedAttendanceType = $request->string('attendance_type')->toString();
@@ -83,6 +81,16 @@ class AttendanceService
     private function inferAttendanceTypeForEmployee(Employee $employee, Carbon $now): string
     {
         return Type::TimeIn->value;
+    }
+
+    private function attendanceTimestamp(Request $request): Carbon
+    {
+        if (! $request->filled('occurred_at')) {
+            return Carbon::now('Asia/Manila');
+        }
+
+        return Carbon::parse($request->string('occurred_at')->toString(), 'Asia/Manila')
+            ->setTimezone('Asia/Manila');
     }
 
     private function attendanceWindowStart(Carbon $now): Carbon

@@ -56,6 +56,7 @@ Route::controller(AttendanceController::class)
     ->as('attendance.')
     ->group(function () {
         Route::get('/', 'index')->name('index');
+        Route::get('/current-time', 'currentTime')->name('current-time');
         Route::post('/verify-employee', 'verifyEmployee')->name('verify-employee');
         Route::post('/record-time-in', 'recordTimeIn')->name('record-time-in');
     });

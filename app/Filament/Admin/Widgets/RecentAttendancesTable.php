@@ -53,13 +53,13 @@ class RecentAttendancesTable extends TableWidget
                     ->sortable(),
 
                 TextColumn::make('time_in')
-                    ->label('Time in')
+                    ->label('Time In')
                     ->dateTime('h:i A')
                     ->placeholder('-')
                     ->sortable(),
 
                 TextColumn::make('time_out')
-                    ->label('Time out')
+                    ->label('Time Out')
                     ->dateTime('h:i A')
                     ->placeholder('-')
                     ->sortable(),

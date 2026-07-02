@@ -55,10 +55,12 @@ class AttendancesTable
                     ->sortable(),
 
                 TextColumn::make('time_in')
+                    ->label('Time In')
                     ->dateTime('h:i A')
                     ->sortable(),
 
                 TextColumn::make('time_out')
+                    ->label('Time Out')
                     ->dateTime('h:i A')
                     ->sortable(),
 

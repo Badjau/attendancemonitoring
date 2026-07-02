@@ -14,6 +14,17 @@ class AttendanceController extends Controller
 {
     public function __construct(protected AttendanceService $attendanceService) {}
 
+    public function currentTime(): JsonResponse
+    {
+        $now = now('Asia/Manila');
+
+        return response()->json([
+            'iso' => $now->toIso8601String(),
+            'timestamp_ms' => $now->getTimestampMs(),
+            'timezone' => 'Asia/Manila',
+        ]);
+    }
+
     public function verifyEmployee(VerifyEmployeeRequest $request): JsonResponse
     {
         try {

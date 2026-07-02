@@ -87,6 +87,7 @@ const hasTypedEmployeePassword = ref(false)
 
 let stream: MediaStream | null = null
 let interval: ReturnType<typeof setInterval>
+let clockSyncInterval: ReturnType<typeof setInterval>
 let focusInterval: ReturnType<typeof setInterval>
 let faceDetectionInterval: ReturnType<typeof setInterval> | null = null
 let autoFingerprintTimeout: ReturnType<typeof setTimeout> | null = null
@@ -99,9 +100,13 @@ const lastScannedTime = ref(0)
 const SCAN_COOLDOWN_MS = 1000
 const AUTO_FINGERPRINT_RETRY_MS = 500
 const AUTO_FINGERPRINT_SCAN_WINDOW_MS = 120000
+const CLOCK_SYNC_INTERVAL_MS = 60 * 60 * 1000
+const CLOCK_OFFSET_STORAGE_KEY = 'timeclock.clockOffsetMs'
+const CLOCK_TIME_ZONE = 'Asia/Manila'
 const ATTENDANCE_IMAGE_MAX_WIDTH = 960
 const FACE_ACTIVE_ZONE_WIDTH_RATIO = 0.58
 const FACE_ACTIVE_ZONE_HEIGHT_RATIO = 0.78
+let clockOffsetMs = 0
 const isLocationReady = computed(
     () =>
         Boolean(coords.value) &&
@@ -318,14 +323,69 @@ const captureImage = (): string | null => {
     return canvas.toDataURL('image/jpeg', 0.72)
 }
 
+const loadClockOffset = () => {
+    const storedOffset = Number(localStorage.getItem(CLOCK_OFFSET_STORAGE_KEY))
+
+    clockOffsetMs = Number.isFinite(storedOffset) ? storedOffset : 0
+}
+
+const trustedNow = (): Date => new Date(Date.now() + clockOffsetMs)
+
+const trustedNowIso = (): string => trustedNow().toISOString()
+
+const trustedMinutesFromMidnight = (): number => {
+    const parts = new Intl.DateTimeFormat('en-US', {
+        hour: '2-digit',
+        hourCycle: 'h23',
+        minute: '2-digit',
+        timeZone: CLOCK_TIME_ZONE,
+    }).formatToParts(trustedNow())
+
+    const hour = Number(parts.find((part) => part.type === 'hour')?.value ?? 0)
+    const minute = Number(
+        parts.find((part) => part.type === 'minute')?.value ?? 0,
+    )
+
+    return hour * 60 + minute
+}
+
+const syncClock = async () => {
+    if (!navigator.onLine) return
+
+    const startedAt = Date.now()
+    const response = await fetch('/attendance/current-time', {
+        headers: {
+            Accept: 'application/json',
+            'X-Requested-With': 'XMLHttpRequest',
+        },
+    })
+    const endedAt = Date.now()
+
+    if (!response.ok) return
+
+    const payload = await response.json()
+    const serverTimestamp = Number(payload.timestamp_ms)
+
+    if (!Number.isFinite(serverTimestamp)) return
+
+    clockOffsetMs = Math.round(serverTimestamp - (startedAt + endedAt) / 2)
+    localStorage.setItem(CLOCK_OFFSET_STORAGE_KEY, String(clockOffsetMs))
+    updateTime()
+}
+
+const syncClockQuietly = () => {
+    syncClock().catch(() => null)
+}
+
 const updateTime = () => {
-    const now = new Date()
+    const now = trustedNow()
 
     currentTime.value = now.toLocaleTimeString('en-US', {
         hour: 'numeric',
         minute: '2-digit',
         second: '2-digit',
         hour12: true,
+        timeZone: CLOCK_TIME_ZONE,
     })
 
     currentDate.value = now.toLocaleDateString('en-US', {
@@ -333,12 +393,12 @@ const updateTime = () => {
         year: 'numeric',
         month: 'long',
         day: 'numeric',
+        timeZone: CLOCK_TIME_ZONE,
     })
 }
 
 const inferredAttendanceType = (): AttendanceAction => {
-    const now = new Date()
-    const minutesFromMidnight = now.getHours() * 60 + now.getMinutes()
+    const minutesFromMidnight = trustedMinutesFromMidnight()
 
     if (
         isMinuteWithinRange(
@@ -836,7 +896,7 @@ const fingerprintAttendancePayload = (
 ) => ({
     command_id: commandId,
     attendance_type: attendanceAction || undefined,
-    occurred_at: new Date().toISOString(),
+    occurred_at: trustedNowIso(),
     offline_id: commandId,
     latitude: coords.value.latitude,
     longitude: coords.value.longitude,
@@ -1214,7 +1274,7 @@ const submitAttendance = async (
 
     const result = await syncStore.submitOrQueueAttendance({
         offlineId: createOfflineId(),
-        occurredAt: new Date().toISOString(),
+        occurredAt: trustedNowIso(),
         employeeIdentifier,
         employeeName: employeeName || employeeIdentifier,
         attendanceMethod: method,
@@ -1272,8 +1332,11 @@ const onDocumentClick = (e: MouseEvent) => {
 }
 
 onMounted(async () => {
+    loadClockOffset()
     updateTime()
     interval = setInterval(updateTime, 1000)
+    syncClockQuietly()
+    clockSyncInterval = setInterval(syncClockQuietly, CLOCK_SYNC_INTERVAL_MS)
     getLocation().catch(() => null)
 
     ensureRFIDFocus()
@@ -1284,6 +1347,7 @@ onMounted(async () => {
 
     document.addEventListener('click', onDocumentClick)
     document.addEventListener('touchend', onDocumentClick)
+    window.addEventListener('online', syncClockQuietly)
 
     scheduleAutoFingerprintScan(1000)
 })
@@ -1294,6 +1358,7 @@ onUnmounted(() => {
     }
 
     clearInterval(interval)
+    clearInterval(clockSyncInterval)
     clearInterval(focusInterval)
     clearAutoFingerprintScan()
     closeZktecoEvents()
@@ -1301,6 +1366,7 @@ onUnmounted(() => {
 
     document.removeEventListener('click', onDocumentClick)
     document.removeEventListener('touchend', onDocumentClick)
+    window.removeEventListener('online', syncClockQuietly)
     if (rfidTimeout) clearTimeout(rfidTimeout)
 })
 </script>
