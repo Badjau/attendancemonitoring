@@ -37,3 +37,5 @@ Homestead.json
 .env.production
 .phpactor.json
 auth.json
+
+face_service/.venv
