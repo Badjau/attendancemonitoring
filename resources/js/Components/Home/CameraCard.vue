@@ -1,19 +1,17 @@
 <script setup lang="ts">
 import axios from 'axios'
 import {
-    Fingerprint,
     LoaderCircle,
     LogIn,
     LogOut,
     MapPin,
-    ScanFace,
     TriangleAlert,
 } from '@lucide/vue'
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useToast } from 'primevue'
 import { useGeolocator } from '@/Composables/useGeolocator.js'
 import { useSyncStore } from '@/Stores/sync.js'
-import { recognizeFace } from '@/Services/faceService.js'
+import { verifyEmployeeFace } from '@/Services/faceService.js'
 
 type AttendanceAction = 'time-in' | 'time-out'
 type AttendanceMethod = 'rfid' | 'keypad' | 'fingerprint' | 'face'
@@ -93,7 +91,6 @@ let focusInterval: ReturnType<typeof setInterval>
 let faceDetectionInterval: ReturnType<typeof setInterval> | null = null
 let autoFingerprintTimeout: ReturnType<typeof setTimeout> | null = null
 let rfidTimeout: any = null
-let isFaceRecognitionInFlight = false
 let isAutoFingerprintScanActive = false
 let autoFingerprintScanVersion = 0
 
@@ -102,6 +99,8 @@ const SCAN_COOLDOWN_MS = 1000
 const AUTO_FINGERPRINT_RETRY_MS = 500
 const AUTO_FINGERPRINT_SCAN_WINDOW_MS = 120000
 const ATTENDANCE_IMAGE_MAX_WIDTH = 960
+const FACE_ACTIVE_ZONE_WIDTH_RATIO = 0.58
+const FACE_ACTIVE_ZONE_HEIGHT_RATIO = 0.78
 const isLocationReady = computed(
     () =>
         Boolean(coords.value) &&
@@ -239,6 +238,42 @@ const pauseAutoFingerprintScan = () => {
 
 const startFaceDetectorOverlay = () => {
     clearFaceDetectorOverlay()
+
+    const drawOverlay = () => {
+        const canvas = overlayRef.value
+        const video = videoRef.value
+        const context = canvas?.getContext('2d')
+        if (!canvas || !video || !context) return
+
+        const rect = video.getBoundingClientRect()
+        const ratio = window.devicePixelRatio || 1
+        canvas.width = Math.round(rect.width * ratio)
+        canvas.height = Math.round(rect.height * ratio)
+        canvas.style.width = `${rect.width}px`
+        canvas.style.height = `${rect.height}px`
+        context.setTransform(ratio, 0, 0, ratio, 0, 0)
+        context.clearRect(0, 0, rect.width, rect.height)
+
+        const zoneWidth = rect.width * FACE_ACTIVE_ZONE_WIDTH_RATIO
+        const zoneHeight = rect.height * FACE_ACTIVE_ZONE_HEIGHT_RATIO
+        const zoneX = (rect.width - zoneWidth) / 2
+        const zoneY = (rect.height - zoneHeight) / 2
+
+        context.fillStyle = 'rgba(0, 30, 29, 0.42)'
+        context.fillRect(0, 0, rect.width, zoneY)
+        context.fillRect(0, zoneY + zoneHeight, rect.width, rect.height - zoneY - zoneHeight)
+        context.fillRect(0, zoneY, zoneX, zoneHeight)
+        context.fillRect(zoneX + zoneWidth, zoneY, rect.width - zoneX - zoneWidth, zoneHeight)
+
+        context.strokeStyle = '#f9bc60'
+        context.lineWidth = 3
+        context.setLineDash([14, 8])
+        context.strokeRect(zoneX, zoneY, zoneWidth, zoneHeight)
+        context.setLineDash([])
+    }
+
+    drawOverlay()
+    faceDetectionInterval = setInterval(drawOverlay, 250)
 }
 
 const captureImage = (): string | null => {
@@ -249,14 +284,29 @@ const captureImage = (): string | null => {
 
     if (video.videoWidth <= 0 || video.videoHeight <= 0) return null
 
-    const scale = Math.min(1, ATTENDANCE_IMAGE_MAX_WIDTH / video.videoWidth)
-    canvas.width = Math.round(video.videoWidth * scale)
-    canvas.height = Math.round(video.videoHeight * scale)
+    const sourceWidth = Math.round(video.videoWidth * FACE_ACTIVE_ZONE_WIDTH_RATIO)
+    const sourceHeight = Math.round(video.videoHeight * FACE_ACTIVE_ZONE_HEIGHT_RATIO)
+    const sourceX = Math.round((video.videoWidth - sourceWidth) / 2)
+    const sourceY = Math.round((video.videoHeight - sourceHeight) / 2)
+    const scale = Math.min(1, ATTENDANCE_IMAGE_MAX_WIDTH / sourceWidth)
+
+    canvas.width = Math.round(sourceWidth * scale)
+    canvas.height = Math.round(sourceHeight * scale)
 
     const ctx = canvas.getContext('2d')
     if (!ctx) return null
 
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
+    ctx.drawImage(
+        video,
+        sourceX,
+        sourceY,
+        sourceWidth,
+        sourceHeight,
+        0,
+        0,
+        canvas.width,
+        canvas.height,
+    )
 
     return canvas.toDataURL('image/jpeg', 0.72)
 }
@@ -363,9 +413,12 @@ const openCameraForCapture = async (
 }
 
 const handleTimeAction = async (actionName: AttendanceAction) => {
+    pauseAutoFingerprintScan()
     await ensureAttendanceFlowReady(actionName)
     employeePassword.value = ''
     hasTypedEmployeePassword.value = false
+    faceStatusText.value = 'RFID and fingerprint scanners are listening.'
+    scheduleAutoFingerprintScan(0)
 }
 
 const resetAttendanceSelection = () => {
@@ -640,7 +693,10 @@ const verifyLiveFaceMatchesEmployee = async (
             throw new Error('Camera photo could not be captured.')
         }
 
-        const result = await recognizeFace(base64ToBlob(image, 'image/jpeg'))
+        const result = await verifyEmployeeFace(
+            employee.employee_id,
+            base64ToBlob(image, 'image/jpeg'),
+        )
         if (!result.matched || result.employee_id !== employee.employee_id) {
             toast.add({
                 severity: 'error',
@@ -666,82 +722,6 @@ const verifyLiveFaceMatchesEmployee = async (
         })
         faceStatusText.value = 'Unable to verify face.'
         return null
-    }
-}
-
-const recognizeLiveFaceEmployee = async (): Promise<LiveFaceMatch | null> => {
-    if (!videoRef.value || !isVideoReady.value) {
-        toast.add({
-            severity: 'error',
-            summary: 'Camera',
-            detail: 'Camera not ready. Please allow camera access.',
-            life: 5000,
-        })
-        return null
-    }
-
-    if (isFaceRecognitionInFlight) return null
-
-    if (!props.employees.length) {
-        toast.add({
-            severity: 'warn',
-            summary: 'Face Recognition',
-            detail: 'No registered employee faces are available.',
-            life: 5000,
-        })
-        faceStatusText.value = 'No registered faces available.'
-        return null
-    }
-
-    faceStatusText.value = 'Recognizing face...'
-
-    const image = captureImage()
-    if (!image) {
-        toast.add({
-            severity: 'error',
-            summary: 'Camera',
-            detail: 'Camera image is not ready.',
-            life: 5000,
-        })
-        return null
-    }
-
-    isFaceRecognitionInFlight = true
-
-    try {
-        const result = await recognizeFace(base64ToBlob(image, 'image/jpeg'))
-        if (!result.matched || !result.employee_id) {
-            toast.add({
-                severity: 'error',
-                summary: 'Face Recognition',
-                detail: result.message || 'Face not recognized.',
-                life: 5000,
-            })
-            faceStatusText.value = result.message || 'Face not recognized.'
-            return null
-        }
-
-        const employee =
-            props.employees.find(
-                (item) => item.employee_id === result.employee_id,
-            ) ?? {
-                id: 0,
-                employee_id: result.employee_id,
-                first_name: result.employee_id,
-                last_name: '',
-                position: '',
-                branch: null,
-                profile_url: null,
-            }
-
-        faceStatusText.value = `Recognized ${employeeFullName(employee)}.`
-        emit('employeeVerified', employee)
-
-        return {
-            employee,
-        }
-    } finally {
-        isFaceRecognitionInFlight = false
     }
 }
 
@@ -843,64 +823,6 @@ const submitManualAttendance = async () => {
     }
 }
 
-const submitFaceAttendance = async () => {
-    pauseAutoFingerprintScan()
-
-    const attendanceAction = attendanceType.value || undefined
-
-    await ensureAttendanceFlowReady(attendanceAction)
-    await openCameraForCapture()
-
-    if (
-        locationLoading.value ||
-        locationError.value ||
-        !isLocationReady.value
-    ) {
-        toast.add({
-            severity: 'error',
-            summary: 'Location',
-            detail: locationError.value || 'Waiting for GPS location.',
-            life: 5000,
-        })
-        return
-    }
-
-    try {
-        startProcessing('face', 'Processing facial recognition...')
-
-        const matchedFace = await recognizeLiveFaceEmployee()
-        if (!matchedFace) {
-            resetAttendanceSelection()
-            return
-        }
-
-        const image = captureAttendanceImage(matchedFace)
-        if (!image) {
-            resetAttendanceSelection()
-            return
-        }
-
-        await submitAttendance(
-            matchedFace.employee.employee_id,
-            'face',
-            employeeFullName(matchedFace.employee),
-            image,
-        )
-    } catch (error) {
-        console.error('Error submitting face attendance:', error)
-        toast.add({
-            severity: 'error',
-            summary: 'Face Recognition',
-            detail:
-                error instanceof Error
-                    ? error.message
-                    : 'Facial recognition attendance failed.',
-            life: 5000,
-        })
-        resetAttendanceSelection()
-    }
-}
-
 const fingerprintAttendancePayload = (
     commandId: string,
     attendanceAction?: AttendanceAction | '',
@@ -994,12 +916,6 @@ const runFingerprintAttendance = async (
     }
 }
 
-const submitFingerprintAttendance = async () => {
-    clearAutoFingerprintScan()
-    await runFingerprintAttendance(false)
-    scheduleAutoFingerprintScan()
-}
-
 const scheduleAutoFingerprintScan = (delay = AUTO_FINGERPRINT_RETRY_MS) => {
     clearAutoFingerprintScan()
 
@@ -1007,7 +923,7 @@ const scheduleAutoFingerprintScan = (delay = AUTO_FINGERPRINT_RETRY_MS) => {
         if (
             isAutoFingerprintScanActive ||
             isProcessing.value ||
-            showEmployeeIdInputField.value ||
+            !showEmployeeIdInputField.value ||
             isCameraActive.value ||
             !isLocationReady.value
         ) {
@@ -1496,42 +1412,6 @@ onUnmounted(() => {
                     </button>
                 </div>
 
-                <div class="mt-4 grid grid-cols-2 gap-4">
-                    <button
-                        type="button"
-                        class="inline-flex w-full items-center justify-center gap-2 bg-brand-card hover:bg-white text-brand-stroke border-2 border-brand-stroke rounded-2xl py-4 px-3 transition-all duration-200 ease-out font-bold shadow-[4px_4px_0px_0px_#001e1d] hover:-translate-y-1 hover:shadow-[6px_6px_0px_0px_#001e1d] active:translate-x-1 active:translate-y-1 active:shadow-none"
-                        :class="{
-                            'opacity-60 cursor-not-allowed hover:translate-y-0 hover:shadow-[4px_4px_0px_0px_#001e1d]':
-                                isProcessing,
-                        }"
-                        :disabled="isProcessing"
-                        title="Fingerprint"
-                        @click="submitFingerprintAttendance"
-                    >
-                        <LoaderCircle
-                            v-if="processingMethod === 'fingerprint'"
-                            class="w-5 h-5 animate-spin"
-                        />
-                        <Fingerprint v-else class="w-5 h-5" />
-                        <span class="text-sm">Fingerprint</span>
-                    </button>
-
-                    <button
-                        type="button"
-                        class="inline-flex w-full items-center justify-center gap-2 bg-brand-card hover:bg-white text-brand-stroke border-2 border-brand-stroke rounded-2xl py-4 px-3 transition-all duration-200 ease-out font-bold shadow-[4px_4px_0px_0px_#001e1d] hover:-translate-y-1 hover:shadow-[6px_6px_0px_0px_#001e1d] active:translate-x-1 active:translate-y-1 active:shadow-none"
-                        :class="{
-                            'opacity-60 cursor-not-allowed hover:translate-y-0 hover:shadow-[4px_4px_0px_0px_#001e1d]':
-                                isProcessing,
-                        }"
-                        :disabled="isProcessing"
-                        title="Facial Recognition"
-                        @click="submitFaceAttendance"
-                    >
-                        <ScanFace class="w-5 h-5" />
-                        <span class="text-sm">Face</span>
-                    </button>
-                </div>
-
                 <div
                     v-if="isProcessing"
                     class="mt-5 flex items-center gap-3 rounded-2xl border-2 border-brand-stroke bg-brand-headline px-4 py-3 text-left shadow-[3px_3px_0px_0px_#001e1d]"
@@ -1556,7 +1436,7 @@ onUnmounted(() => {
                             @keydown="onRFIDKeydown"
                         />
 
-                        <div class="flex items-center justify-center gap-2">
+                        <div class="flex items-center justify-center">
                             <input
                                 v-if="showEmployeeIdInputField"
                                 ref="empIdInput"
@@ -1572,24 +1452,18 @@ onUnmounted(() => {
                                 @input="onEmpIdInput"
                                 @keydown="onEmpIdKeydown"
                             />
-
-                            <div v-if="showEmployeeIdInputField" class="mt-3">
-                                <button
-                                    type="button"
-                                    class="w-full bg-brand-stroke hover:bg-brand-bg text-brand-headline border-2 border-brand-stroke rounded-xl py-3 px-4 text-sm font-bold transition-all duration-200 ease-out shadow-[3px_3px_0px_0px_#abd1c6] hover:-translate-y-0.5 hover:shadow-[5px_5px_0px_0px_#abd1c6] active:translate-x-1 active:translate-y-1 active:shadow-none"
-                                    @click="submitManualAttendance"
-                                >
-                                    Submit
-                                </button>
-                            </div>
                         </div>
                     </div>
 
                     <p
-                        v-if="
-                            showEmployeeIdInputField ||
-                            faceStatusText !== 'Face verification ready.'
-                        "
+                        v-if="showEmployeeIdInputField"
+                        class="text-brand-bg text-center text-xs font-black uppercase tracking-wide"
+                    >
+                        RFID and fingerprint scanners are listening.
+                    </p>
+
+                    <p
+                        v-else-if="faceStatusText !== 'Face verification ready.'"
                         class="text-brand-bg text-xs font-black uppercase tracking-wide"
                     >
                         {{ faceStatusText }}

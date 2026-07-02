@@ -48,7 +48,7 @@ class AdminAccessController extends Controller
 
         $this->unlockAdminFor($request, $user);
 
-        return redirect()->intended('/admin');
+        return redirect()->intended($user->is_hr ? '/admin/attendances' : '/admin');
     }
 
     public function showRegister(Request $request): View|RedirectResponse
@@ -88,7 +88,7 @@ class AdminAccessController extends Controller
 
         $this->unlockAdminFor($request, $user);
 
-        return redirect('/admin');
+        return redirect($user->is_hr ? '/admin/attendances' : '/admin');
     }
 
     public function logout(Request $request): RedirectResponse

@@ -128,9 +128,13 @@ class EmployeeForm
 
                             Actions::make([
                                 Action::make('registerFace')
-                                    ->label('Register face')
+                                    ->label(fn (Employee $record): string => filled($record->employeeProfileUrl()) || $record->faceEmbeddings()->exists()
+                                        ? 'Update Face'
+                                        : 'Register face')
                                     ->icon(Heroicon::OutlinedCamera)
-                                    ->modalHeading(fn (Employee $record): string => 'Register face for '.$record->name)
+                                    ->modalHeading(fn (Employee $record): string => (filled($record->employeeProfileUrl()) || $record->faceEmbeddings()->exists()
+                                        ? 'Update face for '
+                                        : 'Register face for ').$record->name)
                                     ->modalSubmitAction(false)
                                     ->modalCancelActionLabel('Close')
                                     ->modalWidth('5xl')

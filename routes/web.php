@@ -7,6 +7,7 @@ use App\Http\Controllers\AttendanceController;
 use App\Http\Controllers\EmployeeWebAuthnController;
 use App\Http\Controllers\HomeController;
 use App\Http\Controllers\TimeclockUnlockController;
+use App\Services\HomeService;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 
@@ -32,6 +33,9 @@ Route::controller(AdminAccessController::class)
 
 Route::get('/face', fn () => redirect()->route('home'))->name('face');
 Route::get('/face/register', fn () => redirect()->route('home'))->name('face.register');
+Route::get('/face/diagnostics', fn (HomeService $homeService) => Inertia::render('Face/Index', [
+    'employees' => $homeService->getEmployeesWithFaces(),
+]))->name('face.diagnostics');
 
 Route::get('/', [HomeController::class, 'home'])
     ->name('home');

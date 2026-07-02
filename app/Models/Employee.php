@@ -127,6 +127,11 @@ class Employee extends Model implements HasMedia, WebAuthnAuthenticatable
         return $this->hasMany(ZktecoFingerprintTemplate::class);
     }
 
+    public function faceEmbeddings(): HasMany
+    {
+        return $this->hasMany(FaceEmbedding::class);
+    }
+
     public function latestZktecoFingerprintTemplate(): HasOne
     {
         return $this->hasOne(ZktecoFingerprintTemplate::class)->latestOfMany('enrolled_at');

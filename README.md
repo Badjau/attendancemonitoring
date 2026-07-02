@@ -88,6 +88,8 @@ npm install
 composer run dev
 ```
 
+Then run your server (Laragon, Apache, Nginx, ...)
+
 `composer run dev` starts Laravel, the queue listener, log tailing, and Vite together. For test or production servers, use `npm run build` instead of `npm run dev`.
 
 ## Server Update

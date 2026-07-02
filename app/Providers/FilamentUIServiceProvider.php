@@ -74,8 +74,7 @@ class FilamentUIServiceProvider extends ServiceProvider
 
         Select::configureUsing(function (Select $field) {
             return $field
-                ->searchable()
-                ->preload();
+                ->searchable();
         });
 
         // capitalize the model name in a create action label

@@ -2,6 +2,7 @@
     class="space-y-4"
     x-data="faceRegistration({
         employeeId: @js($employee->employee_id),
+        hasRegisteredFace: @js(filled($employee->employeeProfileUrl()) || $employee->faceEmbeddings()->exists()),
     })"
 >
     <div
@@ -137,11 +138,12 @@
                 type="button"
                 x-show="! isReviewingCapture"
                 class="fi-btn fi-btn-size-lg fi-color-primary w-full"
-                :disabled="! isCameraReady || isCapturing || isSubmitting"
-                @click="prepareCaptureForReview"
+                :disabled="ready ? isSubmitting : (! isCameraReady || isCapturing || isSubmitting)"
+                @click="ready ? finish() : prepareCaptureForReview()"
             >
-                <span x-show="! isCapturing">Capture enrollment image</span>
-                <span x-show="isCapturing">Capturing...</span>
+                <span x-show="ready">Save</span>
+                <span x-show="! ready && ! isCapturing">Capture enrollment image</span>
+                <span x-show="! ready && isCapturing">Capturing...</span>
             </button>
 
             <div x-show="isReviewingCapture" x-transition.opacity class="grid grid-cols-2 gap-3">

@@ -10,7 +10,13 @@ const jsonPayload = async (response, fallbackMessage) => {
     const payload = await response.json().catch(() => ({}))
 
     if (!response.ok) {
-        throw new Error(payload.detail || payload.message || fallbackMessage)
+        const detail = Array.isArray(payload.detail)
+            ? payload.detail
+                  .map((error) => error.msg || error.message || String(error))
+                  .join(' ')
+            : payload.detail
+
+        throw new Error(detail || payload.message || fallbackMessage)
     }
 
     return payload
@@ -18,7 +24,7 @@ const jsonPayload = async (response, fallbackMessage) => {
 
 export const recognizeFace = async (imageBlob) => {
     const formData = new FormData()
-    formData.append('image', imageBlob, `face_recognition_${Date.now()}.jpg`)
+    formData.append('image', imageBlob, `face_deepface_${Date.now()}.jpg`)
 
     const response = await fetch(`${faceServiceUrl()}/api/recognize`, {
         method: 'POST',
@@ -31,13 +37,33 @@ export const recognizeFace = async (imageBlob) => {
     return jsonPayload(response, 'Face recognition failed.')
 }
 
-export const enrollFace = async (employeeId, imageBlob, poseLabel = '') => {
+export const verifyEmployeeFace = async (employeeId, imageBlob) => {
+    const formData = new FormData()
+    formData.append('image', imageBlob, `face_verify_${employeeId}_${Date.now()}.jpg`)
+
+    const response = await fetch(
+        `${faceServiceUrl()}/api/employees/${encodeURIComponent(employeeId)}/verify`,
+        {
+            method: 'POST',
+            headers: {
+                Accept: 'application/json',
+            },
+            body: formData,
+        },
+    )
+
+    return jsonPayload(response, 'Face verification failed.')
+}
+
+export const enrollFace = async (employeeId, imageBlob, poseLabel = '', resetExisting = false) => {
     const formData = new FormData()
     formData.append('image', imageBlob, `face_enrollment_${employeeId}_${Date.now()}.jpg`)
     if (poseLabel) formData.append('pose_label', poseLabel)
+    if (resetExisting) formData.append('reset_existing', 'true')
+    const resetQuery = resetExisting ? '?reset_existing=true' : ''
 
     const response = await fetch(
-        `${faceServiceUrl()}/api/employees/${encodeURIComponent(employeeId)}/enroll`,
+        `${faceServiceUrl()}/api/employees/${encodeURIComponent(employeeId)}/enroll${resetQuery}`,
         {
             method: 'POST',
             headers: {

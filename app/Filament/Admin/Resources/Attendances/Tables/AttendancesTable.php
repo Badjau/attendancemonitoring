@@ -138,7 +138,6 @@ class AttendancesTable
                         fn ($query) => $query->orderBy('first_name')->orderBy('last_name')
                     )
                     ->getOptionLabelFromRecordUsing(fn ($record) => "{$record->first_name} {$record->last_name}")
-                    ->preload()
                     ->searchable()
                     ->getSearchResultsUsing(
                         fn (string $search) => Employee::query()

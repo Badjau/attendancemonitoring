@@ -45,4 +45,8 @@ return [
         'url' => env('FACE_SERVICE_URL', 'https://127.0.0.1:8001'),
     ],
 
+    'face_embeddings' => [
+        'token' => env('FACE_EMBEDDINGS_TOKEN', ''),
+    ],
+
 ];

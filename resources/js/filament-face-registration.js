@@ -4,7 +4,7 @@ import {
     faceServiceUrl,
 } from './Services/faceService.js'
 
-window.faceRegistration = ({ employeeId }) => ({
+window.faceRegistration = ({ employeeId, hasRegisteredFace = false }) => ({
     video: null,
     captureCanvas: null,
     stream: null,
@@ -23,6 +23,8 @@ window.faceRegistration = ({ employeeId }) => ({
     enrollmentCount: 0,
     requiredCount: 3,
     ready: false,
+    isUpdatingExisting: hasRegisteredFace,
+    hasResetExisting: false,
     serviceUrl: faceServiceUrl(),
 
     get canSave() {
@@ -47,7 +49,9 @@ window.faceRegistration = ({ employeeId }) => ({
         try {
             await this.loadStatus()
             await this.startCamera()
-            this.statusText = 'Capture a clear face image.'
+            this.statusText = this.isUpdatingExisting
+                ? `Capture 1 of ${this.requiredCount}.`
+                : 'Capture a clear face image.'
         } catch (error) {
             console.error(error)
             this.statusText =
@@ -65,9 +69,12 @@ window.faceRegistration = ({ employeeId }) => ({
 
     async loadStatus() {
         const status = await faceEnrollmentStatus(employeeId)
-        this.enrollmentCount = status.enrollment_count
         this.requiredCount = status.required_count
-        this.ready = status.ready
+        this.enrollmentCount = this.isUpdatingExisting ? 0 : status.enrollment_count
+        this.ready = this.isUpdatingExisting ? false : status.ready
+        this.statusText = this.isUpdatingExisting
+            ? `Capture 1 of ${this.requiredCount}.`
+            : this.statusText
     },
 
     async startCamera() {
@@ -212,21 +219,30 @@ window.faceRegistration = ({ employeeId }) => ({
         this.statusText = 'Saving enrollment capture...'
 
         try {
-            const payload = await enrollFace(employeeId, this.capturedBlob)
+            const shouldResetExisting = this.isUpdatingExisting && !this.hasResetExisting
+            const payload = await enrollFace(
+                employeeId,
+                this.capturedBlob,
+                '',
+                shouldResetExisting,
+            )
 
             this.enrollmentCount = payload.enrollment_count
             this.requiredCount = payload.required_count
             this.ready = payload.ready
+            this.hasResetExisting = this.hasResetExisting || shouldResetExisting
+            this.isUpdatingExisting = false
             this.success = true
             this.message = payload.message || 'Enrollment capture saved.'
             this.statusText = this.ready
-                ? 'Face enrollment is ready.'
+                ? 'Face enrollment is ready. Save to finish.'
                 : `Capture ${this.enrollmentCount + 1} of ${this.requiredCount}.`
             this.capturedBlob = null
             this.capturedPreview = ''
             this.isReviewingCapture = false
             this.faceClear = false
             this.faceCount = 0
+            if (this.ready) this.stopCamera()
         } catch (error) {
             this.success = false
             this.message =
@@ -237,5 +253,23 @@ window.faceRegistration = ({ employeeId }) => ({
         } finally {
             this.isSubmitting = false
         }
+    },
+
+    finish() {
+        this.stopCamera()
+
+        const modal = this.$root.closest('[id^="fi-"][id*="-action-"]')
+
+        if (modal?.id) {
+            document.dispatchEvent(
+                new CustomEvent('close-modal', {
+                    bubbles: true,
+                    composed: true,
+                    detail: { id: modal.id },
+                }),
+            )
+        }
+
+        setTimeout(() => window.location.reload(), 350)
     },
 })

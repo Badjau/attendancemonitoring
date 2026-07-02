@@ -2,6 +2,9 @@
 
 Local FastAPI service for attendance face enrollment and recognition.
 
+The service stores numeric DeepFace SFace embeddings in SQLite and compares
+those vectors with cosine distance. It does not compare raw images.
+
 ## Setup
 
 ```bat
@@ -11,7 +14,8 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
-If `face_recognition` fails to install on Windows, install `dlib` from a compatible prebuilt wheel or use Conda, then rerun `pip install -r requirements.txt`.
+The first request may take longer while DeepFace downloads the SFace, YuNet,
+and anti-spoofing model weights.
 
 ## Run
 
@@ -26,4 +30,6 @@ FACE_SERVICE_URL=https://127.0.0.1:8001
 VITE_FACE_SERVICE_URL=https://127.0.0.1:8001
 ```
 
-Embeddings are stored in `data/faces.sqlite`.
+Embeddings are stored in `data/faces.sqlite` with model, detector, pose, quality,
+and timestamp metadata. Keep Laravel and Vue pointed at the FastAPI endpoints so
+SQLite can later be swapped for FAISS, Qdrant, or ChromaDB inside this service.

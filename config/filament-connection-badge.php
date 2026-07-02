@@ -60,7 +60,7 @@ return [
     | detects that the connection has been lost.
     */
 
-    'show_overlay' => true,
+    'show_overlay' => false,
 
     /*
     |--------------------------------------------------------------------------
@@ -83,7 +83,7 @@ return [
 
     'route' => [
         'prefix' => '_filament-connection-badge',
-        'middleware' => ['web'],
+        'middleware' => [],
         'throttle' => env('FILAMENT_CONNECTION_BADGE_THROTTLE'),
     ],
 
@@ -96,7 +96,7 @@ return [
     | want to monitor a different endpoint instead.
     */
 
-    'ping_url' => env('FILAMENT_CONNECTION_BADGE_PING_URL'),
+    'ping_url' => env('FILAMENT_CONNECTION_BADGE_PING_URL', '/favicon.ico'),
 
     /*
     |--------------------------------------------------------------------------

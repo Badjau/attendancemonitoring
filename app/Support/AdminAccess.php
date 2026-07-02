@@ -60,11 +60,20 @@ class AdminAccess
 
         $employeeId = $request->session()->get('admin_unlocked_by');
 
-        return (bool) $employeeId
-            && Employee::query()
+        if (! $employeeId) {
+            return false;
+        }
+
+        $cacheKey = "admin_access.normal_admin_employee.{$employeeId}";
+
+        if (! $request->attributes->has($cacheKey)) {
+            $request->attributes->set($cacheKey, Employee::query()
                 ->whereKey($employeeId)
                 ->where('role', Employee::ROLE_ADMIN)
-                ->exists();
+                ->exists());
+        }
+
+        return (bool) $request->attributes->get($cacheKey);
     }
 
     private static function currentAdminUser(?Request $request = null): ?User
@@ -72,6 +81,16 @@ class AdminAccess
         $request ??= request();
         $adminUserId = $request->session()->get('admin_password_unlocked_by') ?? Auth::id();
 
-        return $adminUserId ? User::query()->find($adminUserId) : null;
+        if (! $adminUserId) {
+            return null;
+        }
+
+        $cacheKey = "admin_access.current_user.{$adminUserId}";
+
+        if (! $request->attributes->has($cacheKey)) {
+            $request->attributes->set($cacheKey, User::query()->find($adminUserId));
+        }
+
+        return $request->attributes->get($cacheKey);
     }
 }

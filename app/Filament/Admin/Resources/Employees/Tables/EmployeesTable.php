@@ -106,6 +106,7 @@ class EmployeesTable
             ->toolbarActions([
                 BulkActionGroup::make([
                     DeleteBulkAction::make()
+                        ->modalDescription('Deleting employees wipes ALL historic data bundled with each employee, including attendance history, registered face images, face vectors, fingerprint data, RFID access, and related records.')
                         ->visible(fn (): bool => AdminAccess::hasAnyAdminAccess()),
                 ])
                     ->visible(fn (): bool => AdminAccess::hasAnyAdminAccess()),

@@ -9,8 +9,8 @@ from app.recognition import analyze_single_face
 def test_rejects_no_face(monkeypatch):
     from app import recognition
 
-    monkeypatch.setattr(recognition, "face_recognition", type("Fake", (), {
-        "face_locations": staticmethod(lambda image, model="hog": []),
+    monkeypatch.setattr(recognition, "DeepFace", type("Fake", (), {
+        "extract_faces": staticmethod(lambda **kwargs: []),
     }))
 
     with pytest.raises(HTTPException) as exc:
@@ -22,8 +22,11 @@ def test_rejects_no_face(monkeypatch):
 def test_rejects_multiple_faces(monkeypatch):
     from app import recognition
 
-    monkeypatch.setattr(recognition, "face_recognition", type("Fake", (), {
-        "face_locations": staticmethod(lambda image, model="hog": [(0, 160, 160, 0), (0, 220, 220, 80)]),
+    monkeypatch.setattr(recognition, "DeepFace", type("Fake", (), {
+        "extract_faces": staticmethod(lambda **kwargs: [
+            {"facial_area": {"x": 0, "y": 0, "w": 160, "h": 160}, "confidence": 0.99},
+            {"facial_area": {"x": 80, "y": 0, "w": 140, "h": 220}, "confidence": 0.99},
+        ]),
     }))
 
     with pytest.raises(HTTPException) as exc:
@@ -38,12 +41,39 @@ def test_accepts_valid_quality(monkeypatch):
     image = np.indices((260, 260)).sum(axis=0).astype(np.uint8)
     rgb = np.stack([image, image, image], axis=2)
 
-    monkeypatch.setattr(recognition, "face_recognition", type("Fake", (), {
-        "face_locations": staticmethod(lambda image, model="hog": [(20, 220, 220, 20)]),
-        "face_encodings": staticmethod(lambda image, known_face_locations=None: [np.ones(128)]),
+    monkeypatch.setattr(recognition, "DeepFace", type("Fake", (), {
+        "extract_faces": staticmethod(lambda **kwargs: [{
+            "facial_area": {"x": 20, "y": 20, "w": 200, "h": 200},
+            "confidence": 0.99,
+            "is_real": True,
+            "antispoof_score": 0.98,
+        }]),
+        "represent": staticmethod(lambda **kwargs: [{"embedding": np.ones(128)}]),
     }))
 
     analysis = analyze_single_face(b"image", rgb, Settings(min_blur_score=1))
 
     assert analysis.embedding.shape == (128,)
     assert analysis.quality["width"] == 200
+
+
+def test_enrollment_does_not_require_anti_spoofing(monkeypatch):
+    from app import recognition
+
+    image = np.indices((260, 260)).sum(axis=0).astype(np.uint8)
+    rgb = np.stack([image, image, image], axis=2)
+
+    monkeypatch.setattr(recognition, "DeepFace", type("Fake", (), {
+        "extract_faces": staticmethod(lambda **kwargs: [{
+            "facial_area": {"x": 20, "y": 20, "w": 200, "h": 200},
+            "confidence": 0.99,
+            "is_real": False,
+            "antispoof_score": 0.14,
+        }]),
+        "represent": staticmethod(lambda **kwargs: [{"embedding": np.ones(128)}]),
+    }))
+
+    analysis = analyze_single_face(b"image", rgb, Settings(min_blur_score=1))
+
+    assert analysis.embedding.shape == (128,)
+    assert analysis.spoofing["checked"] is False
