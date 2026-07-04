@@ -1024,6 +1024,7 @@ const pollZktecoBridgeStatus = async (
 
     await new Promise<void>((resolve, reject) => {
         const timeout = setTimeout(() => {
+            void cancelZktecoCommand(commandId)
             closeZktecoEvents()
             reject(new Error('No fingerprint scan was received. Please try again.'))
         }, timeoutMs)
@@ -1035,6 +1036,7 @@ const pollZktecoBridgeStatus = async (
         }
 
         const fail = (error: Error) => {
+            void cancelZktecoCommand(commandId)
             clearTimeout(timeout)
             closeZktecoEvents()
             reject(error)
@@ -1240,6 +1242,23 @@ const postZktecoBridgeCommand = async (
         throw new Error(
             bridgePayload.message || 'Unable to connect to Finger Scanner Bridge.',
         )
+    }
+}
+
+const cancelZktecoCommand = async (commandId: string): Promise<void> => {
+    if (!commandId) return
+
+    const bridgeUrl = props.zktecoBridgeUrl.endsWith('/')
+        ? props.zktecoBridgeUrl.slice(0, -1)
+        : props.zktecoBridgeUrl
+
+    try {
+        await postZktecoBridgeCommand(
+            bridgeUrl + '/commands/' + encodeURIComponent(commandId) + '/cancel',
+            {},
+        )
+    } catch {
+        // The command may already be complete or the bridge may be unavailable.
     }
 }
 

@@ -78,6 +78,17 @@ window.fingerprintEnrollment = ({
         }
     },
 
+    async postAgentCommand(path, body) {
+        const response = await fetch(
+            `${this.zktecoBridgeUrl.replace(/\/$/, '')}${path}`,
+            this.bridgeRequestOptions(body),
+        )
+
+        const payload = await response.json().catch(() => ({}))
+
+        return { response, payload }
+    },
+
     get busy() {
         return this.zktecoLoading || this.submittingEnrollment
     },
@@ -321,12 +332,17 @@ window.fingerprintEnrollment = ({
         }
 
         try {
-            const response = await fetch(
-                `${this.zktecoBridgeUrl.replace(/\/$/, '')}/commands/enroll`,
-                this.bridgeRequestOptions(employeePayload),
+            let { response, payload } = await this.postAgentCommand(
+                '/commands/enroll',
+                employeePayload,
             )
 
-            const payload = await response.json().catch(() => ({}))
+            if (response.status === 404) {
+                ;({ response, payload } = await this.postAgentCommand(
+                    '/enroll',
+                    employeePayload,
+                ))
+            }
 
             if (!response.ok) {
                 throw new Error(
@@ -341,21 +357,12 @@ window.fingerprintEnrollment = ({
             )
             this.listenToEnrollmentEvents(commandId)
         } catch (error) {
-            if (!this.shouldLaunchBridgeProtocol()) {
-                this.message =
-                    error instanceof Error
-                        ? error.message
-                        : 'Unable to connect to the fingerprint scanner.'
-                this.success = false
-                return
-            }
-
-            const launchUrl = `zkteco-bridge://enroll?payload=${encodeURIComponent(JSON.stringify(employeePayload))}`
-
-            window.location.href = launchUrl
-
-            this.message = `Opening the fingerprint scanner. Scan ${this.selectedFingerLabel} 3 times when it is ready.`
-            this.listenToEnrollmentEvents(commandId)
+            this.message =
+                error instanceof Error
+                    ? error.message
+                    : 'Unable to connect to the fingerprint scanner.'
+            this.success = false
+            this.closeEnrollmentEvents()
         } finally {
             if (!this.enrollmentEvents) {
                 this.zktecoLoading = false

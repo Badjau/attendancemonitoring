@@ -44,7 +44,18 @@ builder.Services.AddSingleton<IZkFingerprintSdk, ZkFingerprintSdk>();
 builder.Services.AddSingleton<CommandCoordinator>();
 builder.Services.AddSingleton<TemplateSyncService>();
 builder.Services.AddHostedService(provider => provider.GetRequiredService<TemplateSyncService>());
-builder.Services.AddHttpClient<LaravelApiClient>();
+builder.Services.AddHttpClient<LaravelApiClient>()
+    .ConfigurePrimaryHttpMessageHandler(provider =>
+    {
+        var options = provider.GetRequiredService<IOptions<AgentOptions>>().Value;
+
+        return new HttpClientHandler
+        {
+            ServerCertificateCustomValidationCallback = options.AllowInvalidServerCertificate
+                ? HttpClientHandler.DangerousAcceptAnyServerCertificateValidator
+                : null,
+        };
+    });
 
 var app = builder.Build();
 var options = app.Services.GetRequiredService<IOptions<AgentOptions>>().Value;

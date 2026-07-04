@@ -14,6 +14,7 @@ public sealed class LaravelApiClient
         this.http = http;
         this.options = options.Value;
         this.http.BaseAddress = new Uri(this.options.ApiBaseUrl.TrimEnd('/') + "/");
+        this.http.Timeout = TimeSpan.FromSeconds(30);
         this.http.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 
         if (!string.IsNullOrWhiteSpace(this.options.ScannerToken))

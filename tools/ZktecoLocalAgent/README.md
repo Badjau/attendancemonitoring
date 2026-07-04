@@ -17,10 +17,9 @@ Before building or running the agent, make sure the scanner PC has:
 
 - Windows
 - A supported ZKTeco fingerprint scanner
-- .NET 8 x86 runtime support
 - The ZKTeco SDK DLLs
 
-Because this project is published with `--self-contained false`, the scanner PC must have the .NET 8 runtime installed. In practice, install the `.NET 8 x86 Desktop Runtime`. If the app still does not start, also install the matching `.NET 8 x86 ASP.NET Core Runtime` or Hosting Bundle.
+The agent is published as a self-contained `win-x86` app, so the scanner PC does not need a separate .NET runtime installation. It still runs as 32-bit because the ZKTeco SDK DLLs are x86.
 
 ## Required ZKTeco SDK DLLs
 
@@ -74,7 +73,7 @@ Build order matters:
 Publish command:
 
 ```powershell
-dotnet publish .\tools\ZktecoLocalAgent\ZktecoLocalAgent.csproj -c Release -r win-x86 --self-contained false -o .\tools\ZktecoLocalAgent\publish
+dotnet publish .\tools\ZktecoLocalAgent\ZktecoLocalAgent.csproj -c Release -r win-x86 --self-contained true -o .\tools\ZktecoLocalAgent\publish
 ```
 
 ## Install On The Scanner PC
@@ -83,8 +82,8 @@ Run the installer after publishing:
 
 ```powershell
 .\tools\ZktecoLocalAgent\Installer\install-agent.ps1 `
-  -ApiBaseUrl "https://your-domain/api/zkteco" `
-  -ScannerToken "PASTE_ZKTECO_SCANNER_TOKEN_HERE" `
+  -ApiBaseUrl "https://20.20.52.71/api/zkteco" `
+  -ScannerToken "fhDVzlVcoUqRxpVtWsr8N5YEPXzsgoNJb4GsGymgfTM" `
   -DeviceSerial "SCANNER-PC-01"
 ```
 
@@ -213,7 +212,6 @@ $env:LOCALAPPDATA\ZktecoLocalAgent\ZktecoLocalAgent.exe
 
 If it exits immediately, check:
 
-- .NET 8 runtime installation
 - ZKTeco DLL presence
 - log files
 
@@ -230,7 +228,6 @@ Make sure:
 
 Common causes:
 
-- missing .NET 8 x86 runtime
 - missing ZKTeco SDK DLLs
 - scanner SDK dependency issue
 

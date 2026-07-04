@@ -1,1 +1,11 @@
-{"Version":1,"Hash":"fnYdVJNvRxaPMPJSc8wIg15ZgZ8S8wla1dBZ9Twqlr0=","Source":"ZktecoLocalAgent","BasePath":"/","Mode":"Root","ManifestType":"Build","ReferencedProjectsConfiguration":[],"DiscoveryPatterns":[],"Assets":[],"Endpoints":[]}
+{
+  "Version": 1,
+  "Hash": "LmubeWIefuiWp0VY4Ys/JOmdDn2b1Fn1JfiD2XqDQJ8=",
+  "Source": "ZktecoLocalAgent",
+  "BasePath": "_content/ZktecoLocalAgent",
+  "Mode": "Default",
+  "ManifestType": "Build",
+  "ReferencedProjectsConfiguration": [],
+  "DiscoveryPatterns": [],
+  "Assets": []
+}

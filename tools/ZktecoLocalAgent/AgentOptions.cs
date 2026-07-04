@@ -8,4 +8,5 @@ public sealed class AgentOptions
     public string DeviceSerial { get; set; } = "ZKTECO-LOCAL";
     public int SyncIntervalSeconds { get; set; } = 60;
     public int LogRetentionDays { get; set; } = 14;
+    public bool AllowInvalidServerCertificate { get; set; } = true;
 }

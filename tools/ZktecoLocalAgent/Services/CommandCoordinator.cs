@@ -17,11 +17,14 @@ public sealed class CommandCoordinator : IDisposable
     private readonly object gate = new();
     private readonly List<Channel<CommandEvent>> subscribers = [];
     private readonly List<byte[]> enrollmentTemplates = [];
+    private readonly Dictionary<string, CommandEvent> latestEvents = [];
 
     private ActiveCommand? activeCommand;
     private CommandEvent currentEvent = new(null, AgentStates.Idle, "Fingerprint agent starting.");
     private TemplateMatch? pendingAttendanceMatch;
     private byte[]? pendingEnrollmentTemplate;
+    private bool isHandlingCapture;
+    private DateTimeOffset lastEnrollmentAcceptedAt = DateTimeOffset.MinValue;
 
     public CommandCoordinator(
         IZkFingerprintSdk sdk,
@@ -42,7 +45,7 @@ public sealed class CommandCoordinator : IDisposable
 
     public HealthPayload Health(string? revision)
     {
-        var ok = sdk.IsInitialized && sdk.ScannerAvailable && currentEvent.State != AgentStates.Error;
+        var ok = sdk.IsInitialized && sdk.ScannerAvailable;
         return new HealthPayload(
             ok,
             currentEvent.State,
@@ -71,6 +74,7 @@ public sealed class CommandCoordinator : IDisposable
 
         enrollmentTemplates.Clear();
         pendingEnrollmentTemplate = null;
+        lastEnrollmentAcceptedAt = DateTimeOffset.MinValue;
         await PublishAsync(Event(commandId, AgentStates.WaitingForScan, "Scan the same finger 3 times.", request), cancellationToken);
         return Results.Ok(new { command_id = commandId, message = "Fingerprint agent is ready. Scan the same finger 3 times." });
     }
@@ -122,15 +126,29 @@ public sealed class CommandCoordinator : IDisposable
 
         var request = command.Enrollment!;
         await PublishAsync(Event(commandId, AgentStates.Recording, "Saving fingerprint enrollment...", request), cancellationToken);
-        await laravel.EnrollAsync(new
+
+        try
         {
-            employee_id = request.EmployeeDatabaseId,
-            finger_index = request.FingerIndex <= 0 ? 1 : request.FingerIndex,
-            template_base64 = Convert.ToBase64String(template),
-            template_size = template.Length,
-            device_serial = options.DeviceSerial,
-            fingerprint_image_base64 = sdk.LastFingerprintImageBase64(),
-        }, cancellationToken);
+            await laravel.EnrollAsync(new
+            {
+                employee_id = request.EmployeeDatabaseId,
+                finger_index = request.FingerIndex <= 0 ? 1 : request.FingerIndex,
+                template_base64 = Convert.ToBase64String(template),
+                template_size = template.Length,
+                device_serial = options.DeviceSerial,
+                fingerprint_image_base64 = sdk.LastFingerprintImageBase64(),
+            }, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Unable to save fingerprint enrollment for command {CommandId}.", commandId);
+            await PublishAsync(Event(commandId, AgentStates.Captured, $"Unable to save fingerprint: {ex.Message}", request, sdk.LastFingerprintImageBase64()), CancellationToken.None);
+
+            return Results.Json(new
+            {
+                message = $"Unable to save fingerprint: {ex.Message}",
+            }, statusCode: StatusCodes.Status502BadGateway);
+        }
 
         ClearActive();
         await PublishAsync(Event(commandId, AgentStates.Success, "Fingerprint successfully Registered!", request), cancellationToken);
@@ -207,7 +225,11 @@ public sealed class CommandCoordinator : IDisposable
 
         try
         {
-            if (commandId is null || currentEvent.CommandId == commandId)
+            if (commandId is not null && latestEvents.TryGetValue(commandId, out var latestEvent))
+            {
+                yield return latestEvent;
+            }
+            else if (commandId is null || currentEvent.CommandId == commandId)
             {
                 yield return currentEvent;
             }
@@ -234,19 +256,33 @@ public sealed class CommandCoordinator : IDisposable
 
     public async Task PublishAsync(CommandEvent commandEvent, CancellationToken cancellationToken)
     {
-        currentEvent = commandEvent with { CreatedAt = DateTimeOffset.UtcNow };
-        var json = JsonSerializer.Serialize(currentEvent);
-        await cache.AppendEventAsync(currentEvent, json, cancellationToken);
+        var publishedEvent = commandEvent with { CreatedAt = DateTimeOffset.UtcNow };
+
+        lock (gate)
+        {
+            if (publishedEvent.CommandId is not null)
+            {
+                latestEvents[publishedEvent.CommandId] = publishedEvent;
+                currentEvent = publishedEvent;
+            }
+            else if (activeCommand is null)
+            {
+                currentEvent = publishedEvent;
+            }
+        }
+
+        var json = JsonSerializer.Serialize(publishedEvent);
+        await cache.AppendEventAsync(publishedEvent, json, cancellationToken);
 
         lock (subscribers)
         {
             foreach (var subscriber in subscribers.ToArray())
             {
-                subscriber.Writer.TryWrite(currentEvent);
+                subscriber.Writer.TryWrite(publishedEvent);
             }
         }
 
-        logger.LogInformation("Command {CommandId} state {State}: {Message}", currentEvent.CommandId, currentEvent.State, currentEvent.Message);
+        logger.LogInformation("Command {CommandId} state {State}: {Message}", publishedEvent.CommandId, publishedEvent.State, publishedEvent.Message);
     }
 
     public void Dispose()
@@ -261,7 +297,17 @@ public sealed class CommandCoordinator : IDisposable
             ActiveCommand? command;
             lock (gate)
             {
+                if (isHandlingCapture)
+                {
+                    return;
+                }
+
                 command = activeCommand;
+
+                if (command is not null)
+                {
+                    isHandlingCapture = true;
+                }
             }
 
             if (command is null)
@@ -289,11 +335,24 @@ public sealed class CommandCoordinator : IDisposable
                 ClearActive();
                 await PublishAsync(new CommandEvent(command.CommandId, AgentStates.Error, ex.Message, ErrorCode: ex.GetType().Name), CancellationToken.None);
             }
+            finally
+            {
+                lock (gate)
+                {
+                    isHandlingCapture = false;
+                }
+            }
         });
     }
 
     private async Task HandleEnrollmentCaptureAsync(ActiveCommand command, byte[] capturedTemplate)
     {
+        var now = DateTimeOffset.UtcNow;
+        if (now - lastEnrollmentAcceptedAt < TimeSpan.FromMilliseconds(900))
+        {
+            return;
+        }
+
         if (enrollmentTemplates.Count > 0 && sdk.Match(capturedTemplate, enrollmentTemplates[^1]) <= 0)
         {
             await PublishAsync(Event(command.CommandId, AgentStates.WaitingForScan, "Please scan the same finger for enrollment.", command.Enrollment!), CancellationToken.None);
@@ -301,10 +360,11 @@ public sealed class CommandCoordinator : IDisposable
         }
 
         enrollmentTemplates.Add(capturedTemplate);
+        lastEnrollmentAcceptedAt = now;
 
         if (enrollmentTemplates.Count < RegisterFingerCount)
         {
-            await PublishAsync(Event(command.CommandId, AgentStates.WaitingForScan, $"{RegisterFingerCount - enrollmentTemplates.Count} scan(s) remaining.", command.Enrollment!), CancellationToken.None);
+            await PublishAsync(Event(command.CommandId, AgentStates.WaitingForScan, $"Scan accepted. {RegisterFingerCount - enrollmentTemplates.Count} scan(s) remaining.", command.Enrollment!), CancellationToken.None);
             return;
         }
 
@@ -369,6 +429,7 @@ public sealed class CommandCoordinator : IDisposable
             pendingAttendanceMatch = null;
             pendingEnrollmentTemplate = null;
             enrollmentTemplates.Clear();
+            lastEnrollmentAcceptedAt = DateTimeOffset.MinValue;
         }
     }
 

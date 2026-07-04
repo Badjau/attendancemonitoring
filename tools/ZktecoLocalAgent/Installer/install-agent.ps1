@@ -5,7 +5,8 @@ param(
     [string]$LocalListenUrl = "http://127.0.0.1:8765",
     [string]$DeviceSerial = "ZKTECO-LOCAL",
     [int]$SyncIntervalSeconds = 60,
-    [int]$LogRetentionDays = 14
+    [int]$LogRetentionDays = 14,
+    [bool]$AllowInvalidServerCertificate = $true
 )
 
 $ErrorActionPreference = "Stop"
@@ -22,6 +23,7 @@ $config = @{
         DeviceSerial = $DeviceSerial
         SyncIntervalSeconds = $SyncIntervalSeconds
         LogRetentionDays = $LogRetentionDays
+        AllowInvalidServerCertificate = $AllowInvalidServerCertificate
     }
 } | ConvertTo-Json -Depth 4
 
