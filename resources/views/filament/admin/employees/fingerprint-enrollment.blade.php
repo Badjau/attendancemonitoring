@@ -120,6 +120,37 @@
         </div>
     </div>
 
+    <div class="rounded-lg border border-gray-200 bg-white p-4 text-sm dark:border-gray-700 dark:bg-gray-900">
+        <div class="mb-3 flex items-center justify-between gap-3">
+            <div>
+                <div class="text-sm font-semibold text-gray-950 dark:text-white">Fingerprint preview</div>
+                <div class="mt-1 text-xs text-gray-500 dark:text-gray-400" x-text="fingerprintPreviewImage ? 'Latest scan' : 'Waiting for scan'"></div>
+            </div>
+            <div
+                class="rounded-full px-3 py-1 text-xs font-semibold"
+                :class="fingerprintPreviewImage ? 'bg-success-50 text-success-700 dark:bg-success-950 dark:text-success-300' : 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300'"
+            >
+                <span x-text="fingerprintPreviewImage ? 'Preview ready' : 'No image'"></span>
+            </div>
+        </div>
+
+        <div class="flex aspect-[4/3] items-center justify-center overflow-hidden rounded-lg border border-dashed border-gray-300 bg-gray-50 dark:border-gray-700 dark:bg-gray-950">
+            <template x-if="fingerprintPreviewImage">
+                <img
+                    :src="fingerprintPreviewImage"
+                    alt="Latest fingerprint scan preview"
+                    class="h-full w-full object-contain p-3"
+                />
+            </template>
+
+            <template x-if="! fingerprintPreviewImage">
+                <div class="px-4 text-center text-sm font-medium text-gray-500 dark:text-gray-400">
+                    Scan a selected finger to show the latest fingerprint image here.
+                </div>
+            </template>
+        </div>
+    </div>
+
     <div class="flex flex-wrap gap-2">
         <button
             type="button"

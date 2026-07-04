@@ -355,7 +355,7 @@ public sealed class CommandCoordinator : IDisposable
 
         if (enrollmentTemplates.Count > 0 && sdk.Match(capturedTemplate, enrollmentTemplates[^1]) <= 0)
         {
-            await PublishAsync(Event(command.CommandId, AgentStates.WaitingForScan, "Please scan the same finger for enrollment.", command.Enrollment!), CancellationToken.None);
+            await PublishAsync(Event(command.CommandId, AgentStates.WaitingForScan, "Please scan the same finger for enrollment.", command.Enrollment!, sdk.LastFingerprintImageBase64()), CancellationToken.None);
             return;
         }
 
@@ -364,7 +364,7 @@ public sealed class CommandCoordinator : IDisposable
 
         if (enrollmentTemplates.Count < RegisterFingerCount)
         {
-            await PublishAsync(Event(command.CommandId, AgentStates.WaitingForScan, $"Scan accepted. {RegisterFingerCount - enrollmentTemplates.Count} scan(s) remaining.", command.Enrollment!), CancellationToken.None);
+            await PublishAsync(Event(command.CommandId, AgentStates.WaitingForScan, $"Scan accepted. {RegisterFingerCount - enrollmentTemplates.Count} scan(s) remaining.", command.Enrollment!, sdk.LastFingerprintImageBase64()), CancellationToken.None);
             return;
         }
 

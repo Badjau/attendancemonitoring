@@ -14,6 +14,7 @@ window.fingerprintEnrollment = ({
     enrollmentCaptured: false,
     enrollmentCommandId: '',
     enrollmentEvents: null,
+    fingerprintPreviewImage: '',
     message: '',
     success: false,
     selectedFinger: null,
@@ -49,6 +50,15 @@ window.fingerprintEnrollment = ({
         return String(message || '')
             .replaceAll('ZKTeco Bridge', 'Fingerprint scanner')
             .replaceAll('ZKTeco', 'Fingerprint')
+    },
+
+    fingerprintImageSrc(imageBase64) {
+        if (!imageBase64) return ''
+
+        const image = String(imageBase64)
+        return image.startsWith('data:')
+            ? image
+            : `data:image/png;base64,${image}`
     },
 
     shouldLaunchBridgeProtocol() {
@@ -138,6 +148,7 @@ window.fingerprintEnrollment = ({
     resetPendingEnrollment() {
         this.enrollmentCaptured = false
         this.enrollmentCommandId = ''
+        this.fingerprintPreviewImage = ''
         this.closeEnrollmentEvents()
     },
 
@@ -181,6 +192,12 @@ window.fingerprintEnrollment = ({
 
         if (status.message) {
             this.message = this.scannerMessage(status.message)
+        }
+
+        if (status.fingerprint_image_base64) {
+            this.fingerprintPreviewImage = this.fingerprintImageSrc(
+                status.fingerprint_image_base64,
+            )
         }
 
         if (status.state === 'captured' && !this.enrollmentCaptured) {
