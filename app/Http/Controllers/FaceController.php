@@ -67,23 +67,23 @@ class FaceController extends Controller
         }
 
         $shouldSaveProfileImage = filled($profileImageBase64) && $employee->getFirstMedia('employee-profile') === null;
-        $jpegBase64 = $shouldSaveProfileImage
-            ? $this->compressedJpegBase64($profileImageBase64)
+        $jpegBytes = $shouldSaveProfileImage
+            ? $this->compressedJpegBytes($profileImageBase64)
             : null;
 
         $embedding = $employee->faceEmbeddings()->create($validated);
         $profileImageSaved = false;
 
-        if ($shouldSaveProfileImage && $jpegBase64 !== null) {
+        if ($shouldSaveProfileImage && $jpegBytes !== null) {
             $employee
-                ->addMediaFromBase64($jpegBase64, 'image/jpeg', 'image/png')
+                ->addMediaFromString($jpegBytes)
                 ->usingFileName($this->faceProfileFileName($employee, $validated['image_hash']))
                 ->withCustomProperties([
                     'source' => 'face_enrollment',
                     'image_hash' => $validated['image_hash'],
                     'saved_from_embedding_id' => $embedding->id,
                 ])
-                ->toMediaCollection('employee-profile');
+                ->toMediaCollection('employee-profile', 'public');
 
             $profileImageSaved = true;
         }
@@ -113,7 +113,7 @@ class FaceController extends Controller
         ]);
     }
 
-    private function compressedJpegBase64(string $base64Image): string
+    private function compressedJpegBytes(string $base64Image): string
     {
         $base64Image = preg_replace('/^data:image\/(?:jpeg|jpg|png);base64,/', '', trim($base64Image)) ?? '';
         $imageBytes = base64_decode($base64Image, true);
@@ -169,7 +169,7 @@ class FaceController extends Controller
             ]);
         }
 
-        return base64_encode($jpegBytes);
+        return $jpegBytes;
     }
 
     private function faceProfileFileName(Employee $employee, string $imageHash): string

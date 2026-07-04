@@ -38,7 +38,7 @@ class FaceRoutesTest extends TestCase
         $employee = $this->createEmployee();
         $firstImageHash = hash('sha256', 'face');
 
-        $this->withToken('test-token')
+        $firstResponse = $this->withToken('test-token')
             ->postJson("/api/face/employees/{$employee->employee_id}/embeddings", [
                 'embedding' => [0.1, 0.2, 0.3],
                 'image_hash' => $firstImageHash,
@@ -50,13 +50,18 @@ class FaceRoutesTest extends TestCase
             ])
             ->assertCreated()
             ->assertJsonPath('employee_id', 'EMP-001')
-            ->assertJsonPath('profile_image_saved', true);
+            ->assertJsonPath('profile_image_saved', true)
+            ->assertJsonPath('profile_image_url', fn (string $url): bool => str_contains($url, '/storage/'));
 
         $this->assertCount(1, $employee->fresh()->getMedia('employee-profile'));
         $media = Media::query()->where('collection_name', 'employee-profile')->sole();
         $this->assertSame('face-emp-001-'.$firstImageHash.'.jpg', $media->file_name);
+        $this->assertSame('public', $media->disk);
+        $this->assertSame('image/jpeg', $media->mime_type);
         $this->assertSame('face_enrollment', $media->getCustomProperty('source'));
         $this->assertSame($firstImageHash, $media->getCustomProperty('image_hash'));
+        Storage::disk('public')->assertExists($media->getPathRelativeToRoot());
+        $this->assertStringStartsWith('/storage/', parse_url($firstResponse->json('profile_image_url'), PHP_URL_PATH));
 
         $this->withToken('test-token')
             ->postJson("/api/face/employees/{$employee->employee_id}/embeddings", [
@@ -73,6 +78,7 @@ class FaceRoutesTest extends TestCase
 
         $this->assertCount(1, $employee->fresh()->getMedia('employee-profile'));
         $this->assertSame($media->id, $employee->fresh()->getFirstMedia('employee-profile')->id);
+        $this->assertSame($firstResponse->json('profile_image_url'), $employee->fresh()->employeeProfileUrl());
 
         $this->withToken('test-token')
             ->getJson("/api/face/employees/{$employee->employee_id}/embeddings")
@@ -127,6 +133,59 @@ class FaceRoutesTest extends TestCase
 
         $this->assertCount(1, $employee->fresh()->faceEmbeddings);
         $this->assertCount(1, $employee->fresh()->getMedia('employee-profile'));
+    }
+
+    public function test_employee_profile_url_is_empty_without_media_and_public_storage_url_with_media(): void
+    {
+        Storage::fake('public');
+
+        $employee = $this->createEmployee();
+
+        $this->assertSame('', $employee->employeeProfileUrl());
+
+        $employee
+            ->addMediaFromString(base64_decode($this->pngBase64('profile'), true))
+            ->usingFileName('profile.png')
+            ->toMediaCollection('employee-profile', 'public');
+
+        $url = $employee->fresh()->employeeProfileUrl();
+        $media = $employee->fresh()->getFirstMedia('employee-profile');
+
+        $this->assertNotSame('', $url);
+        $this->assertStringStartsWith('/storage/', parse_url($url, PHP_URL_PATH));
+        $this->assertSame('public', $media->disk);
+        Storage::disk('public')->assertExists($media->getPathRelativeToRoot());
+    }
+
+    public function test_admin_face_views_render_without_media_and_use_public_profile_url_with_media(): void
+    {
+        Storage::fake('public');
+
+        $employee = $this->createEmployee();
+
+        $this->blade('@include("filament.admin.employees.face-summary", ["employee" => $employee])', [
+            'employee' => $employee,
+        ])
+            ->assertSee('No face registered yet')
+            ->assertDontSee('<img', false);
+
+        $employee
+            ->addMediaFromString(base64_decode($this->pngBase64('view-profile'), true))
+            ->usingFileName('view-profile.png')
+            ->toMediaCollection('employee-profile', 'public');
+
+        $profileUrl = $employee->fresh()->employeeProfileUrl();
+
+        $this->blade('@include("filament.admin.employees.face-summary", ["employee" => $employee])', [
+            'employee' => $employee->fresh(),
+        ])
+            ->assertSee('Registered face exists')
+            ->assertSee($profileUrl, false);
+
+        $this->blade('@include("filament.admin.employees.face-registration", ["employee" => $employee])', [
+            'employee' => $employee->fresh(),
+        ])
+            ->assertSee('hasRegisteredFace: true', false);
     }
 
     public function test_face_embedding_api_replaces_complete_enrollment_even_without_reset_flag(): void

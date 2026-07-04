@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     ambiguous_margin: float = 0.04
     min_enrollments: int = 3
     min_face_size: int = 120
-    min_blur_score: float = 30.0
+    min_blur_score: float = 10.0
     min_brightness: float = 45.0
     max_brightness: float = 215.0
 

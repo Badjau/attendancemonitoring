@@ -53,12 +53,14 @@ class Employee extends Model implements HasMedia, WebAuthnAuthenticatable
 
     public function registerMediaCollections(): void
     {
-        $this->addMediaCollection('employee-profile')->singleFile();
+        $this->addMediaCollection('employee-profile')->useDisk('public')->singleFile();
     }
 
     public function employeeProfileUrl(): string
     {
-        return $this->getFirstMediaUrl('employee-profile');
+        $url = trim($this->getFirstMediaUrl('employee-profile'));
+
+        return $url === '' ? '' : str_replace('\\', '/', $url);
     }
 
     public function getNameAttribute(): string
