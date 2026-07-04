@@ -42,7 +42,16 @@ class AttendanceForm
                         'rfid' => 'RFID',
                         'fingerprint' => 'Fingerprint',
                         'keypad' => 'Keypad',
+                        'face' => 'Facial Recognition',
                     ]),
+
+                Select::make('attendance_mode')
+                    ->label('Mode')
+                    ->options([
+                        'auto-toggle' => 'Auto-toggle',
+                        'manual-button' => 'Manual button',
+                    ])
+                    ->required(),
 
                 DatePicker::make('attendance_date')
                     ->required(),

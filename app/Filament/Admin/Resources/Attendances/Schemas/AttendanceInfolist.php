@@ -42,6 +42,11 @@ class AttendanceInfolist
                             ->label('Method')
                             ->badge()
                             ->placeholder('-'),
+
+                        TextEntry::make('attendance_mode')
+                            ->label('Mode')
+                            ->badge()
+                            ->placeholder('-'),
                     ])
                     ->columns(2)
                     ->columnSpanFull(),

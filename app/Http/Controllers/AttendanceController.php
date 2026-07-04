@@ -67,7 +67,7 @@ class AttendanceController extends Controller
                     'greeting' => [
                         'first_name' => $employee->first_name,
                         'is_birthday' => $employee->date_of_birth?->isBirthday() ?? false,
-                        'attendance_type' => $request->attendance_type,
+                        'attendance_type' => $attendance->attendance_type->value,
                     ],
                     'employee' => [
                         'id' => $employee->id,
@@ -85,7 +85,7 @@ class AttendanceController extends Controller
                 ->with('greeting', [
                     'first_name' => $employee->first_name,
                     'is_birthday' => $employee->date_of_birth?->isBirthday() ?? false,
-                    'attendance_type' => $request->attendance_type,
+                    'attendance_type' => $attendance->attendance_type->value,
                 ]);
         } catch (ValidationException $e) {
             if ($request->expectsJson()) {

@@ -10,27 +10,17 @@ use Joaopaulolndev\FilamentGeneralSettings\Models\GeneralSetting;
 class AttendanceScheduleSettings
 {
     private const DEFAULTS = [
-        'time_in_start' => '00:01', // 12:01 AM
-        'time_in_end' => '23:59', // 11:59 PM
-        'time_out_start' => '00:00', // 12:00 AM
-        'time_out_end' => '00:00', // 12:00 AM
+        'time_in_start' => '08:00',
+        'time_out_start' => '18:00',
+        'duplicate_scan_window_seconds' => '60',
+        'show_face_attendance_button' => false,
     ];
 
     private static ?array $cachedSettings = null;
 
     public function inferAttendanceType(Carbon $now): string
     {
-        $minute = ($now->hour * 60) + $now->minute;
-
-        if ($this->isMinuteWithinRange($minute, $this->timeInStartMinutes(), $this->timeInEndMinutes())) {
-            return Type::TimeIn->value;
-        }
-
-        if ($this->isMinuteWithinRange($minute, $this->timeOutStartMinutes(), $this->timeOutEndMinutes())) {
-            return Type::TimeOut->value;
-        }
-
-        return $minute <= $this->timeInEndMinutes()
+        return (($now->hour * 60) + $now->minute) < $this->timeOutStartMinutes()
             ? Type::TimeIn->value
             : Type::TimeOut->value;
     }
@@ -42,30 +32,43 @@ class AttendanceScheduleSettings
     {
         return [
             'time_in_start' => $this->setting('time_in_start'),
-            'time_in_end' => $this->setting('time_in_end'),
             'time_out_start' => $this->setting('time_out_start'),
-            'time_out_end' => $this->setting('time_out_end'),
+            'duplicate_scan_window_seconds' => (string) $this->duplicateScanWindowSeconds(),
+            'show_face_attendance_button' => $this->showFaceAttendanceButton(),
         ];
     }
 
-    private function timeInStartMinutes(): int
+    public function shiftStart(Carbon $date): Carbon
     {
-        return $this->timeToMinutes($this->setting('time_in_start'));
+        return $date->copy()->setTimeFromTimeString($this->setting('time_in_start').':00');
     }
 
-    private function timeInEndMinutes(): int
+    public function shiftEnd(Carbon $date): Carbon
     {
-        return $this->timeToMinutes($this->setting('time_in_end'));
+        return $date->copy()->setTimeFromTimeString($this->setting('time_out_start').':00');
+    }
+
+    public function duplicateScanWindowSeconds(): int
+    {
+        $value = $this->getAllSettings()['duplicate_scan_window_seconds'] ?? self::DEFAULTS['duplicate_scan_window_seconds'];
+
+        return max(0, min(3600, (int) $value));
+    }
+
+    public function showFaceAttendanceButton(): bool
+    {
+        $value = $this->getAllSettings()['show_face_attendance_button'] ?? self::DEFAULTS['show_face_attendance_button'];
+
+        if (is_bool($value)) {
+            return $value;
+        }
+
+        return filter_var($value, FILTER_VALIDATE_BOOLEAN);
     }
 
     private function timeOutStartMinutes(): int
     {
         return $this->timeToMinutes($this->setting('time_out_start'));
-    }
-
-    private function timeOutEndMinutes(): int
-    {
-        return $this->timeToMinutes($this->setting('time_out_end'));
     }
 
     private function setting(string $key): string
@@ -105,14 +108,5 @@ class AttendanceScheduleSettings
         [$hours, $minutes] = array_map('intval', explode(':', $time));
 
         return ($hours * 60) + $minutes;
-    }
-
-    private function isMinuteWithinRange(int $minute, int $start, int $end): bool
-    {
-        if ($start <= $end) {
-            return $minute >= $start && $minute <= $end;
-        }
-
-        return $minute >= $start || $minute <= $end;
     }
 }

@@ -29,20 +29,16 @@ class AttendanceStatsOverview extends StatsOverviewWidget
     {
         $date = $this->getSelectedDate();
 
-        $dailyAttendances = Attendance::query()
-            ->whereDate('attendance_date', $date);
+        $summary = Attendance::query()
+            ->whereDate('attendance_date', $date)
+            ->selectRaw('count(case when time_in is not null then 1 end) as clocked_in')
+            ->selectRaw('sum(case when is_late = 1 then 1 else 0 end) as late_count')
+            ->selectRaw('sum(case when overtime_status = ? then 1 else 0 end) as pending_overtime_count', [OvertimeStatus::Pending->value])
+            ->first();
 
-        $clockedIn = (clone $dailyAttendances)
-            ->whereNotNull('time_in')
-            ->count();
-
-        $late = (clone $dailyAttendances)
-            ->where('is_late', true)
-            ->count();
-
-        $pendingOvertime = (clone $dailyAttendances)
-            ->where('overtime_status', OvertimeStatus::Pending->value)
-            ->count();
+        $clockedIn = (int) ($summary?->clocked_in ?? 0);
+        $late = (int) ($summary?->late_count ?? 0);
+        $pendingOvertime = (int) ($summary?->pending_overtime_count ?? 0);
 
         $employeeCount = Employee::query()->count();
         $presentRate = $employeeCount === 0

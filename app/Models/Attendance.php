@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\Attendance\AttendanceMethod;
+use App\Enums\Attendance\Mode;
 use App\Enums\Attendance\OvertimeStatus;
 use App\Enums\Attendance\Status;
 use App\Enums\Attendance\Type;
@@ -22,6 +23,7 @@ class Attendance extends Model implements HasMedia
         'rfid_uid',
         'attendance_type',
         'attendance_method',
+        'attendance_mode',
         'offline_id',
         'attendance_date',
         'time_in',
@@ -62,6 +64,7 @@ class Attendance extends Model implements HasMedia
         'latitude' => 'float',
         'longitude' => 'float',
         'attendance_method' => AttendanceMethod::class,
+        'attendance_mode' => Mode::class,
     ];
 
     public function registerMediaCollections(): void

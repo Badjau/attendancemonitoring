@@ -14,9 +14,9 @@ const props = defineProps<{
     employeesWithFaces: any
     attendanceSchedule: {
         time_in_start: string
-        time_in_end: string
         time_out_start: string
-        time_out_end: string
+        duplicate_scan_window_seconds: string
+        show_face_attendance_button: boolean
     }
     zktecoBridgeUrl: string
 }>()

@@ -384,7 +384,7 @@ public sealed class CommandCoordinator : IDisposable
 
         pendingAttendanceMatch = match;
         await PublishAsync(Event(command.CommandId, AgentStates.Matched, "Fingerprint matched. Capturing attendance photo...", match.Template, command.Attendance?.AttendanceType, match.Score), CancellationToken.None);
-        await PublishAsync(Event(command.CommandId, AgentStates.AwaitingBrowserPhoto, "Fingerprint matched. Waiting for browser attendance photo.", match.Template, command.Attendance?.AttendanceType, match.Score), CancellationToken.None);
+        await PublishAsync(Event(command.CommandId, AgentStates.AwaitingBrowserPhoto, "Fingerprint matched. Waiting for facial verification.", match.Template, command.Attendance?.AttendanceType, match.Score), CancellationToken.None);
     }
 
     private async Task HandleUnlockCaptureAsync(ActiveCommand command, byte[] capturedTemplate)

@@ -82,7 +82,7 @@ Run the installer after publishing:
 
 ```powershell
 .\tools\ZktecoLocalAgent\Installer\install-agent.ps1 `
-  -ApiBaseUrl "https://20.20.52.71/api/zkteco" `
+  -ApiBaseUrl "https://YOUR-APP-URL/api/zkteco" `
   -ScannerToken "fhDVzlVcoUqRxpVtWsr8N5YEPXzsgoNJb4GsGymgfTM" `
   -DeviceSerial "SCANNER-PC-01"
 ```

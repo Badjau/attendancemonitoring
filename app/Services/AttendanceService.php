@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Enums\Attendance\AttendanceMethod;
+use App\Enums\Attendance\Mode;
 use App\Enums\Attendance\OvertimeStatus;
 use App\Enums\Attendance\Status;
 use App\Enums\Attendance\Type;
@@ -37,12 +38,25 @@ class AttendanceService
 
         $now = $this->attendanceTimestamp($request);
         $employee = $this->findEmployee($request->rfid);
-        $this->finalizePreviousAttendanceDays($employee, $now);
+        $attendanceMode = $this->attendanceMode($request);
+        $this->finalizePreviousOpenAttendanceDays($employee, $now);
+
+        if ($attendanceMode === Mode::AutoToggle->value) {
+            $duplicateAttendance = $this->duplicateScanAttendance($employee, $now, $request);
+
+            if ($duplicateAttendance) {
+                return $duplicateAttendance;
+            }
+        }
+
         $requestedAttendanceType = $request->string('attendance_type')->toString();
         $attendanceType = in_array($requestedAttendanceType, [Type::TimeIn->value, Type::TimeOut->value], true)
             ? $requestedAttendanceType
             : $this->inferAttendanceTypeForEmployee($employee, $now);
-        $request->merge(['attendance_type' => $attendanceType]);
+        $request->merge([
+            'attendance_type' => $attendanceType,
+            'attendance_mode' => $attendanceMode,
+        ]);
 
         if ($attendanceType == Type::TimeIn->value) {
             return $this->timeIn($request, $now, $employee);
@@ -80,7 +94,9 @@ class AttendanceService
 
     private function inferAttendanceTypeForEmployee(Employee $employee, Carbon $now): string
     {
-        return Type::TimeIn->value;
+        return $this->latestOpenTimeInWithinWindow($employee, $now)
+            ? Type::TimeOut->value
+            : Type::TimeIn->value;
     }
 
     private function attendanceTimestamp(Request $request): Carbon
@@ -110,20 +126,61 @@ class AttendanceService
             ->first();
     }
 
-    private function finalizePreviousAttendanceDays(Employee $employee, Carbon $now): void
+    private function finalizePreviousOpenAttendanceDays(Employee $employee, Carbon $now): void
     {
         $this->model
             ->where('employee_id', $employee->id)
             ->whereNotNull('time_in')
+            ->whereNull('time_out')
             ->whereDate('attendance_date', '<', $now->toDateString())
-            ->distinct()
-            ->pluck('attendance_date')
-            ->each(fn ($date): ?float => $this->markDailyLastTimeInAsTimeOut($employee, Carbon::parse($date)));
+            ->orderBy('attendance_date')
+            ->orderBy('time_in')
+            ->get()
+            ->each(fn (Attendance $attendance): ?float => $this->closeAttendanceAtConfiguredTimeOut($attendance));
     }
 
     private function attendanceMethod(Request $request): ?string
     {
         return $request->attendance_method ?: null;
+    }
+
+    private function attendanceMode(Request $request): string
+    {
+        $requestedAttendanceType = $request->string('attendance_type')->toString();
+
+        return in_array($requestedAttendanceType, [Type::TimeIn->value, Type::TimeOut->value], true)
+            ? Mode::ManualButton->value
+            : Mode::AutoToggle->value;
+    }
+
+    private function duplicateScanAttendance(Employee $employee, Carbon $now, Request $request): ?Attendance
+    {
+        $windowSeconds = $this->attendanceScheduleSettings->duplicateScanWindowSeconds();
+
+        if ($windowSeconds <= 0) {
+            return null;
+        }
+
+        $method = $this->attendanceMethod($request);
+        if (! in_array($method, [
+            AttendanceMethod::RFID->value,
+            AttendanceMethod::FINGERPRINT->value,
+            AttendanceMethod::FACE->value,
+        ], true)) {
+            return null;
+        }
+
+        return $this->model
+            ->where('employee_id', $employee->id)
+            ->where(function ($query) use ($now, $windowSeconds): void {
+                $threshold = $now->copy()->subSeconds($windowSeconds)->format('Y-m-d H:i:s');
+
+                $query->where('time_in', '>=', $threshold)
+                    ->orWhere('time_out', '>=', $threshold);
+            })
+            ->latest('updated_at')
+            ->latest('id')
+            ->first();
     }
 
     private function findEmployee(string $employeeId): Employee
@@ -171,8 +228,7 @@ class AttendanceService
         $employee ??= $this->findEmployee($request->rfid);
         $locationData = $this->validateLocation($request, $employee);
 
-        // TODO: Make it the shift start time dynamic
-        $shiftStart = $now->copy()->setTimeFromTimeString('08:00:00');
+        $shiftStart = $this->attendanceScheduleSettings->shiftStart($now);
 
         $isLate = $now->gt($shiftStart);
         $lateMinutes = $isLate ? $shiftStart->diffInMinutes($now) : 0;
@@ -182,6 +238,7 @@ class AttendanceService
             'rfid_uid' => $request->rfid,
             'attendance_type' => Type::TimeIn->value,
             'attendance_method' => $this->attendanceMethod($request),
+            'attendance_mode' => $request->attendance_mode ?? Mode::AutoToggle->value,
             'offline_id' => $request->offline_id,
             'attendance_date' => $now->toDateString(),
             'time_in' => $now->format('Y-m-d H:i:s'),
@@ -209,8 +266,7 @@ class AttendanceService
             throw new \Exception('Please time in first.');
         }
 
-        // TODO: Make it the shift end time dynamic
-        $shiftEnd = $now->copy()->setTimeFromTimeString('18:00:00');
+        $shiftEnd = $this->attendanceScheduleSettings->shiftEnd($now);
         $timeIn = $this->storedDateTime($firstTimeInAttendance, 'time_in');
         $workedMinutes = $timeIn->diffInMinutes($now);
 
@@ -223,6 +279,7 @@ class AttendanceService
         $firstTimeInAttendance->fill([
             'attendance_type' => Type::TimeOut->value,
             'attendance_method' => $this->attendanceMethod($request),
+            'attendance_mode' => $request->attendance_mode ?? Mode::AutoToggle->value,
             'time_out' => $now->format('Y-m-d H:i:s'),
             'total_hours' => round($workedMinutes / 60, 2),
             'status' => Status::Present->value,
@@ -238,6 +295,33 @@ class AttendanceService
         $this->attachAttendanceImage($request, $firstTimeInAttendance, 'time-out-image');
 
         return $firstTimeInAttendance->refresh();
+    }
+
+    private function closeAttendanceAtConfiguredTimeOut(Attendance $attendance): ?float
+    {
+        $timeIn = $this->storedDateTime($attendance, 'time_in');
+        $scheduledTimeOut = $this->attendanceScheduleSettings->shiftEnd(
+            Carbon::parse($attendance->attendance_date)
+        );
+        $workedMinutes = max(0, $timeIn->diffInMinutes($scheduledTimeOut, false));
+        $totalHours = round($workedMinutes / 60, 2);
+
+        $attendance->fill([
+            'attendance_type' => Type::TimeOut->value,
+            'attendance_mode' => Mode::AutoToggle->value,
+            'time_out' => $scheduledTimeOut->format('Y-m-d H:i:s'),
+            'total_hours' => $totalHours,
+            'status' => Status::Present->value,
+            'is_undertime' => false,
+            'undertime_minutes' => 0,
+            'is_overtime' => false,
+            'overtime_minutes' => 0,
+            'overtime_status' => null,
+        ])->save();
+
+        $this->syncDailyTotalHours($attendance->employee, Carbon::parse($attendance->attendance_date));
+
+        return $totalHours;
     }
 
     private function syncDailyTotalHours(Employee $employee, Carbon $date): ?float
