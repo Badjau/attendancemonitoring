@@ -17,16 +17,26 @@ const hostnameFromUrl = (value, fallback) => {
     }
 };
 
+const protocolFromUrl = (value, fallback) => {
+    try {
+        return new URL(value).protocol.replace(':', '') || fallback;
+    } catch {
+        return fallback;
+    }
+};
+
 export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, process.cwd(), '');
     const appUrl = env.APP_URL || 'https://attendancemonitoring.test';
+    const appProtocol = protocolFromUrl(appUrl, 'https');
+    const useHttps = appProtocol === 'https' && hasSslCertificates;
     const devServerHost =
         env.VITE_DEV_SERVER_HOST || hostnameFromUrl(appUrl, '127.0.0.1');
     const devServerPort = Number(env.VITE_DEV_SERVER_PORT || 5174);
     const allowedOrigins = [
         'https://attendancemonitoring.test',
         appUrl,
-        `https://${devServerHost}`,
+        `${appProtocol}://${devServerHost}`,
     ];
 
     return {
@@ -57,8 +67,8 @@ export default defineConfig(({ mode }) => {
         tailwindcss(),
     ],
     server: {
-        origin: `https://${devServerHost}:${devServerPort}`,
-        https: hasSslCertificates
+        origin: `${appProtocol}://${devServerHost}:${devServerPort}`,
+        https: useHttps
             ? {
                   key: readFileSync(sslKeyPath),
                   cert: readFileSync(sslCertPath),
@@ -73,7 +83,7 @@ export default defineConfig(({ mode }) => {
             ignored: ['**/storage/framework/views/**'],
         },
         hmr: {
-            protocol: 'wss',
+            protocol: useHttps ? 'wss' : 'ws',
             host: devServerHost,
             port: devServerPort,
         },

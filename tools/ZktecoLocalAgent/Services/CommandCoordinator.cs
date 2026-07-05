@@ -17,6 +17,7 @@ public sealed class CommandCoordinator : IDisposable
     private readonly object gate = new();
     private readonly List<Channel<CommandEvent>> subscribers = [];
     private readonly List<byte[]> enrollmentTemplates = [];
+    private readonly List<string> enrollmentPreviewImages = [];
     private readonly Dictionary<string, CommandEvent> latestEvents = [];
 
     private ActiveCommand? activeCommand;
@@ -73,6 +74,7 @@ public sealed class CommandCoordinator : IDisposable
         }
 
         enrollmentTemplates.Clear();
+        enrollmentPreviewImages.Clear();
         pendingEnrollmentTemplate = null;
         lastEnrollmentAcceptedAt = DateTimeOffset.MinValue;
         await PublishAsync(Event(commandId, AgentStates.WaitingForScan, "Scan the same finger 3 times.", request), cancellationToken);
@@ -353,9 +355,17 @@ public sealed class CommandCoordinator : IDisposable
             return;
         }
 
+        var fingerprintImage = sdk.LastFingerprintImageBase64();
+        if (!string.IsNullOrWhiteSpace(fingerprintImage))
+        {
+            enrollmentPreviewImages.Add(fingerprintImage);
+        }
+
+        await PublishAsync(Event(command.CommandId, AgentStates.WaitingForScan, "Fingerprint image received.", command.Enrollment!, fingerprintImage), CancellationToken.None);
+
         if (enrollmentTemplates.Count > 0 && sdk.Match(capturedTemplate, enrollmentTemplates[^1]) <= 0)
         {
-            await PublishAsync(Event(command.CommandId, AgentStates.WaitingForScan, "Please scan the same finger for enrollment.", command.Enrollment!, sdk.LastFingerprintImageBase64()), CancellationToken.None);
+            await PublishAsync(Event(command.CommandId, AgentStates.WaitingForScan, "Please scan the same finger for enrollment.", command.Enrollment!, fingerprintImage), CancellationToken.None);
             return;
         }
 
@@ -364,13 +374,13 @@ public sealed class CommandCoordinator : IDisposable
 
         if (enrollmentTemplates.Count < RegisterFingerCount)
         {
-            await PublishAsync(Event(command.CommandId, AgentStates.WaitingForScan, $"Scan accepted. {RegisterFingerCount - enrollmentTemplates.Count} scan(s) remaining.", command.Enrollment!, sdk.LastFingerprintImageBase64()), CancellationToken.None);
+            await PublishAsync(Event(command.CommandId, AgentStates.WaitingForScan, $"Scan accepted. {RegisterFingerCount - enrollmentTemplates.Count} scan(s) remaining.", command.Enrollment!, fingerprintImage), CancellationToken.None);
             return;
         }
 
         pendingEnrollmentTemplate = sdk.MergeEnrollmentTemplates(enrollmentTemplates[0], enrollmentTemplates[1], enrollmentTemplates[2]);
         enrollmentTemplates.Clear();
-        await PublishAsync(Event(command.CommandId, AgentStates.Captured, "Fingerprint captured. Review and submit to save.", command.Enrollment!, sdk.LastFingerprintImageBase64()), CancellationToken.None);
+        await PublishAsync(Event(command.CommandId, AgentStates.Captured, "Fingerprint captured. Review and submit to save.", command.Enrollment!, fingerprintImage), CancellationToken.None);
     }
 
     private async Task HandleAttendanceCaptureAsync(ActiveCommand command, byte[] capturedTemplate)
@@ -429,14 +439,22 @@ public sealed class CommandCoordinator : IDisposable
             pendingAttendanceMatch = null;
             pendingEnrollmentTemplate = null;
             enrollmentTemplates.Clear();
+            enrollmentPreviewImages.Clear();
             lastEnrollmentAcceptedAt = DateTimeOffset.MinValue;
         }
     }
 
     private static string NewCommandId(string prefix) => $"{prefix}-{Guid.NewGuid():N}";
 
-    private static CommandEvent Event(string commandId, string state, string message, StartEnrollRequest employee, string? fingerprintImage = null)
+    private CommandEvent Event(string commandId, string state, string message, StartEnrollRequest employee, string? fingerprintImage = null)
     {
+        string[] previewImages;
+
+        lock (gate)
+        {
+            previewImages = enrollmentPreviewImages.ToArray();
+        }
+
         return new CommandEvent(
             commandId,
             state,
@@ -447,7 +465,8 @@ public sealed class CommandCoordinator : IDisposable
             employee.FirstName,
             employee.Branch,
             employee.IsBirthday,
-            FingerprintImageBase64: fingerprintImage
+            FingerprintImageBase64: fingerprintImage,
+            EnrollmentScanImages: previewImages
         );
     }
 

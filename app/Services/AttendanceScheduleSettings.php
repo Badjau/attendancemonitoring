@@ -4,7 +4,6 @@ namespace App\Services;
 
 use App\Enums\Attendance\Type;
 use Carbon\Carbon;
-use Illuminate\Support\Facades\Cache;
 use Joaopaulolndev\FilamentGeneralSettings\Models\GeneralSetting;
 
 class AttendanceScheduleSettings
@@ -92,12 +91,10 @@ class AttendanceScheduleSettings
     {
         // Cache at request level to avoid multiple database queries
         if (self::$cachedSettings === null) {
-            self::$cachedSettings = Cache::remember('attendance_schedule_settings', 3600, function () {
-                $settings = GeneralSetting::query()->first();
-                $configs = $settings?->more_configs ?? [];
+            $settings = GeneralSetting::query()->first();
+            $configs = $settings?->more_configs ?? [];
 
-                return is_array($configs) ? $configs : [];
-            });
+            self::$cachedSettings = is_array($configs) ? $configs : [];
         }
 
         return self::$cachedSettings;

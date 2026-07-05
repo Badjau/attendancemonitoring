@@ -75,13 +75,29 @@ public sealed class LaravelApiClient
         var body = await response.Content.ReadAsStringAsync(cancellationToken);
         if (!response.IsSuccessStatusCode)
         {
-            throw new InvalidOperationException(body);
+            throw new InvalidOperationException(
+                $"Laravel API request to {response.RequestMessage?.RequestUri} failed with {(int)response.StatusCode} {response.ReasonPhrase}: {SummarizeErrorBody(body)}"
+            );
         }
 
         return System.Text.Json.JsonSerializer.Deserialize<T>(
             body,
             new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true }
         ) ?? throw new InvalidOperationException("Laravel API returned an empty response.");
+    }
+
+    private static string SummarizeErrorBody(string body)
+    {
+        var trimmed = body.Trim();
+
+        if (trimmed.StartsWith("<", StringComparison.Ordinal))
+        {
+            return "HTML error page returned. Check that ApiBaseUrl points to the Laravel /api/zkteco endpoint for the running app.";
+        }
+
+        return string.IsNullOrWhiteSpace(trimmed)
+            ? "Empty response."
+            : trimmed;
     }
 }
 

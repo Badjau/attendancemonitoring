@@ -48,6 +48,16 @@ window.faceRegistration = ({ employeeId, hasRegisteredFace = false }) => ({
 
         try {
             await this.loadStatus()
+        } catch (error) {
+            console.error(error)
+            this.statusText =
+                'Unable to connect to the face service. Check the face service URL, HTTPS certificate, and CORS allowed origins.'
+            this.message = this.statusText
+            this.success = false
+            return
+        }
+
+        try {
             await this.startCamera()
             this.statusText = this.isUpdatingExisting
                 ? `Capture 1 of ${this.requiredCount}.`
