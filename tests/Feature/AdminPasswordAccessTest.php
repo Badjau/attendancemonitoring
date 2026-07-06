@@ -4,7 +4,9 @@ namespace Tests\Feature;
 
 use App\Models\Employee;
 use App\Models\User;
+use App\Support\PasswordVerifier;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Tests\TestCase;
 
@@ -67,13 +69,119 @@ class AdminPasswordAccessTest extends TestCase
         $this->assertNotNull(session('admin_password_unlocked_by'));
     }
 
+    public function test_admin_password_login_accepts_legacy_bcrypt_hashes(): void
+    {
+        $user = User::create([
+            'name' => 'Emergency Admin',
+            'username' => 'admin',
+            'email' => 'admin@example.test',
+            'password' => Hash::make('temporary'),
+            'is_admin' => true,
+            'is_it_admin' => true,
+        ]);
+
+        DB::table('users')
+            ->where('id', $user->id)
+            ->update(['password' => $this->legacyBcryptHash()]);
+
+        $this->assertSame($this->legacyBcryptHash(), DB::table('users')->where('id', $user->id)->value('password'));
+        $this->assertTrue(PasswordVerifier::check('password', $this->legacyBcryptHash()));
+
+        $response = $this->post('/admin/login', [
+            'username' => 'admin',
+            'password' => 'password',
+        ]);
+
+        $response->assertRedirect('/admin');
+        $this->assertAuthenticated();
+        $this->assertNotNull(session('admin_password_unlocked_by'));
+    }
+
+    public function test_admin_password_login_ignores_stale_login_intended_url(): void
+    {
+        User::create([
+            'name' => 'Emergency Admin',
+            'username' => 'admin',
+            'email' => 'admin@example.test',
+            'password' => Hash::make('M(@!+@dmin'),
+            'is_admin' => true,
+            'is_it_admin' => true,
+        ]);
+
+        $response = $this
+            ->withSession(['url.intended' => url('/admin/login')])
+            ->post('/admin/login', [
+                'username' => 'admin',
+                'password' => 'M(@!+@dmin',
+            ]);
+
+        $response->assertRedirect('/admin');
+        $this->assertAuthenticated();
+        $this->assertNotNull(session('admin_password_unlocked_by'));
+    }
+
+    public function test_admin_password_login_keeps_valid_admin_intended_url(): void
+    {
+        User::create([
+            'name' => 'Emergency Admin',
+            'username' => 'admin',
+            'email' => 'admin@example.test',
+            'password' => Hash::make('M(@!+@dmin'),
+            'is_admin' => true,
+            'is_it_admin' => true,
+        ]);
+
+        $response = $this
+            ->withSession(['url.intended' => url('/admin/employees')])
+            ->post('/admin/login', [
+                'username' => 'admin',
+                'password' => 'M(@!+@dpassword123
+            ]);
+
+        $response->assertRedirect(url('/admin/employees'));
+        $this->assertAuthenticated();
+        $this->assertNotNull(session('admin_password_unlocked_by'));
+    }
+
+    public function test_timeclock_admin_unlock_accepts_legacy_bcrypt_hashes(): void
+    {
+        $user = User::create([
+            'name' => 'Emergency Admin',
+            'username' => 'admin',
+            'email' => 'admin@example.test',
+            'password' => Hash::make('temporary'),
+            'is_admin' => true,
+            'is_it_admin' => true,
+        ]);
+password123
+        DB::table('users')
+            ->where('id', $user->id)
+            ->update(['password' => $this->legacyBcryptHash()]);
+
+        $this->assertSame($this->legacyBcryptHash(), DB::table('users')->where('id', $user->id)->value('password'));
+        $this->assertTrue(PasswordVerifier::check('password', $this->legacyBcryptHash()));
+
+        $this->postJson('/unlock', [
+            'method' => 'admin',
+            'username' => 'admin',
+            'credential' => 'password',
+            'audit_image' => 'data:image/png;base64,'.base64_encode('audit'),
+        ])
+            ->assertOk()
+            ->assertJsonPath('message', 'Admin unlocked.')
+            ->assertJsonPath('redirect', '/admin');
+
+        $this->assertAuthenticated();
+        $this->assertNotNull(session('admin_password_unlocked_by'));
+    }
+
     public function test_admin_registration_locks_after_first_admin_for_locked_visitors(): void
     {
         User::create([
             'name' => 'Emergency Admin',
             'username' => 'admin',
             'email' => 'admin@example.test',
-            'password' => Hash::make('password123'),
+            'password' => Hash::make('M(@!+@dmin'),
             'is_admin' => true,
             'is_it_admin' => true,
         ]);
@@ -91,7 +199,7 @@ class AdminPasswordAccessTest extends TestCase
             'name' => 'Emergency Admin',
             'username' => 'admin',
             'email' => 'admin@example.test',
-            'password' => Hash::make('password123'),
+            'password' => Hash::make('M(@!+@dmin'),
             'is_admin' => true,
             'is_it_admin' => true,
         ]);
@@ -123,5 +231,10 @@ class AdminPasswordAccessTest extends TestCase
 
         $response->assertOk();
         $this->assertNull(session('timeclock_unlocked_by'));
+    }
+
+    private function legacyBcryptHash(): string
+    {
+        return '$2a$10$abcdefghijklmnopqrstuu5Lo0g67CiD3M4RpN1BmBb4Crp5w7dbK';
     }
 }

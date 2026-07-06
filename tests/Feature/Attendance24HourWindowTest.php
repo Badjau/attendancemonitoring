@@ -140,6 +140,51 @@ class Attendance24HourWindowTest extends TestCase
         $this->assertSame('2026-06-17 17:53:00', Carbon::parse($attendance->getRawOriginal('time_in'))->format('Y-m-d H:i:s'));
     }
 
+    public function test_numeric_face_identifier_matches_employee_without_zero_padding(): void
+    {
+        Employee::query()->create([
+            'employee_id' => '3097269',
+            'rfid_uid' => 'RFID-3097269',
+            'first_name' => 'Ada',
+            'last_name' => 'Lovelace',
+            'middle_name' => 'Byron',
+            'date_of_birth' => '1990-01-01',
+            'position' => 'Developer',
+            'role' => Employee::ROLE_EMPLOYEE,
+        ]);
+
+        $verified = app(AttendanceService::class)->verifyEmployee(new Request([
+            'employee_id' => '0003097269',
+            'attendance_method' => AttendanceMethod::FACE->value,
+        ]));
+
+        $this->assertSame('3097269', $verified['employee']->employee_id);
+    }
+
+    public function test_numeric_rfid_identifier_matches_card_without_zero_padding(): void
+    {
+        $employee = Employee::query()->create([
+            'employee_id' => 'EMP-3097269',
+            'rfid_uid' => '3097269',
+            'first_name' => 'Ada',
+            'last_name' => 'Lovelace',
+            'middle_name' => 'Byron',
+            'date_of_birth' => '1990-01-01',
+            'position' => 'Developer',
+            'role' => Employee::ROLE_EMPLOYEE,
+        ]);
+
+        $attendance = app(AttendanceService::class)->recordAttendance(new Request([
+            'rfid' => '0003097269',
+            'attendance_method' => AttendanceMethod::RFID->value,
+            'occurred_at' => '2026-06-17 07:55:00',
+            'latitude' => 0,
+            'longitude' => 0,
+        ]));
+
+        $this->assertSame($employee->id, $attendance->employee_id);
+    }
+
     private function employee(): Employee
     {
         $number = Employee::query()->count() + 1;

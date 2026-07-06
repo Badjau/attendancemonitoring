@@ -23,14 +23,14 @@
         <h1>Admin login</h1>
         <p>Use the emergency admin username and password for the admin dashboard.</p>
 
-        <form method="post" action="{{ route('admin.access.login.store') }}">
+        <form method="post" action="{{ route('admin.access.login.store') }}" autocomplete="off">
             @csrf
 
             <label for="username">Username or email</label>
-            <input id="username" name="username" value="{{ old('username') }}" autocomplete="username" required autofocus>
+            <input id="username" name="username" value="{{ old('username') }}" autocomplete="off" required autofocus>
 
             <label for="password">Password</label>
-            <input id="password" name="password" type="password" autocomplete="current-password" required>
+            <input id="password" name="password" type="password" autocomplete="off" required>
 
             <button type="submit">Open admin dashboard</button>
         </form>

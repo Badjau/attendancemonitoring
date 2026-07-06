@@ -6,6 +6,7 @@ use Filament\Actions\Action;
 use Filament\Actions\CreateAction;
 use Filament\Forms\Components\Field;
 use Filament\Forms\Components\Select;
+use Filament\Forms\Components\TextInput;
 use Filament\Infolists\Components\Entry;
 use Filament\Schemas\Components\Component;
 use Filament\Schemas\Schema;
@@ -75,6 +76,11 @@ class FilamentUIServiceProvider extends ServiceProvider
         Select::configureUsing(function (Select $field) {
             return $field
                 ->searchable();
+        });
+
+        TextInput::configureUsing(function (TextInput $field) {
+            return $field
+                ->autocomplete(false);
         });
 
         // capitalize the model name in a create action label
