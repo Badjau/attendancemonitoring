@@ -681,6 +681,7 @@ onUnmounted(() => {
 
                 <form
                     v-if="method === 'keypad'"
+                    autocomplete="off"
                     class="space-y-4"
                     @submit.prevent="submitUnlock()"
                 >
@@ -688,7 +689,7 @@ onUnmounted(() => {
                         v-model="password"
                         type="password"
                         name="timeclock-unlock-password"
-                        autocomplete="new-password"
+                        autocomplete="off"
                         class="w-full rounded-2xl border-2 border-brand-stroke bg-white px-4 py-4 text-lg font-bold outline-none transition-shadow focus:shadow-[4px_4px_0px_0px_#001e1d]"
                         placeholder="Enter unlock PIN"
                     />
@@ -730,6 +731,7 @@ onUnmounted(() => {
 
                 <form
                     v-else-if="method === 'admin'"
+                    autocomplete="off"
                     class="space-y-4"
                     @submit.prevent="submitUnlock()"
                 >
@@ -737,7 +739,7 @@ onUnmounted(() => {
                         v-model="adminUsername"
                         type="text"
                         name="admin-username"
-                        autocomplete="username"
+                        autocomplete="off"
                         class="w-full rounded-2xl border-2 border-brand-stroke bg-white px-4 py-4 text-lg font-bold outline-none transition-shadow focus:shadow-[4px_4px_0px_0px_#001e1d]"
                         placeholder="Admin username or email"
                     />
@@ -746,7 +748,7 @@ onUnmounted(() => {
                         v-model="adminPassword"
                         type="password"
                         name="admin-password"
-                        autocomplete="current-password"
+                        autocomplete="off"
                         class="w-full rounded-2xl border-2 border-brand-stroke bg-white px-4 py-4 text-lg font-bold outline-none transition-shadow focus:shadow-[4px_4px_0px_0px_#001e1d]"
                         placeholder="Admin password"
                     />

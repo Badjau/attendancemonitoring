@@ -10,10 +10,11 @@ use App\Enums\Attendance\Type;
 use App\Models\Attendance;
 use App\Models\Employee;
 use App\Models\User;
+use App\Support\PasswordVerifier;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 class AttendanceService
@@ -73,9 +74,7 @@ class AttendanceService
     {
         $employee = $request->attendance_method === AttendanceMethod::KEYPAD->value
             ? $this->findEmployeeByPassword($request->employee_id)
-            : Employee::where('employee_id', $request->employee_id)
-                ->orWhere('rfid_uid', $request->employee_id)
-                ->first();
+            : $this->findEmployeeByIdentifier($request->employee_id);
 
         if (! $employee) {
             throw ValidationException::withMessages([
@@ -185,9 +184,7 @@ class AttendanceService
 
     private function findEmployee(string $employeeId): Employee
     {
-        $employee = Employee::where('employee_id', $employeeId)
-            ->orWhere('rfid_uid', $employeeId)
-            ->first();
+        $employee = $this->findEmployeeByIdentifier($employeeId);
 
         if (! $employee) {
             throw new \Exception('Employee is not existing.');
@@ -196,6 +193,66 @@ class AttendanceService
         $this->ensureEmployeeCanRecordAttendance($employee);
 
         return $employee;
+    }
+
+    private function findEmployeeByIdentifier(?string $identifier): ?Employee
+    {
+        $candidates = $this->identifierCandidates($identifier);
+
+        if ($candidates === []) {
+            return null;
+        }
+
+        $primary = $candidates[0];
+        $employee = Employee::query()
+            ->where('employee_id', $primary)
+            ->orWhere('rfid_uid', $primary)
+            ->first();
+
+        if ($employee) {
+            return $employee;
+        }
+
+        return Employee::query()
+            ->where(function ($query) use ($candidates): void {
+                $query
+                    ->whereIn('employee_id', $candidates)
+                    ->orWhereIn('rfid_uid', $candidates)
+                    ->orWhereIn(DB::raw('TRIM(employee_id)'), $candidates)
+                    ->orWhereIn(DB::raw('TRIM(rfid_uid)'), $candidates);
+            })
+            ->first();
+    }
+
+    /**
+     * Scanner and face-service identifiers can differ only by zero padding.
+     * Keep exact matching first, then add conservative numeric variants.
+     *
+     * @return array<int, string>
+     */
+    private function identifierCandidates(?string $identifier): array
+    {
+        $normalized = trim((string) preg_replace('/[[:cntrl:]]/', '', (string) $identifier));
+
+        if ($normalized === '') {
+            return [];
+        }
+
+        $candidates = [$normalized];
+
+        if (ctype_digit($normalized)) {
+            $unpadded = ltrim($normalized, '0');
+            $unpadded = $unpadded === '' ? '0' : $unpadded;
+            $candidates[] = $unpadded;
+
+            foreach ([6, 7, 8, 9, 10, 11, 12] as $length) {
+                if (strlen($unpadded) <= $length) {
+                    $candidates[] = str_pad($unpadded, $length, '0', STR_PAD_LEFT);
+                }
+            }
+        }
+
+        return array_values(array_unique($candidates));
     }
 
     private function ensureEmployeeCanRecordAttendance(Employee $employee): void
@@ -469,9 +526,7 @@ class AttendanceService
             ->select(['id', 'first_name', 'last_name', 'employee_id', 'password'])
             ->get()
             ->first(function (Employee $employee) use ($password): bool {
-                return Hash::isHashed($employee->password)
-                    ? Hash::check($password, $employee->password)
-                    : hash_equals($employee->password, $password);
+                return PasswordVerifier::checkHashOrPlainText($password, $employee->password);
             });
     }
 }

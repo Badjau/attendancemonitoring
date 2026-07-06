@@ -6,11 +6,11 @@ use App\Http\Requests\TimeclockUnlockRequest;
 use App\Models\Employee;
 use App\Models\User;
 use App\Services\TimeclockUnlockService;
+use App\Support\PasswordVerifier;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -66,7 +66,7 @@ class TimeclockUnlockController extends Controller
 
             return response()->json([
                 'message' => $isAdmin ? 'Admin unlocked.' : 'Timeclock unlocked.',
-                'redirect' => $isAdmin ? url('/admin') : route('home'),
+                'redirect' => $isAdmin ? '/admin' : route('home'),
             ]);
         } catch (ValidationException $e) {
             return response()->json([
@@ -126,7 +126,7 @@ class TimeclockUnlockController extends Controller
             })
             ->first();
 
-        if (! $user || ! Hash::check($password, $user->password)) {
+        if (! $user || ! PasswordVerifier::check($password, $user->password)) {
             throw ValidationException::withMessages([
                 'username' => 'The admin username or password is incorrect.',
             ]);
@@ -149,7 +149,7 @@ class TimeclockUnlockController extends Controller
 
         return response()->json([
             'message' => 'Admin unlocked.',
-            'redirect' => url('/admin'),
+            'redirect' => '/admin',
         ]);
     }
 }

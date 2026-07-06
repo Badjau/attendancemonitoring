@@ -4,10 +4,10 @@ namespace App\Http\Controllers;
 
 use App\Models\User;
 use App\Support\AdminAccess;
+use App\Support\PasswordVerifier;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\Rule;
 use Illuminate\View\View;
 
@@ -40,7 +40,7 @@ class AdminAccessController extends Controller
             })
             ->first();
 
-        if (! $user || ! Hash::check($credentials['password'], $user->password)) {
+        if (! $user || ! PasswordVerifier::check($credentials['password'], $user->password)) {
             return back()
                 ->withErrors(['username' => 'The admin username or password is incorrect.'])
                 ->onlyInput('username');
@@ -48,7 +48,7 @@ class AdminAccessController extends Controller
 
         $this->unlockAdminFor($request, $user);
 
-        return redirect()->intended($user->is_hr ? '/admin/attendances' : '/admin');
+        return redirect()->to($this->adminRedirectPath($request, $user));
     }
 
     public function showRegister(Request $request): View|RedirectResponse
@@ -126,6 +126,19 @@ class AdminAccessController extends Controller
             'admin_password_unlocked_at' => now()->toDateTimeString(),
         ]);
         $request->session()->save();
+    }
+
+    private function adminRedirectPath(Request $request, User $user): string
+    {
+        $fallback = $user->is_hr ? '/admin/attendances' : '/admin';
+        $intended = $request->session()->pull('url.intended', $fallback);
+        $path = parse_url($intended, PHP_URL_PATH) ?: $fallback;
+
+        if (in_array($path, ['/admin/login', '/admin/register', '/unlock'], true)) {
+            return $fallback;
+        }
+
+        return $intended;
     }
 
     private function canRegister(Request $request): bool

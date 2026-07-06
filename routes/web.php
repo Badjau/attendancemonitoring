@@ -3,12 +3,16 @@
 use App\Http\Controllers\AdminAccessController;
 use App\Http\Controllers\AnnouncementController;
 use App\Http\Controllers\AttendanceController;
+use App\Http\Controllers\DatabaseHealthController;
 use App\Http\Controllers\EmployeeWebAuthnController;
 use App\Http\Controllers\HomeController;
 use App\Http\Controllers\TimeclockUnlockController;
 use App\Services\HomeService;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
+
+Route::get('/health/database', DatabaseHealthController::class)
+    ->name('health.database');
 
 Route::controller(TimeclockUnlockController::class)
     ->prefix('unlock')

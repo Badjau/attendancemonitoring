@@ -188,6 +188,7 @@
                 <input
                     x-model="search"
                     type="search"
+                    autocomplete="off"
                     placeholder="Search location"
                     class="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-950 shadow-sm outline-none transition focus:border-primary-500 focus:ring-1 focus:ring-primary-500 dark:border-gray-700 dark:bg-gray-800 dark:text-white"
                     x-on:keydown.enter.prevent="searchLocations()"

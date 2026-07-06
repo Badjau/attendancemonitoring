@@ -7,8 +7,8 @@ use App\Models\Employee;
 use App\Models\TimeclockAuthorizedUser;
 use App\Models\TimeclockUnlockLog;
 use App\Models\User;
+use App\Support\PasswordVerifier;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\ValidationException;
 
 class TimeclockUnlockService
@@ -71,9 +71,7 @@ class TimeclockUnlockService
                     return false;
                 }
 
-                return Hash::isHashed($employeePassword)
-                    ? Hash::check($password, $employeePassword)
-                    : hash_equals($employeePassword, $password);
+                return PasswordVerifier::checkHashOrPlainText($password, $employeePassword);
             });
     }
 

@@ -152,9 +152,25 @@ public sealed class CommandCoordinator : IDisposable
             }, statusCode: StatusCodes.Status502BadGateway);
         }
 
+        try
+        {
+            await RefreshMatcherTemplatesAsync(cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Fingerprint enrollment saved but matcher refresh failed for command {CommandId}.", commandId);
+            ClearActive();
+            await PublishAsync(new CommandEvent(commandId, AgentStates.Error, $"Fingerprint was saved, but the scanner cache could not refresh: {ex.Message}", ErrorCode: ex.GetType().Name), CancellationToken.None);
+
+            return Results.Json(new
+            {
+                message = $"Fingerprint was saved, but the scanner cache could not refresh: {ex.Message}",
+            }, statusCode: StatusCodes.Status502BadGateway);
+        }
+
         ClearActive();
-        await PublishAsync(Event(commandId, AgentStates.Success, "Fingerprint successfully Registered!", request), cancellationToken);
-        return Results.Ok(new { message = "Fingerprint successfully Registered!" });
+        await PublishAsync(Event(commandId, AgentStates.Success, "Fingerprint successfully registered and ready for verification.", request), cancellationToken);
+        return Results.Ok(new { message = "Fingerprint successfully registered and ready for verification." });
     }
 
     public async Task<IResult> FinalizeAttendanceAsync(string commandId, AttendanceCommandRequest request, CancellationToken cancellationToken)
@@ -445,6 +461,15 @@ public sealed class CommandCoordinator : IDisposable
     }
 
     private static string NewCommandId(string prefix) => $"{prefix}-{Guid.NewGuid():N}";
+
+    private async Task RefreshMatcherTemplatesAsync(CancellationToken cancellationToken)
+    {
+        var manifest = await laravel.ManifestAsync(cancellationToken);
+        var templates = await laravel.AllTemplatesAsync(cancellationToken);
+
+        await cache.RebuildTemplatesAsync(templates, manifest.Revision, cancellationToken);
+        sdk.ReloadMatcher(await cache.LoadTemplatesAsync(cancellationToken));
+    }
 
     private CommandEvent Event(string commandId, string state, string message, StartEnrollRequest employee, string? fingerprintImage = null)
     {

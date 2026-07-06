@@ -806,15 +806,13 @@ const submitFaceAttendance = async () => {
             return
         }
 
-        const employee = props.employees.find(
-            (employee) => employee.employee_id === result.employee_id,
-        )
-        if (employee) emit('employeeVerified', employee)
+        const employee = await verifyEmployeeIdentifier(result.employee_id, 'face')
+        if (!employee) return
 
         await submitAttendance(
-            result.employee_id,
+            employee.employee_id,
             'face',
-            employee ? employeeFullName(employee) : result.employee_id,
+            employeeFullName(employee),
             image,
         )
     } catch (error) {
@@ -1598,13 +1596,14 @@ onUnmounted(() => {
                                 <input
                                     ref="empIdInput"
                                     v-model="employeePassword"
-                                    type="password"
-                                    name="keypad-attendance-password"
-                                    autocomplete="new-password"
+                                    type="text"
+                                    name="keypad-attendance-pin"
+                                    autocomplete="off"
                                     inputmode="numeric"
                                     pattern="[0-9]*"
                                     autocapitalize="off"
                                     spellcheck="false"
+                                    style="-webkit-text-security: disc"
                                     class="mb-2 h-9 w-full rounded-lg border-2 border-brand-stroke bg-brand-headline px-3 text-center text-sm font-black tracking-[0.25em] text-brand-stroke"
                                     @focus="onEmpIdFocus"
                                     @input="onEmpIdInput"

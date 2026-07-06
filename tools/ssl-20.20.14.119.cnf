@@ -18,3 +18,4 @@ subjectAltName = @alt_names
 IP.1 = 20.20.14.119
 DNS.1 = attendancemonitoring.test
 DNS.2 = *.attendancemonitoring.test
+DNS.3 = 127.0.0.1:8000

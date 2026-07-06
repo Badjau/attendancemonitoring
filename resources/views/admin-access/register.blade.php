@@ -23,27 +23,27 @@
         <h1>Register admin</h1>
         <p>Create the emergency username and password for the admin dashboard.</p>
 
-        <form method="post" action="{{ route('admin.access.register.store') }}">
+        <form method="post" action="{{ route('admin.access.register.store') }}" autocomplete="off">
             @csrf
 
             <label for="name">Name</label>
-            <input id="name" name="name" value="{{ old('name') }}" autocomplete="name" required autofocus>
+            <input id="name" name="name" value="{{ old('name') }}" autocomplete="off" required autofocus>
             @error('name') <div class="error">{{ $message }}</div> @enderror
 
             <label for="username">Username</label>
-            <input id="username" name="username" value="{{ old('username') }}" autocomplete="username" required>
+            <input id="username" name="username" value="{{ old('username') }}" autocomplete="off" required>
             @error('username') <div class="error">{{ $message }}</div> @enderror
 
             <label for="email">Email</label>
-            <input id="email" name="email" type="email" value="{{ old('email') }}" autocomplete="email">
+            <input id="email" name="email" type="email" value="{{ old('email') }}" autocomplete="off">
             @error('email') <div class="error">{{ $message }}</div> @enderror
 
             <label for="password">Password</label>
-            <input id="password" name="password" type="password" autocomplete="new-password" required>
+            <input id="password" name="password" type="password" autocomplete="off" required>
             @error('password') <div class="error">{{ $message }}</div> @enderror
 
             <label for="password_confirmation">Confirm password</label>
-            <input id="password_confirmation" name="password_confirmation" type="password" autocomplete="new-password" required>
+            <input id="password_confirmation" name="password_confirmation" type="password" autocomplete="off" required>
 
             <button type="submit">Create admin account</button>
         </form>
