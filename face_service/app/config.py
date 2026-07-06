@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     database_path: Path = Path(__file__).resolve().parents[1] / "data" / "faces.sqlite"
     debug_frame_path: Path = Path(__file__).resolve().parents[1] / "data" / "debug"
     allowed_origins: str = "https://attendancemonitoring.test,https://20.20.52.71,http://127.0.0.1:8000,http://localhost:8000,https://127.0.0.1,https://localhost"
-    laravel_base_url: str = "https://attendancemonitoring.test"
+    laravel_base_url: str = "http://127.0.0.1:8000"
     face_embeddings_token: str = ""
     laravel_face_embeddings_token: str = ""
     face_cache_ttl_seconds: int = 300

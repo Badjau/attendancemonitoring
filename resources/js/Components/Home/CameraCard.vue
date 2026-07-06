@@ -34,6 +34,7 @@ type VerifiedEmployee = {
 }
 type LiveFaceMatch = {
     employee: VerifiedEmployee
+    image: string
 }
 type AttendanceSchedule = {
     time_in_start: string
@@ -657,6 +658,9 @@ const captureAttendanceImage = (): string | null => {
     return image
 }
 
+const normalizeEmployeeCode = (employeeId: unknown): string =>
+    String(employeeId ?? '').trim()
+
 const verifyEmployeeIdentifier = async (
     employeeIdentifier: string,
     method: AttendanceMethod,
@@ -718,7 +722,11 @@ const verifyLiveFaceMatchesEmployee = async (
             employee.employee_id,
             base64ToBlob(image, 'image/jpeg'),
         )
-        if (!result.matched || result.employee_id !== employee.employee_id) {
+        if (
+            !result.matched ||
+            normalizeEmployeeCode(result.employee_id) !==
+                normalizeEmployeeCode(employee.employee_id)
+        ) {
             toast.add({
                 severity: 'error',
                 summary: 'Face Verification',
@@ -732,6 +740,7 @@ const verifyLiveFaceMatchesEmployee = async (
         faceStatusText.value = `Face matched ${employeeFullName(employee)}.`
         return {
             employee,
+            image,
         }
     } catch (error) {
         console.error('Face verification failed:', error)
@@ -761,17 +770,11 @@ const verifyEmployeeAndSubmit = async (
         return
     }
 
-    const image = captureAttendanceImage()
-    if (!image) {
-        resetAttendanceSelection()
-        return
-    }
-
     await submitAttendance(
         employee.employee_id,
         method,
         employeeFullName(employee),
-        image,
+        matchedFace.image,
     )
 }
 
@@ -1097,17 +1100,12 @@ const pollZktecoBridgeStatus = async (
                     return
                 }
 
-                const image = captureAttendanceImage()
+                faceStatusText.value = 'Recording fingerprint attendance...'
 
-                if (!image) {
-                    fail(new Error('Camera photo could not be captured.'))
-                    return
-                }
-
-                await postZktecoBridgeCommand(
+                const finalizePayload = await postZktecoBridgeCommand(
                     `${props.zktecoBridgeUrl.replace(/\/$/, '')}/commands/${encodeURIComponent(commandId)}/finalize-attendance`,
                     {
-                        attendance_image: image,
+                        attendance_image: matchedFace.image,
                         latitude: coords.value.latitude,
                         longitude: coords.value.longitude,
                         location: locationLabel(),
@@ -1115,7 +1113,14 @@ const pollZktecoBridgeStatus = async (
                     },
                 )
 
-                faceStatusText.value = 'Recording fingerprint attendance...'
+                await handleStatus({
+                    ...finalizePayload,
+                    command_id: commandId,
+                    state: 'success',
+                    message:
+                        finalizePayload.message ||
+                        'Attendance recorded successfully.',
+                })
                 return
             }
 
@@ -1227,15 +1232,19 @@ const startZktecoAttendanceScan = async (
 const postZktecoBridgeCommand = async (
     url: string,
     payload: Record<string, unknown>,
-): Promise<void> => {
+): Promise<Record<string, any>> => {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 45000)
+
     const response = await fetch(url, {
         method: 'POST',
+        signal: controller.signal,
         headers: {
             Accept: 'application/json',
             'Content-Type': 'application/json',
         },
         body: JSON.stringify(payload),
-    })
+    }).finally(() => clearTimeout(timeout))
 
     const bridgePayload = await response.json().catch(() => ({}))
 
@@ -1244,6 +1253,8 @@ const postZktecoBridgeCommand = async (
             bridgePayload.message || 'Unable to connect to Finger Scanner Bridge.',
         )
     }
+
+    return bridgePayload
 }
 
 const cancelZktecoCommand = async (commandId: string): Promise<void> => {
