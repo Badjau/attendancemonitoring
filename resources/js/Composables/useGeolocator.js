@@ -109,7 +109,7 @@ export function useGeolocator() {
                     }
                     usingCachedLocation.value = false
                     locationSource.value = 'live'
-                    accuracyWarning.value = position.coords.accuracy > 100
+                    accuracyWarning.value = position.coords.accuracy > 150 //Lower is better
                     loading.value = false
                     saveLastKnownCoords(coords.value)
                     resolve(coords.value)

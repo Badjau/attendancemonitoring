@@ -15,37 +15,34 @@ return [
     'show_custom_tabs' => true,
     'custom_tabs' => [
         'more_configs' => [
-            'label' => 'Time-In/Time-out',
+            'label' => 'Attendance Flow',
             'icon' => 'heroicon-o-clock',
             'columns' => 1,
             'fields' => [
                 'time_in_start' => [
                     'type' => TypeFieldEnum::Text->value,
-                    'label' => 'Time-in Start',
-                    'placeholder' => '00:01 (12:01 AM)',
-                    'required' => true,
-                    'rules' => ['required', 'date_format:H:i'],
-                ],
-                'time_in_end' => [
-                    'type' => TypeFieldEnum::Text->value,
-                    'label' => 'Time-in End',
-                    'placeholder' => '23:59 (11:59 PM)',
+                    'label' => 'Time In',
+                    'placeholder' => '08:00',
                     'required' => true,
                     'rules' => ['required', 'date_format:H:i'],
                 ],
                 'time_out_start' => [
                     'type' => TypeFieldEnum::Text->value,
-                    'label' => 'Time-out Start',
-                    'placeholder' => '00:00 (12:00 AM)',
+                    'label' => 'Time Out',
+                    'placeholder' => '18:00',
                     'required' => true,
                     'rules' => ['required', 'date_format:H:i'],
                 ],
-                'time_out_end' => [
+                'duplicate_scan_window_seconds' => [
                     'type' => TypeFieldEnum::Text->value,
-                    'label' => 'Time-out End',
-                    'placeholder' => '00:00 (12:00 AM)',
+                    'label' => 'Duplicate Scan Window Seconds',
+                    'placeholder' => '60',
                     'required' => true,
-                    'rules' => ['required', 'date_format:H:i'],
+                    'rules' => ['required', 'integer', 'min:0', 'max:3600'],
+                ],
+                'show_face_attendance_button' => [
+                    'type' => TypeFieldEnum::Boolean->value,
+                    'label' => 'Show Facial Recognition Attendance Button',
                 ],
             ],
         ],

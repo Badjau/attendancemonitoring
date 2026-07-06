@@ -3,6 +3,7 @@
 namespace App\Filament\Admin\Resources\Attendances\Tables;
 
 use App\Enums\Attendance\AttendanceMethod;
+use App\Enums\Attendance\Mode;
 use App\Enums\Attendance\Status;
 use App\Enums\Attendance\Type;
 use App\Models\Attendance;
@@ -47,6 +48,11 @@ class AttendancesTable
 
                 TextColumn::make('attendance_method')
                     ->label('Method')
+                    ->badge()
+                    ->searchable(),
+
+                TextColumn::make('attendance_mode')
+                    ->label('Mode')
                     ->badge()
                     ->searchable(),
 
@@ -131,6 +137,10 @@ class AttendancesTable
                 SelectFilter::make('attendance_method')
                     ->label('Method')
                     ->options(AttendanceMethod::class),
+
+                SelectFilter::make('attendance_mode')
+                    ->label('Mode')
+                    ->options(Mode::class),
 
                 SelectFilter::make('employee_id')
                     ->label('Employee')

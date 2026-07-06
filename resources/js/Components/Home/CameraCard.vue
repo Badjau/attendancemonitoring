@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import axios from 'axios'
 import {
+    Camera,
+    Delete,
+    Eraser,
     LoaderCircle,
     LogIn,
     LogOut,
@@ -11,7 +14,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useToast } from 'primevue'
 import { useGeolocator } from '@/Composables/useGeolocator.js'
 import { useSyncStore } from '@/Stores/sync.js'
-import { verifyEmployeeFace } from '@/Services/faceService.js'
+import { recognizeFace, verifyEmployeeFace } from '@/Services/faceService.js'
 
 type AttendanceAction = 'time-in' | 'time-out'
 type AttendanceMethod = 'rfid' | 'keypad' | 'fingerprint' | 'face'
@@ -31,12 +34,13 @@ type VerifiedEmployee = {
 }
 type LiveFaceMatch = {
     employee: VerifiedEmployee
+    image: string
 }
 type AttendanceSchedule = {
     time_in_start: string
-    time_in_end: string
     time_out_start: string
-    time_out_end: string
+    duplicate_scan_window_seconds: string
+    show_face_attendance_button: boolean
 }
 
 const props = defineProps<{
@@ -77,13 +81,14 @@ const faceStatusText = ref('Face verification ready.')
 const currentTime = ref('')
 const currentDate = ref('')
 
-const showEmployeeIdInputField = ref(false)
+const showEmployeeIdInputField = ref(true)
 
 const rfidInput = ref<HTMLInputElement | null>(null)
 const empIdInput = ref<HTMLInputElement | null>(null)
 const rfidBuffer = ref('')
 const employeePassword = ref('')
 const hasTypedEmployeePassword = ref(false)
+const keypadDigits = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0']
 
 let stream: MediaStream | null = null
 let interval: ReturnType<typeof setInterval>
@@ -333,22 +338,6 @@ const trustedNow = (): Date => new Date(Date.now() + clockOffsetMs)
 
 const trustedNowIso = (): string => trustedNow().toISOString()
 
-const trustedMinutesFromMidnight = (): number => {
-    const parts = new Intl.DateTimeFormat('en-US', {
-        hour: '2-digit',
-        hourCycle: 'h23',
-        minute: '2-digit',
-        timeZone: CLOCK_TIME_ZONE,
-    }).formatToParts(trustedNow())
-
-    const hour = Number(parts.find((part) => part.type === 'hour')?.value ?? 0)
-    const minute = Number(
-        parts.find((part) => part.type === 'minute')?.value ?? 0,
-    )
-
-    return hour * 60 + minute
-}
-
 const syncClock = async () => {
     if (!navigator.onLine) return
 
@@ -397,53 +386,6 @@ const updateTime = () => {
     })
 }
 
-const inferredAttendanceType = (): AttendanceAction => {
-    const minutesFromMidnight = trustedMinutesFromMidnight()
-
-    if (
-        isMinuteWithinRange(
-            minutesFromMidnight,
-            timeToMinutes(props.attendanceSchedule.time_in_start),
-            timeToMinutes(props.attendanceSchedule.time_in_end),
-        )
-    ) {
-        return 'time-in'
-    }
-
-    if (
-        isMinuteWithinRange(
-            minutesFromMidnight,
-            timeToMinutes(props.attendanceSchedule.time_out_start),
-            timeToMinutes(props.attendanceSchedule.time_out_end),
-        )
-    ) {
-        return 'time-out'
-    }
-
-    return minutesFromMidnight <=
-        timeToMinutes(props.attendanceSchedule.time_in_end)
-        ? 'time-in'
-        : 'time-out'
-}
-
-const timeToMinutes = (time: string): number => {
-    const [hours = '0', minutes = '0'] = time.split(':')
-
-    return Number(hours) * 60 + Number(minutes)
-}
-
-const isMinuteWithinRange = (
-    minute: number,
-    start: number,
-    end: number,
-): boolean => {
-    if (start <= end) {
-        return minute >= start && minute <= end
-    }
-
-    return minute >= start || minute <= end
-}
-
 const ensureAttendanceFlowReady = async (actionName?: AttendanceAction) => {
     if (actionName) {
         attendanceType.value = actionName
@@ -451,7 +393,6 @@ const ensureAttendanceFlowReady = async (actionName?: AttendanceAction) => {
 
     showEmployeeIdInputField.value = true
     await nextTick()
-    forceRFIDFocus()
 }
 
 const openCameraForCapture = async (
@@ -490,7 +431,7 @@ const handleTimeAction = async (actionName: AttendanceAction) => {
 
 const resetAttendanceSelection = () => {
     attendanceType.value = ''
-    showEmployeeIdInputField.value = false
+    showEmployeeIdInputField.value = true
     employeePassword.value = ''
     hasTypedEmployeePassword.value = false
     isLoading.value = false
@@ -583,6 +524,7 @@ const onEmpIdFocus = (e: FocusEvent) => {
 }
 
 const onEmpIdInput = () => {
+    employeePassword.value = employeePassword.value.replace(/\D/g, '')
     hasTypedEmployeePassword.value = true
 }
 
@@ -591,6 +533,21 @@ const onEmpIdKeydown = (e: KeyboardEvent) => {
     e.preventDefault()
 
     submitManualAttendance()
+}
+
+const appendKeypadDigit = (digit: string) => {
+    employeePassword.value += digit
+    hasTypedEmployeePassword.value = true
+}
+
+const deleteKeypadDigit = () => {
+    employeePassword.value = employeePassword.value.slice(0, -1)
+    hasTypedEmployeePassword.value = true
+}
+
+const clearKeypad = () => {
+    employeePassword.value = ''
+    hasTypedEmployeePassword.value = true
 }
 
 const csrfToken = (): string =>
@@ -684,9 +641,7 @@ const postWebAuthnJson = async (
     return payload
 }
 
-const captureAttendanceImage = (
-    matchedFace?: LiveFaceMatch | null,
-): string | null => {
+const captureAttendanceImage = (): string | null => {
     const image = captureImage()
 
     if (!image) {
@@ -702,6 +657,9 @@ const captureAttendanceImage = (
 
     return image
 }
+
+const normalizeEmployeeCode = (employeeId: unknown): string =>
+    String(employeeId ?? '').trim()
 
 const verifyEmployeeIdentifier = async (
     employeeIdentifier: string,
@@ -764,7 +722,11 @@ const verifyLiveFaceMatchesEmployee = async (
             employee.employee_id,
             base64ToBlob(image, 'image/jpeg'),
         )
-        if (!result.matched || result.employee_id !== employee.employee_id) {
+        if (
+            !result.matched ||
+            normalizeEmployeeCode(result.employee_id) !==
+                normalizeEmployeeCode(employee.employee_id)
+        ) {
             toast.add({
                 severity: 'error',
                 summary: 'Face Verification',
@@ -778,6 +740,7 @@ const verifyLiveFaceMatchesEmployee = async (
         faceStatusText.value = `Face matched ${employeeFullName(employee)}.`
         return {
             employee,
+            image,
         }
     } catch (error) {
         console.error('Face verification failed:', error)
@@ -792,7 +755,7 @@ const verifyLiveFaceMatchesEmployee = async (
     }
 }
 
-const verifyEmployeeFaceAndSubmit = async (
+const verifyEmployeeAndSubmit = async (
     employeeIdentifier: string,
     method: AttendanceMethod,
 ): Promise<void> => {
@@ -807,18 +770,67 @@ const verifyEmployeeFaceAndSubmit = async (
         return
     }
 
-    const image = captureAttendanceImage(matchedFace)
-    if (!image) {
-        resetAttendanceSelection()
-        return
-    }
-
     await submitAttendance(
         employee.employee_id,
         method,
         employeeFullName(employee),
-        image,
+        matchedFace.image,
     )
+}
+
+const submitFaceAttendance = async () => {
+    pauseAutoFingerprintScan()
+
+    try {
+        startProcessing('face', 'Opening face recognition...')
+        await openCameraForCapture({ loadFaceVerification: true })
+
+        const image = captureAttendanceImage()
+        if (!image) {
+            resetAttendanceSelection()
+            return
+        }
+
+        faceStatusText.value = 'Recognizing face...'
+        const result = await recognizeFace(base64ToBlob(image, 'image/jpeg'))
+
+        if (!result.matched || !result.employee_id) {
+            toast.add({
+                severity: 'error',
+                summary: 'Face Recognition',
+                detail: result.message || 'No registered face matched.',
+                life: 6000,
+            })
+            faceStatusText.value = result.message || 'No registered face matched.'
+            resetAttendanceSelection()
+            return
+        }
+
+        const employee = props.employees.find(
+            (employee) => employee.employee_id === result.employee_id,
+        )
+        if (employee) emit('employeeVerified', employee)
+
+        await submitAttendance(
+            result.employee_id,
+            'face',
+            employee ? employeeFullName(employee) : result.employee_id,
+            image,
+        )
+    } catch (error) {
+        console.error('Error submitting face attendance:', error)
+        toast.add({
+            severity: 'error',
+            summary: 'Face Recognition',
+            detail:
+                error instanceof Error
+                    ? error.message
+                    : 'Unable to record face attendance.',
+            life: 6000,
+        })
+        stopProcessing()
+        resetAttendanceSelection()
+    }
 }
 
 const submitRFIDAttendance = async (rfid: any) => {
@@ -847,7 +859,7 @@ const submitRFIDAttendance = async (rfid: any) => {
 
     try {
         startProcessing('rfid', 'Processing RFID attendance...')
-        await verifyEmployeeFaceAndSubmit(scannedRfid, 'rfid')
+        await verifyEmployeeAndSubmit(scannedRfid, 'rfid')
     } catch (e) {
         console.error('Error submitting RFID attendance:', e)
         stopProcessing()
@@ -859,11 +871,6 @@ const submitManualAttendance = async () => {
     pauseAutoFingerprintScan()
 
     const password = employeePassword.value.trim()
-
-    if (!hasTypedEmployeePassword.value) {
-        employeePassword.value = ''
-        return
-    }
 
     if (!password) {
         toast.add({
@@ -879,7 +886,7 @@ const submitManualAttendance = async () => {
 
     try {
         startProcessing('keypad', 'Processing keypad attendance...')
-        await verifyEmployeeFaceAndSubmit(password, 'keypad')
+        await verifyEmployeeAndSubmit(password, 'keypad')
         employeePassword.value = ''
         hasTypedEmployeePassword.value = false
         setTimeout(() => forceRFIDFocus(), 50)
@@ -990,7 +997,6 @@ const scheduleAutoFingerprintScan = (delay = AUTO_FINGERPRINT_RETRY_MS) => {
         if (
             isAutoFingerprintScanActive ||
             isProcessing.value ||
-            !showEmployeeIdInputField.value ||
             isCameraActive.value ||
             !isLocationReady.value
         ) {
@@ -1057,11 +1063,12 @@ const pollZktecoBridgeStatus = async (
                 faceStatusText.value = status.message
             }
 
-            if (
-                (status.state === 'matched' ||
-                    status.state === 'awaiting_browser_photo') &&
-                !attendancePhotoSent
-            ) {
+            if (status.state === 'matched') {
+                faceStatusText.value = 'Fingerprint matched. Starting facial verification...'
+                return
+            }
+
+            if (status.state === 'awaiting_browser_photo' && !attendancePhotoSent) {
                 attendancePhotoSent = true
                 faceStatusText.value = 'Fingerprint matched. Verifying face...'
 
@@ -1093,17 +1100,12 @@ const pollZktecoBridgeStatus = async (
                     return
                 }
 
-                const image = captureAttendanceImage(matchedFace)
+                faceStatusText.value = 'Recording fingerprint attendance...'
 
-                if (!image) {
-                    fail(new Error('Camera photo could not be captured.'))
-                    return
-                }
-
-                await postZktecoBridgeCommand(
+                const finalizePayload = await postZktecoBridgeCommand(
                     `${props.zktecoBridgeUrl.replace(/\/$/, '')}/commands/${encodeURIComponent(commandId)}/finalize-attendance`,
                     {
-                        attendance_image: image,
+                        attendance_image: matchedFace.image,
                         latitude: coords.value.latitude,
                         longitude: coords.value.longitude,
                         location: locationLabel(),
@@ -1111,7 +1113,14 @@ const pollZktecoBridgeStatus = async (
                     },
                 )
 
-                faceStatusText.value = 'Recording fingerprint attendance...'
+                await handleStatus({
+                    ...finalizePayload,
+                    command_id: commandId,
+                    state: 'success',
+                    message:
+                        finalizePayload.message ||
+                        'Attendance recorded successfully.',
+                })
                 return
             }
 
@@ -1138,10 +1147,7 @@ const pollZktecoBridgeStatus = async (
                         status.employee_name?.split(' ')?.[0] ||
                         '',
                     is_birthday: Boolean(status.is_birthday),
-                    attendance_type:
-                        status.attendance_type ||
-                        attendanceType.value ||
-                        inferredAttendanceType(),
+                    attendance_type: status.attendance_type || attendanceType.value,
                 })
                 resetAttendanceSelection()
                 finish()
@@ -1226,15 +1232,19 @@ const startZktecoAttendanceScan = async (
 const postZktecoBridgeCommand = async (
     url: string,
     payload: Record<string, unknown>,
-): Promise<void> => {
+): Promise<Record<string, any>> => {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 45000)
+
     const response = await fetch(url, {
         method: 'POST',
+        signal: controller.signal,
         headers: {
             Accept: 'application/json',
             'Content-Type': 'application/json',
         },
         body: JSON.stringify(payload),
-    })
+    }).finally(() => clearTimeout(timeout))
 
     const bridgePayload = await response.json().catch(() => ({}))
 
@@ -1243,6 +1253,8 @@ const postZktecoBridgeCommand = async (
             bridgePayload.message || 'Unable to connect to Finger Scanner Bridge.',
         )
     }
+
+    return bridgePayload
 }
 
 const cancelZktecoCommand = async (commandId: string): Promise<void> => {
@@ -1543,6 +1555,17 @@ onUnmounted(() => {
                     </button>
                 </div>
 
+                <button
+                    v-if="props.attendanceSchedule.show_face_attendance_button"
+                    type="button"
+                    @click="submitFaceAttendance"
+                    :disabled="isProcessing"
+                    class="mt-4 flex w-full items-center justify-center gap-2 rounded-2xl border-2 border-brand-stroke bg-brand-headline px-4 py-3 text-sm font-black text-brand-stroke shadow-[4px_4px_0px_0px_#001e1d] transition-all duration-200 ease-out hover:-translate-y-1 hover:shadow-[6px_6px_0px_0px_#001e1d] active:translate-x-1 active:translate-y-1 active:shadow-none disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:translate-y-0 disabled:hover:shadow-[4px_4px_0px_0px_#001e1d]"
+                >
+                    <Camera class="h-5 w-5" />
+                    Facial Recognition
+                </button>
+
                 <div
                     v-if="isProcessing"
                     class="mt-5 flex items-center gap-3 rounded-2xl border-2 border-brand-stroke bg-brand-headline px-4 py-3 text-left shadow-[3px_3px_0px_0px_#001e1d]"
@@ -1568,21 +1591,69 @@ onUnmounted(() => {
                         />
 
                         <div class="flex items-center justify-center">
-                            <input
+                            <div
                                 v-if="showEmployeeIdInputField"
-                                ref="empIdInput"
-                                v-model="employeePassword"
-                                type="password"
-                                name="keypad-attendance-password"
-                                autocomplete="new-password"
-                                autocapitalize="off"
-                                spellcheck="false"
-                                placeholder="Password"
-                                class="text-brand-stroke border-2 border-brand-stroke rounded-xl py-3 px-3 text-sm w-full mt-4"
-                                @focus="onEmpIdFocus"
-                                @input="onEmpIdInput"
-                                @keydown="onEmpIdKeydown"
-                            />
+                                class="mx-auto mt-4 w-full max-w-64"
+                            >
+                                <input
+                                    ref="empIdInput"
+                                    v-model="employeePassword"
+                                    type="password"
+                                    name="keypad-attendance-password"
+                                    autocomplete="new-password"
+                                    inputmode="numeric"
+                                    pattern="[0-9]*"
+                                    autocapitalize="off"
+                                    spellcheck="false"
+                                    class="mb-2 h-9 w-full rounded-lg border-2 border-brand-stroke bg-brand-headline px-3 text-center text-sm font-black tracking-[0.25em] text-brand-stroke"
+                                    @focus="onEmpIdFocus"
+                                    @input="onEmpIdInput"
+                                    @keydown="onEmpIdKeydown"
+                                />
+
+                                <div class="grid grid-cols-3 gap-1.5">
+                                    <button
+                                        v-for="digit in keypadDigits.slice(0, 9)"
+                                        :key="digit"
+                                        type="button"
+                                        class="flex h-9 items-center justify-center rounded-lg border-2 border-brand-stroke bg-brand-headline text-sm font-black text-brand-stroke shadow-[2px_2px_0px_0px_#001e1d] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none"
+                                        @click="appendKeypadDigit(digit)"
+                                    >
+                                        {{ digit }}
+                                    </button>
+                                    <button
+                                        type="button"
+                                        class="flex h-9 items-center justify-center rounded-lg border-2 border-brand-stroke bg-brand-tertiary text-brand-headline shadow-[2px_2px_0px_0px_#001e1d] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none"
+                                        aria-label="Clear"
+                                        @click="clearKeypad"
+                                    >
+                                        <Eraser class="h-4 w-4" />
+                                    </button>
+                                    <button
+                                        type="button"
+                                        class="flex h-9 items-center justify-center rounded-lg border-2 border-brand-stroke bg-brand-headline text-sm font-black text-brand-stroke shadow-[2px_2px_0px_0px_#001e1d] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none"
+                                        @click="appendKeypadDigit('0')"
+                                    >
+                                        0
+                                    </button>
+                                    <button
+                                        type="button"
+                                        class="flex h-9 items-center justify-center rounded-lg border-2 border-brand-stroke bg-brand-headline text-brand-stroke shadow-[2px_2px_0px_0px_#001e1d] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none"
+                                        aria-label="Delete"
+                                        @click="deleteKeypadDigit"
+                                    >
+                                        <Delete class="h-4 w-4" />
+                                    </button>
+                                </div>
+
+                                <button
+                                    type="button"
+                                    class="mt-2 flex h-9 w-full items-center justify-center rounded-lg border-2 border-brand-stroke bg-brand-accent text-xs font-black text-brand-stroke shadow-[3px_3px_0px_0px_#001e1d] active:translate-x-1 active:translate-y-1 active:shadow-none"
+                                    @click="submitManualAttendance"
+                                >
+                                    Enter
+                                </button>
+                            </div>
                         </div>
                     </div>
 

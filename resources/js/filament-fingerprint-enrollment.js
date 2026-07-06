@@ -15,6 +15,8 @@ window.fingerprintEnrollment = ({
     enrollmentCommandId: '',
     enrollmentEvents: null,
     fingerprintPreviewImage: '',
+    enrollmentScanImages: [],
+    enrollmentScanSequence: 0,
     message: '',
     success: false,
     selectedFinger: null,
@@ -61,6 +63,49 @@ window.fingerprintEnrollment = ({
             : `data:image/png;base64,${image}`
     },
 
+    async responsePayload(response) {
+        const body = await response.text()
+
+        if (!body) return {}
+
+        try {
+            return JSON.parse(body)
+        } catch {
+            return { message: body.trim() }
+        }
+    },
+
+    enrollmentScanImageSrc(scan) {
+        return typeof scan === 'string' ? scan : scan?.src || ''
+    },
+
+    appendEnrollmentScanImage(image) {
+        this.enrollmentScanSequence += 1
+        this.enrollmentScanImages = [
+            ...this.enrollmentScanImages.slice(-2),
+            {
+                id: this.enrollmentCommandId + '-' + this.enrollmentScanSequence,
+                src: image,
+            },
+        ]
+    },
+
+    applyEnrollmentScanImages(images) {
+        const normalizedImages = (Array.isArray(images) ? images : [])
+            .map((image) => this.fingerprintImageSrc(image))
+            .filter(Boolean)
+
+        if (!normalizedImages.length) {
+            return
+        }
+
+        this.enrollmentScanSequence = normalizedImages.length
+        this.enrollmentScanImages = normalizedImages.map((src, index) => ({
+            id: `${this.enrollmentCommandId || 'enroll'}-${index + 1}`,
+            src,
+        }))
+    },
+
     shouldLaunchBridgeProtocol() {
         return /^https?:\/\/(?:127\.0\.0\.1|localhost)(?::8765)?(?:\/|$)/i.test(
             this.zktecoBridgeUrl,
@@ -94,7 +139,7 @@ window.fingerprintEnrollment = ({
             this.bridgeRequestOptions(body),
         )
 
-        const payload = await response.json().catch(() => ({}))
+        const payload = await this.responsePayload(response)
 
         return { response, payload }
     },
@@ -149,6 +194,29 @@ window.fingerprintEnrollment = ({
         this.enrollmentCaptured = false
         this.enrollmentCommandId = ''
         this.fingerprintPreviewImage = ''
+        this.enrollmentScanImages = []
+        this.enrollmentScanSequence = 0
+        this.closeEnrollmentEvents()
+    },
+
+    async cancelEnrollmentCommand(commandId = this.enrollmentCommandId) {
+        if (!commandId) return
+
+        try {
+            await this.postAgentCommand(
+                `/commands/${encodeURIComponent(commandId)}/cancel`,
+                {},
+            )
+        } catch {
+            // The command may already be complete or the bridge may be closed.
+        }
+    },
+
+    destroy() {
+        if (this.zktecoLoading || this.enrollmentCaptured) {
+            void this.cancelEnrollmentCommand()
+        }
+
         this.closeEnrollmentEvents()
     },
 
@@ -194,10 +262,14 @@ window.fingerprintEnrollment = ({
             this.message = this.scannerMessage(status.message)
         }
 
-        if (status.fingerprint_image_base64) {
-            this.fingerprintPreviewImage = this.fingerprintImageSrc(
+        if (Array.isArray(status.enrollment_scan_images) && status.enrollment_scan_images.length) {
+            this.applyEnrollmentScanImages(status.enrollment_scan_images)
+        } else if (status.fingerprint_image_base64) {
+            const image = this.fingerprintImageSrc(
                 status.fingerprint_image_base64,
             )
+            this.fingerprintPreviewImage = image
+            this.appendEnrollmentScanImage(image)
         }
 
         if (status.state === 'captured' && !this.enrollmentCaptured) {
@@ -337,11 +409,15 @@ window.fingerprintEnrollment = ({
         this.zktecoLoading = true
         this.message = ''
         this.success = false
+        if (this.enrollmentCommandId) {
+            await this.cancelEnrollmentCommand()
+        }
         this.resetPendingEnrollment()
 
         const commandId =
             crypto.randomUUID?.() ??
             `fingerprint-enroll-${Date.now()}-${Math.random().toString(36).slice(2)}`
+        this.enrollmentCommandId = commandId
         const employeePayload = {
             ...this.employee,
             command_id: commandId,
@@ -354,11 +430,27 @@ window.fingerprintEnrollment = ({
                 employeePayload,
             )
 
+            if (response.status === 409 && payload.command_id) {
+                await this.cancelEnrollmentCommand(payload.command_id)
+                ;({ response, payload } = await this.postAgentCommand(
+                    '/commands/enroll',
+                    employeePayload,
+                ))
+            }
+
             if (response.status === 404) {
                 ;({ response, payload } = await this.postAgentCommand(
                     '/enroll',
                     employeePayload,
                 ))
+
+                if (response.status === 409 && payload.command_id) {
+                    await this.cancelEnrollmentCommand(payload.command_id)
+                    ;({ response, payload } = await this.postAgentCommand(
+                        '/enroll',
+                        employeePayload,
+                    ))
+                }
             }
 
             if (!response.ok) {
@@ -374,6 +466,10 @@ window.fingerprintEnrollment = ({
             )
             this.listenToEnrollmentEvents(commandId)
         } catch (error) {
+            if (this.enrollmentCommandId) {
+                await this.cancelEnrollmentCommand(this.enrollmentCommandId)
+            }
+
             this.message =
                 error instanceof Error
                     ? error.message
@@ -395,12 +491,17 @@ window.fingerprintEnrollment = ({
         this.success = false
 
         try {
-            const response = await fetch(
-                `${this.zktecoBridgeUrl.replace(/\/$/, '')}/commands/${encodeURIComponent(this.enrollmentCommandId)}/commit-enrollment`,
-                this.bridgeRequestOptions({}),
+            let { response, payload } = await this.postAgentCommand(
+                `/commands/${encodeURIComponent(this.enrollmentCommandId)}/commit-enrollment`,
+                {},
             )
 
-            const payload = await response.json().catch(() => ({}))
+            if (response.status === 404) {
+                ;({ response, payload } = await this.postAgentCommand(
+                    '/commit-enrollment',
+                    { command_id: this.enrollmentCommandId },
+                ))
+            }
 
             if (!response.ok) {
                 throw new Error(
@@ -417,6 +518,15 @@ window.fingerprintEnrollment = ({
         } finally {
             this.submittingEnrollment = false
         }
+    },
+
+    async cancelEnrollment() {
+        await this.cancelEnrollmentCommand()
+        this.resetPendingEnrollment()
+        this.zktecoLoading = false
+        this.submittingEnrollment = false
+        this.success = false
+        this.message = 'Fingerprint registration cancelled.'
     },
 
 })

@@ -80,11 +80,12 @@ dotnet publish .\tools\ZktecoLocalAgent\ZktecoLocalAgent.csproj -c Release -r wi
 
 Run the installer after publishing:
 
+cd C:\laragon\www\attendancemonitoring\
 ```powershell
 .\tools\ZktecoLocalAgent\Installer\install-agent.ps1 `
-  -ApiBaseUrl "https://20.20.52.71/api/zkteco" `
-  -ScannerToken "fhDVzlVcoUqRxpVtWsr8N5YEPXzsgoNJb4GsGymgfTM" `
-  -DeviceSerial "SCANNER-PC-01"
+  -ApiBaseUrl "https://YOUR-APP-URL/api/zkteco" `
+  -ScannerToken "YOUR-SCANNER-TOKEN" `
+  -DeviceSerial "ZKTECO-LOCAL"
 ```
 
 What the installer does:

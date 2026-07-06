@@ -20,6 +20,7 @@ window.faceRegistration = ({ employeeId, hasRegisteredFace = false }) => ({
     captureCountdown: 0,
     message: '',
     success: false,
+    serviceConnectionFailed: false,
     enrollmentCount: 0,
     requiredCount: 3,
     ready: false,
@@ -45,21 +46,47 @@ window.faceRegistration = ({ employeeId, hasRegisteredFace = false }) => ({
     async init() {
         this.video = this.$refs.video
         this.captureCanvas = this.$refs.captureCanvas
+        this.serviceConnectionFailed = false
+
+        let cameraError = null
+        let serviceError = null
+
+        try {
+            await this.startCamera()
+        } catch (error) {
+            cameraError = error
+        }
 
         try {
             await this.loadStatus()
-            await this.startCamera()
-            this.statusText = this.isUpdatingExisting
-                ? `Capture 1 of ${this.requiredCount}.`
-                : 'Capture a clear face image.'
         } catch (error) {
-            console.error(error)
+            serviceError = error
+            this.serviceConnectionFailed = true
+        }
+
+        if (serviceError) {
+            console.error(serviceError)
             this.statusText =
-                error instanceof Error
-                    ? error.message
+                'Unable to connect to the face service. Check the face service URL, HTTPS certificate, and CORS allowed origins.'
+            this.message = this.statusText
+            this.success = false
+        }
+
+        if (cameraError) {
+            console.error(cameraError)
+            this.statusText =
+                cameraError instanceof Error
+                    ? cameraError.message
                     : 'Unable to start face registration.'
             this.message = this.statusText
             this.success = false
+            return
+        }
+
+        if (!serviceError) {
+            this.statusText = this.isUpdatingExisting
+                ? `Capture 1 of ${this.requiredCount}.`
+                : 'Capture a clear face image.'
         }
     },
 
@@ -270,6 +297,16 @@ window.faceRegistration = ({ employeeId, hasRegisteredFace = false }) => ({
             )
         }
 
-        setTimeout(() => window.location.reload(), 350)
+        setTimeout(() => {
+            const url = new URL(window.location.href)
+
+            if (url.searchParams.has('redirect')) {
+                url.searchParams.delete('redirect')
+                window.location.replace(url.toString())
+                return
+            }
+
+            window.location.reload()
+        }, 350)
     },
 })

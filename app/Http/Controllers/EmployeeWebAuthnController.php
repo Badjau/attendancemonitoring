@@ -158,7 +158,7 @@ class EmployeeWebAuthnController extends Controller
                 'attendance_method' => 'fingerprint',
             ]);
 
-            $this->attendanceService->recordAttendance($request);
+            $attendance = $this->attendanceService->recordAttendance($request);
 
             return response()->json([
                 'message' => 'Attendance recorded successfully.',
@@ -172,7 +172,7 @@ class EmployeeWebAuthnController extends Controller
                 'greeting' => [
                     'first_name' => $employee->first_name,
                     'is_birthday' => $employee->date_of_birth?->isBirthday() ?? false,
-                    'attendance_type' => $request->attendance_type,
+                    'attendance_type' => $attendance->attendance_type->value,
                 ],
             ]);
         } catch (ValidationException $exception) {

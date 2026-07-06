@@ -104,6 +104,7 @@ public sealed record CommandEvent(
     [property: JsonPropertyName("template_id")] int? TemplateId = null,
     [property: JsonPropertyName("score")] int? Score = null,
     [property: JsonPropertyName("fingerprint_image_base64")] string? FingerprintImageBase64 = null,
+    [property: JsonPropertyName("enrollment_scan_images")] IReadOnlyList<string>? EnrollmentScanImages = null,
     [property: JsonPropertyName("error_code")] string? ErrorCode = null,
     [property: JsonPropertyName("created_at")] DateTimeOffset? CreatedAt = null
 );

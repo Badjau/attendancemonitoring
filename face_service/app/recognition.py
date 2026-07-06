@@ -47,6 +47,11 @@ class FaceExtraction:
 async def read_upload_image(upload: UploadFile) -> tuple[bytes, np.ndarray]:
     content = await upload.read()
     if not content:
+        logger.warning(
+            "face_upload_rejected reason=empty filename=%s content_type=%s",
+            upload.filename,
+            upload.content_type,
+        )
         raise HTTPException(status_code=422, detail="Upload an image.")
 
     try:
@@ -55,8 +60,22 @@ async def read_upload_image(upload: UploadFile) -> tuple[bytes, np.ndarray]:
         with Image.open(BytesIO(content)) as opened:
             rgb = np.array(opened.convert("RGB"))
     except UnidentifiedImageError as exc:
+        logger.warning(
+            "face_upload_rejected reason=invalid_image filename=%s content_type=%s bytes=%s",
+            upload.filename,
+            upload.content_type,
+            len(content),
+        )
         raise HTTPException(status_code=422, detail="Upload a valid image file.") from exc
 
+    logger.info(
+        "face_upload_loaded filename=%s content_type=%s bytes=%s width=%s height=%s",
+        upload.filename,
+        upload.content_type,
+        len(content),
+        int(rgb.shape[1]),
+        int(rgb.shape[0]),
+    )
     return content, rgb
 
 
@@ -66,6 +85,7 @@ def ensure_recognizer_available() -> None:
         if DEEPFACE_IMPORT_ERROR is not None:
             detail = f"{detail} Import error: {DEEPFACE_IMPORT_ERROR}"
 
+        logger.error("deepface_unavailable error=%s", DEEPFACE_IMPORT_ERROR)
         raise HTTPException(
             status_code=503,
             detail=detail,
@@ -461,6 +481,10 @@ def analyze_single_face(content: bytes, rgb: np.ndarray, settings: Settings) -> 
     if face_count == 0:
         if extraction.diagnostics.get("non_spoof_face_count", 0) > 0:
             detector = extraction.diagnostics.get("non_spoof_detector")
+            logger.warning(
+                "face_enrollment_rejected reason=spoofing_unconfirmed detector=%s",
+                detector,
+            )
             raise HTTPException(
                 status_code=422,
                 detail=(
@@ -469,9 +493,11 @@ def analyze_single_face(content: bytes, rgb: np.ndarray, settings: Settings) -> 
                 ),
             )
 
+        logger.warning("face_enrollment_rejected reason=no_face")
         raise HTTPException(status_code=422, detail="No face detected. Look straight at the camera.")
 
     if face_count > 1:
+        logger.warning("face_enrollment_rejected reason=multiple_faces face_count=%s", face_count)
         raise HTTPException(status_code=422, detail="Only one face is allowed in the frame.")
 
     face = faces[0]
@@ -486,12 +512,20 @@ def analyze_single_face(content: bytes, rgb: np.ndarray, settings: Settings) -> 
     )
 
     if spoofing["required"] and not spoofing["checked"]:
+        logger.warning(
+            "face_enrollment_rejected reason=spoofing_unconfirmed error=%s",
+            spoofing["error"],
+        )
         raise HTTPException(
             status_code=422,
             detail="Face detected, but liveness check could not confirm it. Try brighter front lighting and avoid screen glare.",
         )
 
     if spoofing["checked"] and not spoofing["is_real"]:
+        logger.warning(
+            "face_enrollment_rejected reason=spoof score=%s",
+            spoofing["score"],
+        )
         raise HTTPException(status_code=422, detail="Spoofed face detected. Use a live face.")
 
     facial_area = face["facial_area"]
@@ -531,6 +565,15 @@ def analyze_single_face(content: bytes, rgb: np.ndarray, settings: Settings) -> 
         )
         raise HTTPException(status_code=422, detail="The image is too blurry. Hold still and retake.")
 
+    logger.info(
+        "face_enrollment_accepted width=%s height=%s brightness=%s blur_score=%s detector=%s",
+        quality["width"],
+        quality["height"],
+        quality["brightness"],
+        quality["blur_score"],
+        quality["detector_backend"],
+    )
+
     return FaceAnalysis(
         image_sha256=image_sha256,
         rgb=rgb,
@@ -560,6 +603,10 @@ def recognize(content: bytes, rgb: np.ndarray, store: FaceStore, settings: Setti
         if extraction.diagnostics.get("non_spoof_face_count", 0) > 0:
             message = "Face detected, but liveness check could not confirm it."
 
+        logger.info(
+            "face_recognition_result matched=False reason=no_face message=%s",
+            message,
+        )
         return {
             "matched": False,
             "employee_id": None,
@@ -572,6 +619,10 @@ def recognize(content: bytes, rgb: np.ndarray, store: FaceStore, settings: Setti
         }
 
     if face_count > 1:
+        logger.info(
+            "face_recognition_result matched=False reason=multiple_faces face_count=%s",
+            face_count,
+        )
         return {
             "matched": False,
             "employee_id": None,
@@ -628,6 +679,7 @@ def recognize(content: bytes, rgb: np.ndarray, store: FaceStore, settings: Setti
             detector_backend=face.get("detector_backend", settings.detector_backend),
         )
     except HTTPException:
+        logger.warning("face_recognition_result matched=False reason=encoding_failed")
         return {
             "matched": False,
             "employee_id": None,
@@ -643,6 +695,7 @@ def recognize(content: bytes, rgb: np.ndarray, store: FaceStore, settings: Setti
 
     rows = store.embeddings()
     if not rows:
+        logger.info("face_recognition_result matched=False reason=no_enrolled_embeddings")
         return {
             "matched": False,
             "employee_id": None,
@@ -679,6 +732,14 @@ def recognize(content: bytes, rgb: np.ndarray, store: FaceStore, settings: Setti
     )
 
     if best_distance > settings.match_threshold:
+        logger.info(
+            "face_recognition_result matched=False reason=threshold candidate=%s distance=%s threshold=%s confidence=%s margin=%s",
+            best_employee_id,
+            round(best_distance, 4),
+            settings.match_threshold,
+            confidence,
+            margin,
+        )
         return {
             "matched": False,
             "employee_id": None,
@@ -693,6 +754,14 @@ def recognize(content: bytes, rgb: np.ndarray, store: FaceStore, settings: Setti
         }
 
     if margin is not None and margin < settings.ambiguous_margin:
+        logger.info(
+            "face_recognition_result matched=False reason=ambiguous candidate=%s distance=%s margin=%s required_margin=%s confidence=%s",
+            best_employee_id,
+            round(best_distance, 4),
+            margin,
+            settings.ambiguous_margin,
+            confidence,
+        )
         return {
             "matched": False,
             "employee_id": None,
@@ -706,6 +775,13 @@ def recognize(content: bytes, rgb: np.ndarray, store: FaceStore, settings: Setti
             "spoofing_checked": spoofing["checked"],
         }
 
+    logger.info(
+        "face_recognition_result matched=True employee_id=%s confidence=%s distance=%s margin=%s",
+        best_employee_id,
+        confidence,
+        round(best_distance, 4),
+        margin,
+    )
     return {
         "matched": True,
         "employee_id": best_employee_id,
@@ -721,6 +797,7 @@ def recognize(content: bytes, rgb: np.ndarray, store: FaceStore, settings: Setti
 
 
 def verify_employee_face(content: bytes, rgb: np.ndarray, employee_id: str, store: FaceStore, settings: Settings) -> dict:
+    logger.info("face_verification_started employee_id=%s", employee_id)
     scoped_store = type(
         "EmployeeScopedStore",
         (),
@@ -730,10 +807,21 @@ def verify_employee_face(content: bytes, rgb: np.ndarray, employee_id: str, stor
     result = recognize(content, rgb, scoped_store, settings)
     if result["matched"]:
         result["employee_id"] = employee_id
+        logger.info(
+            "face_verification_result employee_id=%s matched=True confidence=%s distance=%s",
+            employee_id,
+            result.get("confidence"),
+            result.get("distance"),
+        )
         return result
 
     if result["message"] == "No enrolled face embeddings are available.":
         result["message"] = "Employee has no enrolled face embeddings."
 
     result["employee_id"] = None
+    logger.info(
+        "face_verification_result employee_id=%s matched=False message=%s",
+        employee_id,
+        result.get("message"),
+    )
     return result

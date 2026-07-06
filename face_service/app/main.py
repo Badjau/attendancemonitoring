@@ -1,6 +1,8 @@
 import base64
 import json
+import logging
 import ssl
+import sys
 from datetime import datetime, timezone
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -19,13 +21,30 @@ from .recognition import (
     verify_employee_face,
 )
 from .schemas import (
+    CacheRefreshResponse,
     DeleteEmployeeResponse,
     EmployeeStatusResponse,
     EnrollmentResponse,
     RecognizeResponse,
-    CacheRefreshResponse,
 )
 
+
+def configure_logging() -> logging.Logger:
+    package_logger = logging.getLogger("app")
+    if not package_logger.handlers:
+        handler = logging.StreamHandler(sys.stdout)
+        handler.setFormatter(
+            logging.Formatter("%(asctime)s %(levelname)s [%(name)s] %(message)s")
+        )
+        package_logger.addHandler(handler)
+
+    package_logger.setLevel(logging.INFO)
+    package_logger.propagate = False
+
+    return logging.getLogger(__name__)
+
+
+logger = configure_logging()
 settings = get_settings()
 store = FaceStore(settings.database_path)
 
@@ -37,6 +56,24 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.on_event("startup")
+def log_startup() -> None:
+    logger.info(
+        "face_service_started database=%s debug_frames=%s laravel_base_url=%s model=%s detector=%s fallback_detector=%s anti_spoofing=%s require_anti_spoofing=%s deepface_available=%s",
+        settings.database_path,
+        settings.debug_frame_path,
+        settings.laravel_base_url,
+        settings.model_name,
+        settings.detector_backend,
+        settings.fallback_detector_backend,
+        settings.anti_spoofing,
+        settings.require_anti_spoofing,
+        DeepFace is not None,
+    )
+    if DEEPFACE_IMPORT_ERROR is not None:
+        logger.warning("deepface_import_error error=%s", DEEPFACE_IMPORT_ERROR)
 
 
 def get_store() -> FaceStore:
@@ -67,31 +104,66 @@ def laravel_json_request(
         raise HTTPException(status_code=503, detail="Laravel face vector API is not configured.")
 
     data = None if payload is None else json.dumps(payload).encode("utf-8")
+    request_method = method or ("POST" if payload is not None else "GET")
+    logger.info(
+        "laravel_api_request method=%s path=%s payload_bytes=%s",
+        request_method,
+        path,
+        len(data) if data is not None else 0,
+    )
     request = Request(
         f"{base_url}{path}",
         data=data,
         headers=laravel_headers(settings),
-        method=method or ("POST" if payload is not None else "GET"),
+        method=request_method,
     )
 
     try:
         context = ssl._create_unverified_context()
         with urlopen(request, timeout=10, context=context) as response:
-            return json.loads(response.read().decode("utf-8"))
+            response_body = response.read().decode("utf-8")
+            logger.info(
+                "laravel_api_response method=%s path=%s status=%s bytes=%s",
+                request_method,
+                path,
+                response.status,
+                len(response_body),
+            )
+            return json.loads(response_body)
     except HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="ignore") or str(exc)
+        logger.warning(
+            "laravel_api_error method=%s path=%s status=%s detail=%s",
+            request_method,
+            path,
+            exc.code,
+            detail,
+        )
         raise HTTPException(status_code=502, detail=f"Laravel face vector API rejected the request: {detail}") from exc
     except (URLError, TimeoutError, json.JSONDecodeError) as exc:
+        logger.warning(
+            "laravel_api_unavailable method=%s path=%s error=%s",
+            request_method,
+            path,
+            exc,
+        )
         raise HTTPException(status_code=502, detail=f"Laravel face vector API is unavailable: {exc}") from exc
 
 
 def refresh_employee_cache(employee_id: str, face_store: FaceStore, settings: Settings) -> dict:
+    logger.info("face_cache_refresh_started employee_id=%s", employee_id)
     payload = laravel_json_request(
         f"/api/face/employees/{employee_id}/embeddings",
         settings,
     )
     embeddings = payload.get("embeddings") or []
     face_store.replace_employee_embeddings(employee_id, embeddings)
+    logger.info(
+        "face_cache_refresh_completed employee_id=%s enrollment_count=%s last_enrolled_at=%s",
+        employee_id,
+        len(embeddings),
+        payload.get("last_enrolled_at"),
+    )
 
     return {
         "employee_id": employee_id,
@@ -104,6 +176,7 @@ def refresh_employee_cache(employee_id: str, face_store: FaceStore, settings: Se
 def cache_is_stale(employee_id: str, face_store: FaceStore, settings: Settings) -> bool:
     cached_at = face_store.employee_cache_refreshed_at(employee_id)
     if not cached_at:
+        logger.info("face_cache_stale employee_id=%s reason=missing_cache", employee_id)
         return True
 
     try:
@@ -111,9 +184,23 @@ def cache_is_stale(employee_id: str, face_store: FaceStore, settings: Settings) 
         if cached_time.tzinfo is None:
             cached_time = cached_time.replace(tzinfo=timezone.utc)
     except ValueError:
+        logger.info(
+            "face_cache_stale employee_id=%s reason=invalid_cached_at cached_at=%s",
+            employee_id,
+            cached_at,
+        )
         return True
 
-    return (datetime.now(timezone.utc) - cached_time).total_seconds() > settings.face_cache_ttl_seconds
+    age_seconds = (datetime.now(timezone.utc) - cached_time).total_seconds()
+    stale = age_seconds > settings.face_cache_ttl_seconds
+    logger.info(
+        "face_cache_checked employee_id=%s stale=%s age_seconds=%s ttl_seconds=%s",
+        employee_id,
+        stale,
+        round(age_seconds, 2),
+        settings.face_cache_ttl_seconds,
+    )
+    return stale
 
 
 @app.get("/health")
@@ -122,6 +209,7 @@ def health(settings: Settings = Depends(get_settings)) -> dict:
         "ok": True,
         "database_path": str(settings.database_path),
         "debug_frame_path": str(settings.debug_frame_path),
+        "laravel_base_url": settings.laravel_base_url,
         "model_name": settings.model_name,
         "detector_backend": settings.detector_backend,
         "fallback_detector_backend": settings.fallback_detector_backend,
@@ -140,8 +228,16 @@ async def recognize_face(
     settings: Settings = Depends(get_settings),
     face_store: FaceStore = Depends(get_store),
 ) -> dict:
+    logger.info("recognize_request_started filename=%s content_type=%s", image.filename, image.content_type)
     content, rgb = await read_upload_image(image)
-    return recognize(content, rgb, face_store, settings)
+    result = recognize(content, rgb, face_store, settings)
+    logger.info(
+        "recognize_request_completed matched=%s employee_id=%s message=%s",
+        result.get("matched"),
+        result.get("employee_id"),
+        result.get("message"),
+    )
+    return result
 
 
 @app.post("/api/employees/{employee_id}/verify", response_model=RecognizeResponse)
@@ -151,11 +247,24 @@ async def verify_employee(
     settings: Settings = Depends(get_settings),
     face_store: FaceStore = Depends(get_store),
 ) -> dict:
+    logger.info(
+        "verify_request_started employee_id=%s filename=%s content_type=%s",
+        employee_id,
+        image.filename,
+        image.content_type,
+    )
     if not face_store.employee_embeddings(employee_id) or cache_is_stale(employee_id, face_store, settings):
         refresh_employee_cache(employee_id, face_store, settings)
 
     content, rgb = await read_upload_image(image)
-    return verify_employee_face(content, rgb, employee_id, face_store, settings)
+    result = verify_employee_face(content, rgb, employee_id, face_store, settings)
+    logger.info(
+        "verify_request_completed employee_id=%s matched=%s message=%s",
+        employee_id,
+        result.get("matched"),
+        result.get("message"),
+    )
+    return result
 
 
 @app.post("/api/employees/{employee_id}/refresh-cache", response_model=CacheRefreshResponse)
@@ -164,6 +273,7 @@ def refresh_employee_face_cache(
     settings: Settings = Depends(get_settings),
     face_store: FaceStore = Depends(get_store),
 ) -> dict:
+    logger.info("manual_cache_refresh_requested employee_id=%s", employee_id)
     return refresh_employee_cache(employee_id, face_store, settings)
 
 
@@ -177,6 +287,15 @@ async def enroll_employee_face(
     settings: Settings = Depends(get_settings),
     face_store: FaceStore = Depends(get_store),
 ) -> dict:
+    logger.info(
+        "enroll_request_started employee_id=%s pose_label=%s reset_existing_form=%s reset_existing_query=%s filename=%s content_type=%s",
+        employee_id,
+        pose_label,
+        reset_existing_form,
+        reset_existing_query,
+        image.filename,
+        image.content_type,
+    )
     content, rgb = await read_upload_image(image)
     analysis = analyze_single_face(content, rgb, settings)
     reset_existing = reset_existing_form or reset_existing_query
@@ -185,6 +304,7 @@ async def enroll_employee_face(
         reset_existing = face_store.employee_status(employee_id)["enrollment_count"] >= settings.min_enrollments
 
     if reset_existing:
+        logger.info("enroll_reset_existing employee_id=%s", employee_id)
         laravel_json_request(
             f"/api/face/employees/{employee_id}/embeddings",
             settings,
@@ -209,6 +329,14 @@ async def enroll_employee_face(
     refresh_employee_cache(employee_id, face_store, settings)
     status = face_store.employee_status(employee_id)
     ready = status["enrollment_count"] >= settings.min_enrollments
+    logger.info(
+        "enroll_request_completed employee_id=%s enrollment_count=%s required_count=%s ready=%s reset_existing=%s",
+        employee_id,
+        status["enrollment_count"],
+        settings.min_enrollments,
+        ready,
+        reset_existing,
+    )
 
     return {
         "employee_id": employee_id,
@@ -232,6 +360,7 @@ def employee_face_status(
     settings: Settings = Depends(get_settings),
     face_store: FaceStore = Depends(get_store),
 ) -> dict:
+    logger.info("face_status_requested employee_id=%s", employee_id)
     refresh_employee_cache(employee_id, face_store, settings)
     status = face_store.employee_status(employee_id)
     return {
@@ -246,6 +375,7 @@ def delete_employee_faces(
     employee_id: str,
     face_store: FaceStore = Depends(get_store),
 ) -> dict:
+    logger.info("face_delete_requested employee_id=%s", employee_id)
     return {
         "employee_id": employee_id,
         "deleted": face_store.delete_employee(employee_id),

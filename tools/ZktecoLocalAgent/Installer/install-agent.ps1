@@ -1,6 +1,6 @@
 param(
     [string]$InstallDir = "$env:LOCALAPPDATA\ZktecoLocalAgent",
-    [string]$ApiBaseUrl = "http://attendancemonitoring.test/api/zkteco",
+    [string]$ApiBaseUrl = "http://127.0.0.1:8000/api/zkteco",
     [string]$ScannerToken = "",
     [string]$LocalListenUrl = "http://127.0.0.1:8765",
     [string]$DeviceSerial = "ZKTECO-LOCAL",

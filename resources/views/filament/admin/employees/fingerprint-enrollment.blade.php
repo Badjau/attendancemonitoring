@@ -124,27 +124,38 @@
         <div class="mb-3 flex items-center justify-between gap-3">
             <div>
                 <div class="text-sm font-semibold text-gray-950 dark:text-white">Fingerprint preview</div>
-                <div class="mt-1 text-xs text-gray-500 dark:text-gray-400" x-text="fingerprintPreviewImage ? 'Latest scan' : 'Waiting for scan'"></div>
+                <div class="mt-1 text-xs text-gray-500 dark:text-gray-400" x-text="enrollmentScanImages.length ? `${enrollmentScanImages.length} scan(s) captured` : 'Waiting for scan'"></div>
             </div>
             <div
                 class="rounded-full px-3 py-1 text-xs font-semibold"
-                :class="fingerprintPreviewImage ? 'bg-success-50 text-success-700 dark:bg-success-950 dark:text-success-300' : 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300'"
+                :class="enrollmentScanImages.length ? 'bg-success-50 text-success-700 dark:bg-success-950 dark:text-success-300' : 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300'"
             >
-                <span x-text="fingerprintPreviewImage ? 'Preview ready' : 'No image'"></span>
+                <span x-text="enrollmentScanImages.length ? 'Preview ready' : 'No image'"></span>
             </div>
         </div>
 
-        <div class="flex aspect-[4/3] items-center justify-center overflow-hidden rounded-lg border border-dashed border-gray-300 bg-gray-50 dark:border-gray-700 dark:bg-gray-950">
-            <template x-if="fingerprintPreviewImage">
-                <img
-                    :src="fingerprintPreviewImage"
-                    alt="Latest fingerprint scan preview"
-                    class="h-full w-full object-contain p-3"
-                />
+        <div class="min-h-56 rounded-lg border border-dashed border-gray-300 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-950">
+            <template x-if="enrollmentScanImages.length > 0">
+                <div class="grid h-full min-h-48 grid-cols-1 gap-3 sm:grid-cols-3">
+                    <template x-for="(scan, index) in enrollmentScanImages" :key="scan.id || (index + '-' + enrollmentScanImageSrc(scan).slice(-12))">
+                        <div class="flex min-h-48 flex-col overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900">
+                            <div class="border-b border-gray-200 px-2 py-1 text-xs font-semibold text-gray-500 dark:border-gray-700 dark:text-gray-400">
+                                Scan <span x-text="index + 1"></span>
+                            </div>
+                            <div class="flex flex-1 items-center justify-center p-1">
+                                <img
+                                    :src="enrollmentScanImageSrc(scan)"
+                                    :alt="`Fingerprint scan ${index + 1}`"
+                                    class="h-44 w-full object-contain"
+                                />
+                            </div>
+                        </div>
+                    </template>
+                </div>
             </template>
 
-            <template x-if="! fingerprintPreviewImage">
-                <div class="px-4 text-center text-sm font-medium text-gray-500 dark:text-gray-400">
+            <template x-if="enrollmentScanImages.length === 0">
+                <div class="flex min-h-48 items-center justify-center px-4 text-center text-sm font-medium text-gray-500 dark:text-gray-400">
                     Scan a selected finger to show the latest fingerprint image here.
                 </div>
             </template>
@@ -171,6 +182,16 @@
         >
             <span x-show="! submittingEnrollment">Save fingerprint</span>
             <span x-show="submittingEnrollment">Saving...</span>
+        </button>
+
+        <button
+            type="button"
+            class="fi-btn fi-btn-size-md fi-color-gray"
+            x-show="zktecoLoading || enrollmentCaptured"
+            :disabled="submittingEnrollment"
+            @click="cancelEnrollment"
+        >
+            Cancel scan
         </button>
     </div>
 </div>
