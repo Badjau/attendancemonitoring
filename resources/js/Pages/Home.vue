@@ -17,6 +17,15 @@ const props = defineProps<{
         time_out_start: string
         duplicate_scan_window_seconds: string
         show_face_attendance_button: boolean
+        show_scan_status_messages: boolean
+    }
+    scanStatusMessages: {
+        idle: string
+        rfid_not_recognized: string
+        fingerprint_waiting: string
+        fingerprint_not_found: string
+        fingerprint_matched: string
+        attendance_recorded: string
     }
     zktecoBridgeUrl: string
 }>()
@@ -127,6 +136,7 @@ onUnmounted(() => {
                 <CameraCard
                     :employees="props.employeesWithFaces"
                     :attendance-schedule="props.attendanceSchedule"
+                    :scan-status-messages="props.scanStatusMessages"
                     :zkteco-bridge-url="props.zktecoBridgeUrl"
                     @employee-verified="setActiveBranch"
                 />

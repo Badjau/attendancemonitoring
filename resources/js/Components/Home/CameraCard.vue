@@ -41,11 +41,22 @@ type AttendanceSchedule = {
     time_out_start: string
     duplicate_scan_window_seconds: string
     show_face_attendance_button: boolean
+    show_scan_status_messages: boolean
 }
+type ScanStatusMessages = {
+    idle: string
+    rfid_not_recognized: string
+    fingerprint_waiting: string
+    fingerprint_not_found: string
+    fingerprint_matched: string
+    attendance_recorded: string
+}
+type ScannerStatusTone = 'default' | 'error'
 
 const props = defineProps<{
     employees: VerifiedEmployee[]
     attendanceSchedule: AttendanceSchedule
+    scanStatusMessages: ScanStatusMessages
     zktecoBridgeUrl: string
 }>()
 
@@ -77,6 +88,8 @@ const isVideoReady = ref(false)
 const isCameraActive = ref(false)
 const isSilentCameraCapture = ref(false)
 const faceStatusText = ref('Face verification ready.')
+const scannerStatusText = ref(props.scanStatusMessages.idle)
+const scannerStatusTone = ref<ScannerStatusTone>('default')
 
 const currentTime = ref('')
 const currentDate = ref('')
@@ -96,10 +109,12 @@ let clockSyncInterval: ReturnType<typeof setInterval>
 let focusInterval: ReturnType<typeof setInterval>
 let faceDetectionInterval: ReturnType<typeof setInterval> | null = null
 let autoFingerprintTimeout: ReturnType<typeof setTimeout> | null = null
+let scannerStatusResetTimeout: ReturnType<typeof setTimeout> | null = null
 let rfidTimeout: any = null
 let isAutoFingerprintScanActive = false
 let autoFingerprintScanVersion = 0
 let zktecoEvents: EventSource | null = null
+let scannerStatusHoldUntil = 0
 
 const lastScannedTime = ref(0)
 const SCAN_COOLDOWN_MS = 1000
@@ -128,6 +143,51 @@ const processingLabel = computed(() =>
         ? faceStatusText.value
         : 'Processing, please wait...',
 )
+const scanStatusMessage = (key: keyof ScanStatusMessages): string =>
+    props.scanStatusMessages[key]
+const setScannerStatus = (
+    key: keyof ScanStatusMessages,
+    options: { tone?: ScannerStatusTone; force?: boolean } = {},
+) => {
+    const heldKeys: Array<keyof ScanStatusMessages> = [
+        'idle',
+        'fingerprint_waiting',
+    ]
+
+    if (
+        !options.force &&
+        Date.now() < scannerStatusHoldUntil &&
+        heldKeys.includes(key)
+    ) {
+        return
+    }
+
+    if (scannerStatusResetTimeout) {
+        clearTimeout(scannerStatusResetTimeout)
+        scannerStatusResetTimeout = null
+    }
+
+    scannerStatusHoldUntil = 0
+    scannerStatusText.value = scanStatusMessage(key)
+    scannerStatusTone.value = options.tone ?? 'default'
+}
+const setTemporaryScannerError = (
+    key: 'rfid_not_recognized' | 'fingerprint_not_found',
+) => {
+    if (scannerStatusResetTimeout) {
+        clearTimeout(scannerStatusResetTimeout)
+    }
+
+    scannerStatusHoldUntil = Date.now() + 3000
+    scannerStatusText.value = scanStatusMessage(key)
+    scannerStatusTone.value = 'error'
+    scannerStatusResetTimeout = setTimeout(() => {
+        scannerStatusHoldUntil = 0
+        scannerStatusText.value = scanStatusMessage('idle')
+        scannerStatusTone.value = 'default'
+        scannerStatusResetTimeout = null
+    }, 3000)
+}
 
 const employeeFullName = (employee: VerifiedEmployee): string =>
     `${employee.first_name} ${employee.last_name}`.trim()
@@ -421,15 +481,20 @@ const openCameraForCapture = async (
 }
 
 const handleTimeAction = async (actionName: AttendanceAction) => {
+    if (attendanceType.value === actionName) {
+        resetAttendanceSelection()
+        return
+    }
+
     pauseAutoFingerprintScan()
     await ensureAttendanceFlowReady(actionName)
     employeePassword.value = ''
     hasTypedEmployeePassword.value = false
-    faceStatusText.value = 'RFID and fingerprint scanners are listening.'
+    setScannerStatus('idle')
     scheduleAutoFingerprintScan(0)
 }
 
-const resetAttendanceSelection = () => {
+const resetAttendanceSelection = (resetScannerStatus = true) => {
     attendanceType.value = ''
     showEmployeeIdInputField.value = true
     employeePassword.value = ''
@@ -437,6 +502,9 @@ const resetAttendanceSelection = () => {
     isLoading.value = false
     processingMethod.value = ''
     faceStatusText.value = 'Face verification ready.'
+    if (resetScannerStatus) {
+        setScannerStatus('idle')
+    }
     stopCamera()
     setTimeout(() => forceRFIDFocus(), 50)
     scheduleAutoFingerprintScan()
@@ -679,10 +747,14 @@ const verifyEmployeeIdentifier = async (
 
         return employee
     } catch (error: any) {
-        const message =
+        const responseMessage =
             error?.response?.data?.message ??
             Object.values(error?.response?.data?.errors ?? {})?.[0]?.[0] ??
             'Employee is not existing.'
+        const message =
+            method === 'rfid'
+                ? scanStatusMessage('rfid_not_recognized')
+                : responseMessage
 
         toast.add({
             severity: 'error',
@@ -691,8 +763,12 @@ const verifyEmployeeIdentifier = async (
             life: 5000,
         })
 
-        faceStatusText.value = message
-        resetAttendanceSelection()
+        if (method === 'rfid') {
+            setTemporaryScannerError('rfid_not_recognized')
+        } else {
+            faceStatusText.value = message
+        }
+        resetAttendanceSelection(method !== 'rfid')
 
         return null
     }
@@ -758,16 +834,16 @@ const verifyLiveFaceMatchesEmployee = async (
 const verifyEmployeeAndSubmit = async (
     employeeIdentifier: string,
     method: AttendanceMethod,
-): Promise<void> => {
+): Promise<boolean> => {
     const employee = await verifyEmployeeIdentifier(employeeIdentifier, method)
-    if (!employee) return
+    if (!employee) return false
 
     await openCameraForCapture({ loadFaceVerification: true })
 
     const matchedFace = await verifyLiveFaceMatchesEmployee(employee)
     if (!matchedFace) {
         resetAttendanceSelection()
-        return
+        return false
     }
 
     await submitAttendance(
@@ -776,6 +852,8 @@ const verifyEmployeeAndSubmit = async (
         employeeFullName(employee),
         matchedFace.image,
     )
+
+    return true
 }
 
 const submitFaceAttendance = async () => {
@@ -857,7 +935,12 @@ const submitRFIDAttendance = async (rfid: any) => {
 
     try {
         startProcessing('rfid', 'Processing RFID attendance...')
-        await verifyEmployeeAndSubmit(scannedRfid, 'rfid')
+        setScannerStatus('idle')
+        const recorded = await verifyEmployeeAndSubmit(scannedRfid, 'rfid')
+        if (!recorded) {
+            stopProcessing()
+            scheduleAutoFingerprintScan()
+        }
     } catch (e) {
         console.error('Error submitting RFID attendance:', e)
         stopProcessing()
@@ -884,10 +967,15 @@ const submitManualAttendance = async () => {
 
     try {
         startProcessing('keypad', 'Processing keypad attendance...')
-        await verifyEmployeeAndSubmit(password, 'keypad')
-        employeePassword.value = ''
-        hasTypedEmployeePassword.value = false
-        setTimeout(() => forceRFIDFocus(), 50)
+        const recorded = await verifyEmployeeAndSubmit(password, 'keypad')
+        if (recorded) {
+            employeePassword.value = ''
+            hasTypedEmployeePassword.value = false
+            setTimeout(() => forceRFIDFocus(), 50)
+        } else {
+            stopProcessing()
+            scheduleAutoFingerprintScan()
+        }
     } catch (e) {
         console.error('Error submitting keypad attendance:', e)
         stopProcessing()
@@ -940,7 +1028,7 @@ const runFingerprintAttendance = async (
         if (!automatic) {
             startProcessing('fingerprint', 'Connecting to Fingerprint scanner...')
         } else {
-            faceStatusText.value = 'Fingerprint scanner ready.'
+            setScannerStatus('idle')
         }
 
         const commandId = createOfflineId()
@@ -950,16 +1038,7 @@ const runFingerprintAttendance = async (
             launchBridge: !automatic,
         })
 
-        if (!automatic) {
-            toast.add({
-                severity: 'info',
-                summary: 'Fingerprint',
-                detail: 'Scan your registered finger on the scanner.',
-                life: 8000,
-            })
-        }
-
-        faceStatusText.value = 'Scan your registered finger on the scanner.'
+        setScannerStatus('idle')
         await pollZktecoBridgeStatus(
             commandId,
             automatic ? AUTO_FINGERPRINT_SCAN_WINDOW_MS : 30000,
@@ -970,6 +1049,7 @@ const runFingerprintAttendance = async (
         return true
     } catch (error) {
         if (!automatic) {
+            setTemporaryScannerError('fingerprint_not_found')
             toast.add({
                 severity: 'error',
                 summary: 'Fingerprint',
@@ -1058,17 +1138,33 @@ const pollZktecoBridgeStatus = async (
 
             if (status.message && status.message !== lastMessage) {
                 lastMessage = status.message
-                faceStatusText.value = status.message
+            }
+
+            if (status.state === 'waiting_for_scan') {
+                if (
+                    String(status.message ?? '')
+                        .toLowerCase()
+                        .includes('not recognized')
+                ) {
+                    setTemporaryScannerError('fingerprint_not_found')
+                    void cancelZktecoCommand(commandId)
+                    finish()
+                    return
+                }
+
+                setScannerStatus('idle')
+                return
             }
 
             if (status.state === 'matched') {
-                faceStatusText.value = 'Fingerprint matched. Starting facial verification...'
+                setScannerStatus('fingerprint_matched')
                 return
             }
 
             if (status.state === 'awaiting_browser_photo' && !attendancePhotoSent) {
                 attendancePhotoSent = true
-                faceStatusText.value = 'Fingerprint matched. Verifying face...'
+                setScannerStatus('fingerprint_matched')
+                faceStatusText.value = 'Verifying face...'
 
                 const employeeIdentifier =
                     status.employee_id || status.data?.employee?.employee_id
@@ -1123,6 +1219,7 @@ const pollZktecoBridgeStatus = async (
             }
 
             if (status.state === 'success') {
+                setScannerStatus('attendance_recorded')
                 if (status.employee || status.data?.employee) {
                     emit('employeeVerified', status.employee || status.data.employee)
                 }
@@ -1147,12 +1244,13 @@ const pollZktecoBridgeStatus = async (
                     is_birthday: Boolean(status.is_birthday),
                     attendance_type: status.attendance_type || attendanceType.value,
                 })
-                resetAttendanceSelection()
+                resetAttendanceSelection(false)
                 finish()
                 return
             }
 
             if (status.state === 'error') {
+                setTemporaryScannerError('fingerprint_not_found')
                 fail(new Error(status.message || 'Fingerprint attendance failed.'))
             }
         }
@@ -1323,7 +1421,8 @@ const submitAttendance = async (
             detail: result.message,
             life: 10000,
         })
-        resetAttendanceSelection()
+        setScannerStatus('attendance_recorded')
+        resetAttendanceSelection(false)
         return
     }
 
@@ -1335,7 +1434,8 @@ const submitAttendance = async (
     })
 
     announceAttendanceGreeting(result.payload?.greeting)
-    resetAttendanceSelection()
+    setScannerStatus('attendance_recorded')
+    resetAttendanceSelection(false)
 }
 const base64ToBlob = (base64: string, mimeType: string): Blob => {
     const byteString = atob(base64.split(',')[1])
@@ -1389,6 +1489,7 @@ onUnmounted(() => {
     clearInterval(interval)
     clearInterval(clockSyncInterval)
     clearInterval(focusInterval)
+    if (scannerStatusResetTimeout) clearTimeout(scannerStatusResetTimeout)
     clearAutoFingerprintScan()
     closeZktecoEvents()
     stopCamera()
@@ -1565,6 +1666,24 @@ onUnmounted(() => {
                 </button>
 
                 <div
+                    v-if="props.attendanceSchedule.show_scan_status_messages"
+                    class="mt-5 rounded-2xl border-2 border-brand-stroke bg-brand-headline px-4 py-3 text-center shadow-[3px_3px_0px_0px_#001e1d]"
+                    :class="{
+                        'border-red-700 bg-red-100 shadow-[3px_3px_0px_0px_#7f1d1d]':
+                            scannerStatusTone === 'error',
+                    }"
+                >
+                    <p
+                        class="text-brand-stroke text-xs font-black uppercase tracking-wide"
+                        :class="{
+                            'text-red-800': scannerStatusTone === 'error',
+                        }"
+                    >
+                        {{ scannerStatusText }}
+                    </p>
+                </div>
+
+                <div
                     v-if="isProcessing"
                     class="mt-5 flex items-center gap-3 rounded-2xl border-2 border-brand-stroke bg-brand-headline px-4 py-3 text-left shadow-[3px_3px_0px_0px_#001e1d]"
                 >
@@ -1657,14 +1776,10 @@ onUnmounted(() => {
                     </div>
 
                     <p
-                        v-if="showEmployeeIdInputField"
-                        class="text-brand-bg text-center text-xs font-black uppercase tracking-wide"
-                    >
-                        RFID and fingerprint scanners are listening.
-                    </p>
-
-                    <p
-                        v-else-if="faceStatusText !== 'Face verification ready.'"
+                        v-if="
+                            !showEmployeeIdInputField &&
+                            faceStatusText !== 'Face verification ready.'
+                        "
                         class="text-brand-bg text-xs font-black uppercase tracking-wide"
                     >
                         {{ faceStatusText }}

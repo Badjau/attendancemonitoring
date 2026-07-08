@@ -27,6 +27,7 @@ class HomeController extends Controller
             'announcements' => $announcements,
             'employeesWithFaces' => $employeesWithFaces,
             'attendanceSchedule' => $this->attendanceScheduleSettings->toArray(),
+            'scanStatusMessages' => $this->attendanceScheduleSettings->scanStatusMessages(),
             'zktecoBridgeUrl' => config('services.zkteco.bridge_url'),
         ]);
     }

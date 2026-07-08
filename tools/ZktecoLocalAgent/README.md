@@ -10,6 +10,7 @@ Windows tray/background agent for scanner PCs. It exposes a local HTTP API on `h
 - Caches templates in SQLite
 - Loads templates into the ZKTeco SDK matcher
 - Sends enrollment and attendance results back to Laravel
+- Probes the scanner while connected and automatically recovers from normal USB unplug/replug events
 
 ## Requirements
 
@@ -69,12 +70,15 @@ Build order matters:
 
 1. Copy the ZKTeco DLLs into `tools\ZktecoLocalAgent\lib\x86`
 2. Publish the project
+3. Run the installer
 
 Publish command:
 
 ```powershell
 dotnet publish .\tools\ZktecoLocalAgent\ZktecoLocalAgent.csproj -c Release -r win-x86 --self-contained true -o .\tools\ZktecoLocalAgent\publish
 ```
+
+`dotnet build` is useful as a compile check, but the installer copies from `tools\ZktecoLocalAgent\publish`. Always run `dotnet publish` before reinstalling the agent.
 
 ## Install On The Scanner PC
 
@@ -90,6 +94,7 @@ cd C:\laragon\www\attendancemonitoring\
 
 What the installer does:
 
+- Stops any running `ZktecoLocalAgent.exe` process before copying files
 - Copies the published files to `%LOCALAPPDATA%\ZktecoLocalAgent`
 - Writes `appsettings.json`
 - Registers the app to start on Windows logon
@@ -114,6 +119,10 @@ http://127.0.0.1:8765/health
 ```
 
 If the agent is running, you should get a JSON response.
+
+When the scanner is connected and the SDK handle is valid, `ok`, `scanner_available`, and `sdk_available` should be `true`.
+If the scanner is unplugged, the agent re-probes the SDK handle every few seconds and `/health` should change to `ok: false`, `scanner_available: false`, and `sdk_available: false` during the disconnect window.
+After the scanner is plugged back in, the agent keeps retrying with exponential backoff and should return `/health` to `ok: true` without a manual restart.
 
 ### 2. Check Current Status
 
@@ -146,6 +155,9 @@ The tray menu also includes:
 - `Restart`
 - `Open log folder`
 - `Exit`
+
+The `Restart` action is still available as a manual recovery option, but normal scanner unplug/replug cases should not require it.
+If the native SDK remains wedged through a prolonged disconnect or repeated reconnect failures, the agent requests the same clean relaunch path used by the tray `Restart` action.
 
 ## Local API Endpoints
 
@@ -216,6 +228,18 @@ If it exits immediately, check:
 - ZKTeco DLL presence
 - log files
 
+To reinstall without hiding startup errors, run the installer with `-NoStart`, then start the installed exe from the same PowerShell window:
+
+```powershell
+.\tools\ZktecoLocalAgent\Installer\install-agent.ps1 `
+  -ApiBaseUrl "https://YOUR-APP-URL/api/zkteco" `
+  -ScannerToken "YOUR-SCANNER-TOKEN" `
+  -DeviceSerial "ZKTECO-LOCAL" `
+  -NoStart
+
+& "$env:LOCALAPPDATA\ZktecoLocalAgent\ZktecoLocalAgent.exe"
+```
+
 ## Troubleshooting
 
 ### `libzkfpcsharp.dll` missing
@@ -236,6 +260,18 @@ Check:
 
 - `%LOCALAPPDATA%\ZktecoLocalAgent\logs`
 - `http://127.0.0.1:8765/health`
+
+### Scanner unplug or reconnect problems
+
+The agent no longer trusts stale SDK state after a successful connection. While the scanner is nominally connected, it periodically probes the open device handle. A failed probe forces a full SDK teardown, sets `/health` false, and returns to the reconnect loop.
+
+Expected behavior:
+
+- unplugging the scanner changes `/health` to `ok: false` within the probe interval
+- plugging the scanner back in changes `/health` back to `ok: true` after a reconnect attempt succeeds
+- prolonged disconnects or repeated reconnect failures trigger one clean agent restart fallback
+
+Manual tray restart should only be needed if Windows or the scanner driver does not expose the device again after replugging.
 
 ### Browser cannot connect to `127.0.0.1:8765`
 

@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "dgSpecHash": "My6IGtslNgA=",
+  "dgSpecHash": "GS89W/p8VBc=",
   "success": true,
   "projectFilePath": "C:\\laragon\\www\\attendancemonitoring\\tools\\ZktecoLocalAgent\\ZktecoLocalAgent.csproj",
   "expectedPackageFiles": [
@@ -35,10 +35,9 @@
     "C:\\Users\\Elijah\\.nuget\\packages\\system.memory\\4.5.3\\system.memory.4.5.3.nupkg.sha512",
     "C:\\Users\\Elijah\\.nuget\\packages\\system.text.encodings.web\\8.0.0\\system.text.encodings.web.8.0.0.nupkg.sha512",
     "C:\\Users\\Elijah\\.nuget\\packages\\system.text.json\\8.0.0\\system.text.json.8.0.0.nupkg.sha512",
-    "C:\\Users\\Elijah\\.nuget\\packages\\microsoft.netcore.app.ref\\8.0.28\\microsoft.netcore.app.ref.8.0.28.nupkg.sha512",
-    "C:\\Users\\Elijah\\.nuget\\packages\\microsoft.windowsdesktop.app.ref\\8.0.28\\microsoft.windowsdesktop.app.ref.8.0.28.nupkg.sha512",
-    "C:\\Users\\Elijah\\.nuget\\packages\\microsoft.aspnetcore.app.ref\\8.0.28\\microsoft.aspnetcore.app.ref.8.0.28.nupkg.sha512",
-    "C:\\Users\\Elijah\\.nuget\\packages\\microsoft.netcore.app.host.win-x86\\8.0.28\\microsoft.netcore.app.host.win-x86.8.0.28.nupkg.sha512"
+    "C:\\Users\\Elijah\\.nuget\\packages\\microsoft.netcore.app.runtime.win-x86\\8.0.28\\microsoft.netcore.app.runtime.win-x86.8.0.28.nupkg.sha512",
+    "C:\\Users\\Elijah\\.nuget\\packages\\microsoft.windowsdesktop.app.runtime.win-x86\\8.0.28\\microsoft.windowsdesktop.app.runtime.win-x86.8.0.28.nupkg.sha512",
+    "C:\\Users\\Elijah\\.nuget\\packages\\microsoft.aspnetcore.app.runtime.win-x86\\8.0.28\\microsoft.aspnetcore.app.runtime.win-x86.8.0.28.nupkg.sha512"
   ],
   "logs": []
 }

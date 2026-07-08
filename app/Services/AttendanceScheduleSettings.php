@@ -13,6 +13,13 @@ class AttendanceScheduleSettings
         'time_out_start' => '18:00',
         'duplicate_scan_window_seconds' => '60',
         'show_face_attendance_button' => false,
+        'show_scan_status_messages' => true,
+        'scan_status_idle' => 'RFID and fingerprint scanners are listening.',
+        'scan_status_rfid_not_recognized' => 'RFID card not recognized.',
+        'scan_status_fingerprint_waiting' => 'Scan your registered finger on the scanner.',
+        'scan_status_fingerprint_not_found' => 'Fingerprint not found.',
+        'scan_status_fingerprint_matched' => 'Fingerprint matched. Starting facial verification...',
+        'scan_status_attendance_recorded' => 'Attendance recorded successfully.',
     ];
 
     private static ?array $cachedSettings = null;
@@ -25,7 +32,7 @@ class AttendanceScheduleSettings
     }
 
     /**
-     * @return array<string, string>
+     * @return array<string, bool|string>
      */
     public function toArray(): array
     {
@@ -34,6 +41,22 @@ class AttendanceScheduleSettings
             'time_out_start' => $this->setting('time_out_start'),
             'duplicate_scan_window_seconds' => (string) $this->duplicateScanWindowSeconds(),
             'show_face_attendance_button' => $this->showFaceAttendanceButton(),
+            'show_scan_status_messages' => $this->showScanStatusMessages(),
+        ];
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    public function scanStatusMessages(): array
+    {
+        return [
+            'idle' => $this->textSetting('scan_status_idle'),
+            'rfid_not_recognized' => $this->textSetting('scan_status_rfid_not_recognized'),
+            'fingerprint_waiting' => $this->textSetting('scan_status_fingerprint_waiting'),
+            'fingerprint_not_found' => $this->textSetting('scan_status_fingerprint_not_found'),
+            'fingerprint_matched' => $this->textSetting('scan_status_fingerprint_matched'),
+            'attendance_recorded' => $this->textSetting('scan_status_attendance_recorded'),
         ];
     }
 
@@ -65,6 +88,17 @@ class AttendanceScheduleSettings
         return filter_var($value, FILTER_VALIDATE_BOOLEAN);
     }
 
+    public function showScanStatusMessages(): bool
+    {
+        $value = $this->getAllSettings()['show_scan_status_messages'] ?? self::DEFAULTS['show_scan_status_messages'];
+
+        if (is_bool($value)) {
+            return $value;
+        }
+
+        return filter_var($value, FILTER_VALIDATE_BOOLEAN);
+    }
+
     private function timeOutStartMinutes(): int
     {
         return $this->timeToMinutes($this->setting('time_out_start'));
@@ -82,6 +116,17 @@ class AttendanceScheduleSettings
 
         if (is_string($value) && filled($value)) {
             return Carbon::parse($value)->format('H:i');
+        }
+
+        return self::DEFAULTS[$key];
+    }
+
+    private function textSetting(string $key): string
+    {
+        $value = $this->getAllSettings()[$key] ?? null;
+
+        if (is_string($value) && filled(trim($value))) {
+            return trim($value);
         }
 
         return self::DEFAULTS[$key];

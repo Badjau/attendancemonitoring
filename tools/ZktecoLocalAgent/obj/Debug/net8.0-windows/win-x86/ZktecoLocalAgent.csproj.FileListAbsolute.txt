@@ -639,3 +639,8 @@ C:\laragon\www\attendancemonitoring\tools\ZktecoLocalAgent\obj\Debug\net8.0-wind
 C:\laragon\www\attendancemonitoring\tools\ZktecoLocalAgent\obj\Debug\net8.0-windows\win-x86\ZktecoLocalAgent.pdb
 C:\laragon\www\attendancemonitoring\tools\ZktecoLocalAgent\obj\Debug\net8.0-windows\win-x86\ZktecoLocalAgent.genruntimeconfig.cache
 C:\laragon\www\attendancemonitoring\tools\ZktecoLocalAgent\obj\Debug\net8.0-windows\win-x86\ref\ZktecoLocalAgent.dll
+C:\laragon\www\attendancemonitoring\storage\framework\testing\zk-agent-build\appsettings.json
+C:\laragon\www\attendancemonitoring\storage\framework\testing\zk-agent-build\lib\x86\libzkfp.dll
+C:\laragon\www\attendancemonitoring\storage\framework\testing\zk-agent-build\lib\x86\libzkfpcsharp.dll
+C:\laragon\www\attendancemonitoring\storage\framework\testing\zk-agent-build\lib\x86\ZKFPCap.dll
+C:\laragon\www\attendancemonitoring\storage\framework\testing\zk-agent-build\ZktecoLocalAgent.exe

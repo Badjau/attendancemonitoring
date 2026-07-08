@@ -210,7 +210,14 @@ const submitUnlock = async (
         )
 
         statusText.value = response.data.message ?? 'Timeclock unlocked.'
-        router.visit(response.data.redirect ?? '/')
+
+        const redirect = response.data.redirect ?? '/'
+        if (redirect.startsWith('/admin')) {
+            window.location.assign(redirect)
+            return
+        }
+
+        router.visit(redirect)
     } catch (error: any) {
         errorText.value = error?.response?.data?.message ?? 'Unlock failed.'
         statusText.value =
