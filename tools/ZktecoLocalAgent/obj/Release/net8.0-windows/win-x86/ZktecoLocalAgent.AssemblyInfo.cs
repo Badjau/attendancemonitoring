@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("ZktecoLocalAgent")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Release")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+3b2ad005f66e95e3b615abd057163e2ae71c594d")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+0bd04dd766ca6838b94969cd5aa561d0d67eed5f")]
 [assembly: System.Reflection.AssemblyProductAttribute("ZktecoLocalAgent")]
 [assembly: System.Reflection.AssemblyTitleAttribute("ZktecoLocalAgent")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

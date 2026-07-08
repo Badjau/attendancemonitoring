@@ -64,6 +64,9 @@ class EmployeeForm
                                 ->label('RFID UIDs')
                                 ->rules(['numeric', 'min:1'])
                                 ->autofocus()
+                                ->extraInputAttributes([
+                                    'x-on:keydown.enter.prevent.stop' => '$event.stopPropagation()',
+                                ])
                                 ->unique(ignoreRecord: true)
                                 ->helperText('Used for RFID attendance and timeclock unlock.'),
                         ]),
