@@ -1,7 +1,7 @@
 {
-  "version": 4,
+  "version": 3,
   "targets": {
-    "net8.0-windows": {
+    "net8.0-windows7.0": {
       "Microsoft.Data.Sqlite/8.0.7": {
         "type": "package",
         "dependencies": {
@@ -621,7 +621,7 @@
         }
       }
     },
-    "net8.0-windows/win-x86": {
+    "net8.0-windows7.0/win-x86": {
       "Microsoft.Data.Sqlite/8.0.7": {
         "type": "package",
         "dependencies": {
@@ -2098,7 +2098,7 @@
     }
   },
   "projectFileDependencyGroups": {
-    "net8.0-windows": [
+    "net8.0-windows7.0": [
       "Microsoft.Data.Sqlite >= 8.0.7",
       "Serilog.AspNetCore >= 8.0.1",
       "Serilog.Sinks.File >= 5.0.0"
@@ -2126,8 +2126,7 @@
         "https://api.nuget.org/v3/index.json": {}
       },
       "frameworks": {
-        "net8.0-windows": {
-          "framework": "net8.0-windows7.0",
+        "net8.0-windows7.0": {
           "targetAlias": "net8.0-windows",
           "projectReferences": {}
         }
@@ -2141,12 +2140,10 @@
         "enableAudit": "true",
         "auditLevel": "low",
         "auditMode": "direct"
-      },
-      "SdkAnalysisLevel": "10.0.300"
+      }
     },
     "frameworks": {
-      "net8.0-windows": {
-        "framework": "net8.0-windows7.0",
+      "net8.0-windows7.0": {
         "targetAlias": "net8.0-windows",
         "dependencies": {
           "Microsoft.Data.Sqlite": {
@@ -2175,19 +2172,15 @@
         "warn": true,
         "downloadDependencies": [
           {
-            "name": "Microsoft.AspNetCore.App.Ref",
+            "name": "Microsoft.AspNetCore.App.Runtime.win-x86",
             "version": "[8.0.28, 8.0.28]"
           },
           {
-            "name": "Microsoft.NETCore.App.Host.win-x86",
+            "name": "Microsoft.NETCore.App.Runtime.win-x86",
             "version": "[8.0.28, 8.0.28]"
           },
           {
-            "name": "Microsoft.NETCore.App.Ref",
-            "version": "[8.0.28, 8.0.28]"
-          },
-          {
-            "name": "Microsoft.WindowsDesktop.App.Ref",
+            "name": "Microsoft.WindowsDesktop.App.Runtime.win-x86",
             "version": "[8.0.28, 8.0.28]"
           }
         ],
@@ -2202,7 +2195,7 @@
             "privateAssets": "none"
           }
         },
-        "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\10.0.301/PortableRuntimeIdentifierGraph.json"
+        "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\8.0.422/PortableRuntimeIdentifierGraph.json"
       }
     },
     "runtimes": {

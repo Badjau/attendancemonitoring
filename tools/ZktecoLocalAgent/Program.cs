@@ -40,6 +40,7 @@ builder.Configuration.AddJsonFile("appsettings.json", optional: true);
 builder.Configuration.AddEnvironmentVariables("ZKTECO_AGENT_");
 builder.Services.Configure<AgentOptions>(builder.Configuration.GetSection("ZktecoAgent"));
 builder.Services.AddSingleton<TemplateCache>();
+builder.Services.AddSingleton<AgentRestartCoordinator>();
 builder.Services.AddSingleton<IZkFingerprintSdk, ZkFingerprintSdk>();
 builder.Services.AddSingleton<CommandCoordinator>();
 builder.Services.AddSingleton<TemplateSyncService>();
@@ -49,16 +50,18 @@ builder.Services.AddHttpClient<LaravelApiClient>()
     {
         var options = provider.GetRequiredService<IOptions<AgentOptions>>().Value;
 
-        return new HttpClientHandler
+        var handler = new SocketsHttpHandler();
+        if (options.AllowInvalidServerCertificate)
         {
-            ServerCertificateCustomValidationCallback = options.AllowInvalidServerCertificate
-                ? HttpClientHandler.DangerousAcceptAnyServerCertificateValidator
-                : null,
-        };
+            handler.SslOptions.RemoteCertificateValidationCallback = (_, _, _, _) => true;
+        }
+
+        return handler;
     });
 
 var app = builder.Build();
 var options = app.Services.GetRequiredService<IOptions<AgentOptions>>().Value;
+var restartCoordinator = app.Services.GetRequiredService<AgentRestartCoordinator>();
 app.Urls.Clear();
 app.Urls.Add(options.LocalListenUrl);
 
@@ -80,6 +83,12 @@ app.Use(async (context, next) =>
 
 app.MapGet("/health", (CommandCoordinator commands, TemplateSyncService sync) => Results.Ok(commands.Health(sync.CurrentRevision)));
 app.MapGet("/status", (CommandCoordinator commands) => Results.Ok(commands.Current));
+app.MapGet("/diagnostics", (CommandCoordinator commands, TemplateSyncService sync, IZkFingerprintSdk sdk) => Results.Ok(new
+{
+    status = commands.Current,
+    health = commands.Health(sync.CurrentRevision),
+    capture = sdk.CaptureDiagnostics,
+}));
 app.MapGet("/events", async (HttpContext context, CommandCoordinator commands) =>
 {
     var commandId = context.Request.Query["command_id"].ToString();
@@ -129,7 +138,7 @@ app.MapPost("/finalize-attendance", (AttendanceCommandRequest request, CommandCo
         ? Task.FromResult<IResult>(Results.UnprocessableEntity(new { message = "command_id is required." }))
         : commands.FinalizeAttendanceAsync(request.CommandId!, request, cancellationToken));
 
-using var tray = new AgentTray(app, options, logDirectory);
+using var tray = new AgentTray(app, options, logDirectory, restartCoordinator);
 await app.StartAsync();
 tray.Run();
 await app.StopAsync();
@@ -139,13 +148,16 @@ internal sealed class AgentTray : IDisposable
     private readonly WebApplication app;
     private readonly AgentOptions options;
     private readonly string logDirectory;
+    private readonly AgentRestartCoordinator restartCoordinator;
     private readonly NotifyIcon notifyIcon;
 
-    public AgentTray(WebApplication app, AgentOptions options, string logDirectory)
+    public AgentTray(WebApplication app, AgentOptions options, string logDirectory, AgentRestartCoordinator restartCoordinator)
     {
         this.app = app;
         this.options = options;
         this.logDirectory = logDirectory;
+        this.restartCoordinator = restartCoordinator;
+        this.restartCoordinator.RestartRequested += OnRestartRequested;
         notifyIcon = new NotifyIcon
         {
             Icon = SystemIcons.Application,
@@ -162,6 +174,7 @@ internal sealed class AgentTray : IDisposable
 
     public void Dispose()
     {
+        restartCoordinator.RestartRequested -= OnRestartRequested;
         notifyIcon.Visible = false;
         notifyIcon.Dispose();
     }
@@ -170,12 +183,7 @@ internal sealed class AgentTray : IDisposable
     {
         var menu = new ContextMenuStrip();
         menu.Items.Add("Status", null, (_, _) => Process.Start(new ProcessStartInfo($"{options.LocalListenUrl.TrimEnd('/')}/health") { UseShellExecute = true }));
-        menu.Items.Add("Restart", null, async (_, _) =>
-        {
-            await app.StopAsync();
-            Application.Exit();
-            Process.Start(new ProcessStartInfo(Application.ExecutablePath) { UseShellExecute = true });
-        });
+        menu.Items.Add("Restart", null, async (_, _) => await RestartAsync());
         menu.Items.Add("Open log folder", null, (_, _) => Process.Start(new ProcessStartInfo(logDirectory) { UseShellExecute = true }));
         menu.Items.Add("Exit", null, async (_, _) =>
         {
@@ -184,5 +192,17 @@ internal sealed class AgentTray : IDisposable
         });
 
         return menu;
+    }
+
+    private void OnRestartRequested(object? sender, AgentRestartRequestedEventArgs e)
+    {
+        _ = Task.Run(RestartAsync);
+    }
+
+    private async Task RestartAsync()
+    {
+        await app.StopAsync();
+        Application.Exit();
+        Process.Start(new ProcessStartInfo(Application.ExecutablePath) { UseShellExecute = true });
     }
 }

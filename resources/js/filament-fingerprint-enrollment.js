@@ -14,6 +14,7 @@ window.fingerprintEnrollment = ({
     enrollmentCaptured: false,
     enrollmentCommandId: '',
     enrollmentEvents: null,
+    enrollmentHealthTimer: null,
     fingerprintPreviewImage: '',
     enrollmentScanImages: [],
     enrollmentScanSequence: 0,
@@ -225,6 +226,64 @@ window.fingerprintEnrollment = ({
             this.enrollmentEvents.close()
             this.enrollmentEvents = null
         }
+
+        if (this.enrollmentHealthTimer) {
+            window.clearTimeout(this.enrollmentHealthTimer)
+            this.enrollmentHealthTimer = null
+        }
+    },
+
+    async agentHealth() {
+        const response = await fetch(
+            `${this.zktecoBridgeUrl.replace(/\/$/, '')}/health`,
+            {
+                headers: {
+                    Accept: 'application/json',
+                },
+            },
+        )
+
+        return this.responsePayload(response)
+    },
+
+    watchEnrollmentHealth(commandId) {
+        if (this.enrollmentHealthTimer) {
+            window.clearTimeout(this.enrollmentHealthTimer)
+        }
+
+        this.enrollmentHealthTimer = window.setTimeout(async () => {
+            if (
+                !this.zktecoLoading ||
+                this.enrollmentCaptured ||
+                this.enrollmentCommandId !== commandId
+            ) {
+                return
+            }
+
+            try {
+                const health = await this.agentHealth()
+                if (health && health.ok === false) {
+                    this.success = false
+                    this.zktecoLoading = false
+                    this.message = this.scannerMessage(
+                        health.message ||
+                            'Fingerprint scanner is not ready. Check the scanner connection and restart the local agent.',
+                    )
+                    this.closeEnrollmentEvents()
+                    return
+                }
+            } catch {
+                this.success = false
+                this.zktecoLoading = false
+                this.message =
+                    'Fingerprint agent stopped responding. Make sure the local agent is running on this PC.'
+                this.closeEnrollmentEvents()
+                return
+            }
+
+            this.message =
+                'Fingerprint scanner is still waiting. Lift and place the selected finger flat on the scanner.'
+        }, 15000)
     },
 
     listenToEnrollmentEvents(commandId) {
@@ -465,6 +524,7 @@ window.fingerprintEnrollment = ({
                     `Waiting for ${this.selectedFingerLabel}. Scan the same finger 3 times.`,
             )
             this.listenToEnrollmentEvents(commandId)
+            this.watchEnrollmentHealth(commandId)
         } catch (error) {
             if (this.enrollmentCommandId) {
                 await this.cancelEnrollmentCommand(this.enrollmentCommandId)

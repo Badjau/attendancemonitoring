@@ -72,13 +72,16 @@ class AttendanceService
 
     public function verifyEmployee(Request $request): array
     {
-        $employee = $request->attendance_method === AttendanceMethod::KEYPAD->value
+        $attendanceMethod = $request->attendance_method;
+        $employee = $attendanceMethod === AttendanceMethod::KEYPAD->value
             ? $this->findEmployeeByPassword($request->employee_id)
             : $this->findEmployeeByIdentifier($request->employee_id);
 
         if (! $employee) {
             throw ValidationException::withMessages([
-                'employee_id' => 'Employee is not existing.',
+                'employee_id' => $attendanceMethod === AttendanceMethod::RFID->value
+                    ? 'RFID card not recognized.'
+                    : 'Employee is not existing.',
             ]);
         }
 

@@ -262,7 +262,7 @@ window.faceRegistration = ({ employeeId, hasRegisteredFace = false }) => ({
             this.success = true
             this.message = payload.message || 'Enrollment capture saved.'
             this.statusText = this.ready
-                ? 'Face enrollment is ready. Save to finish.'
+                ? 'Face registration is complete. Click Done to close this modal.'
                 : `Capture ${this.enrollmentCount + 1} of ${this.requiredCount}.`
             this.capturedBlob = null
             this.capturedPreview = ''
@@ -284,6 +284,9 @@ window.faceRegistration = ({ employeeId, hasRegisteredFace = false }) => ({
 
     finish() {
         this.stopCamera()
+        this.success = true
+        this.message = 'Face registration is complete.'
+        this.statusText = 'Face registration is complete. You can continue on this employee page.'
 
         const modal = this.$root.closest('[id^="fi-"][id*="-action-"]')
 
@@ -296,17 +299,5 @@ window.faceRegistration = ({ employeeId, hasRegisteredFace = false }) => ({
                 }),
             )
         }
-
-        setTimeout(() => {
-            const url = new URL(window.location.href)
-
-            if (url.searchParams.has('redirect')) {
-                url.searchParams.delete('redirect')
-                window.location.replace(url.toString())
-                return
-            }
-
-            window.location.reload()
-        }, 350)
     },
 })

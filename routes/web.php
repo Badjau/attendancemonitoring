@@ -8,11 +8,18 @@ use App\Http\Controllers\EmployeeWebAuthnController;
 use App\Http\Controllers\HomeController;
 use App\Http\Controllers\TimeclockUnlockController;
 use App\Services\HomeService;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 
 Route::get('/health/database', DatabaseHealthController::class)
     ->name('health.database');
+
+Route::get('/csrf-token', function (Request $request) {
+    return response()
+        ->json(['token' => csrf_token()])
+        ->header('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
+})->name('csrf-token');
 
 Route::controller(TimeclockUnlockController::class)
     ->prefix('unlock')
@@ -41,6 +48,7 @@ Route::get('/face/diagnostics', fn (HomeService $homeService) => Inertia::render
 ]))->name('face.diagnostics');
 
 Route::get('/', [HomeController::class, 'home'])
+    ->middleware('timeclock.unlocked')
     ->name('home');
 
 Route::get('/offline-attendance', fn () => Inertia::render('OfflineAttendance/Index'))
@@ -56,6 +64,7 @@ Route::controller(AnnouncementController::class)
 
 // ROUTE FOR ATTENDANCE
 Route::controller(AttendanceController::class)
+    ->middleware('timeclock.unlocked')
     ->prefix('attendance')
     ->as('attendance.')
     ->group(function () {
@@ -67,6 +76,7 @@ Route::controller(AttendanceController::class)
 
 // ROUTE FOR EMPLOYEE WEB AUTHN (FINGERPRINT)
 Route::controller(EmployeeWebAuthnController::class)
+    ->middleware('timeclock.unlocked')
     ->prefix('attendance/fingerprint')
     ->as('attendance.fingerprint.')
     ->group(function () {

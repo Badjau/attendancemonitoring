@@ -177,7 +177,8 @@ const enrichRecordLocation = async (record) => {
  * @param {AttendanceRecord} record
  * @returns {Promise<{payload: any, record: AttendanceRecord}>}
  */
-const postAttendanceRecord = async (record) => {
+const postAttendanceRecord = async (record, options = {}) => {
+    const dispatchRecordedEvent = options.dispatchRecordedEvent ?? true
     const enrichedRecord = await enrichRecordLocation(record)
     const response = await fetch('/attendance/record-time-in', {
         method: 'POST',
@@ -210,11 +211,13 @@ const postAttendanceRecord = async (record) => {
         record: enrichedRecord,
     }
 
-    window.dispatchEvent(
-        new CustomEvent('attendance:recorded', {
-            detail: result,
-        }),
-    )
+    if (dispatchRecordedEvent) {
+        window.dispatchEvent(
+            new CustomEvent('attendance:recorded', {
+                detail: result,
+            }),
+        )
+    }
 
     return result
 }
@@ -284,11 +287,14 @@ const syncApi = {
         }
 
         try {
-            const { payload } = await postAttendanceRecord(data)
+            const { payload, record } = await postAttendanceRecord(data, {
+                dispatchRecordedEvent: false,
+            })
 
             return {
                 queued: false,
                 payload,
+                record,
             }
         } catch (error) {
             if (

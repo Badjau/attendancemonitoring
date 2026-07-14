@@ -54,10 +54,20 @@ public sealed class TemplateSyncService : BackgroundService
         {
             await commands.PublishAsync(new CommandEvent(null, AgentStates.Syncing, "Checking fingerprint template manifest."), cancellationToken);
             var manifest = await laravel.ManifestAsync(cancellationToken);
+            var scannerReady = sdk.IsInitialized && sdk.ScannerAvailable;
 
             if (manifest.Revision == revision)
             {
-                await commands.PublishAsync(new CommandEvent(null, AgentStates.Ready, "Fingerprint agent ready."), cancellationToken);
+                await commands.PublishAsync(
+                    new CommandEvent(
+                        null,
+                        scannerReady ? AgentStates.Ready : AgentStates.Error,
+                        scannerReady
+                            ? "Fingerprint agent ready."
+                            : sdk.LastError ?? "Fingerprint templates are synced, but the scanner is not connected."
+                    ),
+                    cancellationToken
+                );
                 return;
             }
 
@@ -66,13 +76,37 @@ public sealed class TemplateSyncService : BackgroundService
             await cache.RebuildTemplatesAsync(templates, manifest.Revision, cancellationToken);
             sdk.ReloadMatcher(await cache.LoadTemplatesAsync(cancellationToken));
             revision = manifest.Revision;
-            await commands.PublishAsync(new CommandEvent(null, AgentStates.Ready, $"Synced {templates.Count} fingerprint template(s)."), cancellationToken);
+            await commands.PublishAsync(
+                new CommandEvent(
+                    null,
+                    scannerReady ? AgentStates.Ready : AgentStates.Error,
+                    scannerReady
+                        ? $"Synced {templates.Count} fingerprint template(s)."
+                        : sdk.LastError ?? $"Synced {templates.Count} fingerprint template(s), but the scanner is not connected."
+                ),
+                cancellationToken
+            );
         }
         catch (Exception ex)
         {
-            await cache.SetSyncErrorAsync(ex.Message, cancellationToken);
+            var message = SummarizeException(ex);
+            await cache.SetSyncErrorAsync(message, cancellationToken);
             logger.LogError(ex, "Fingerprint template sync failed.");
-            await commands.PublishAsync(new CommandEvent(null, AgentStates.Error, $"Fingerprint sync failed: {ex.Message}", ErrorCode: ex.GetType().Name), cancellationToken);
+            await commands.PublishAsync(new CommandEvent(null, AgentStates.Error, $"Fingerprint sync failed: {message}", ErrorCode: ex.GetType().Name), cancellationToken);
         }
+    }
+
+    private static string SummarizeException(Exception exception)
+    {
+        var messages = new List<string>();
+        for (var current = exception; current is not null; current = current.InnerException)
+        {
+            if (!string.IsNullOrWhiteSpace(current.Message))
+            {
+                messages.Add(current.Message);
+            }
+        }
+
+        return string.Join(" | ", messages.Distinct());
     }
 }

@@ -17,7 +17,7 @@ class AdminAccessRestrictionTest extends TestCase
     {
         $employee = Employee::create([
             'department_id' => null,
-            'branch' => 'Cebu',
+            'branch' => 'Apo',
             'employee_id' => 'ADMIN-001',
             'first_name' => 'Normal',
             'last_name' => 'Admin',

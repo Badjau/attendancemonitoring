@@ -2,18 +2,19 @@
 import { Head, router } from '@inertiajs/vue3'
 import {
     ArrowLeft,
-    Fingerprint,
-    IdCard,
     KeyRound,
     LoaderCircle,
     LockKeyhole,
+    LogIn,
     TriangleAlert,
+    UnlockKeyhole,
     UserRound,
 } from '@lucide/vue'
-import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import axios from 'axios'
 
 const props = defineProps<{
+    isUnlocked: boolean
     zktecoBridgeUrl: string
 }>()
 
@@ -26,25 +27,26 @@ type BridgeStatus = {
     score?: number | null
 }
 type UnlockMethod = 'keypad' | 'rfid' | 'fingerprint' | 'admin'
+type AdminAction = 'lock' | 'unlock' | 'dashboard'
 
 const videoRef = ref<HTMLVideoElement | null>(null)
 const canvasRef = ref<HTMLCanvasElement | null>(null)
-const rfidInput = ref<HTMLInputElement | null>(null)
-const password = ref('')
 const adminUsername = ref('')
 const adminPassword = ref('')
-const rfidBuffer = ref('')
-const method = ref<UnlockMethod>('keypad')
+const method = ref<UnlockMethod>('admin')
+const selectedAdminAction = ref<AdminAction>('unlock')
 const isCameraReady = ref(false)
 const isSubmitting = ref(false)
 const isFingerprintScanning = ref(false)
+const isUnlocked = ref(props.isUnlocked)
 const errorText = ref('')
 const statusText = ref(
-    'Camera audit is required to unlock the attendance system.',
+    props.isUnlocked
+        ? 'Attendance station is unlocked.'
+        : 'Attendance station is locked.',
 )
 
 let stream: MediaStream | null = null
-let rfidTimeout: ReturnType<typeof setTimeout> | null = null
 let autoRfidTimeout: ReturnType<typeof setTimeout> | null = null
 let autoRfidBuffer = ''
 let autoFingerprintTimeout: ReturnType<typeof setTimeout> | null = null
@@ -58,14 +60,8 @@ const AUTO_FINGERPRINT_SCAN_WINDOW_MS = 120000
 const AUTO_RFID_SUBMIT_DELAY_MS = 120
 const AUTO_RFID_MIN_LENGTH = 3
 
-const selectedCredential = computed(() =>
-    method.value === 'keypad'
-        ? password.value.trim()
-        : method.value === 'admin'
-          ? adminPassword.value.trim()
-        : method.value === 'rfid'
-          ? rfidBuffer.value.trim()
-          : '',
+const hasAdminCredentials = computed(
+    () => adminUsername.value.trim() !== '' && adminPassword.value !== '',
 )
 
 const csrfToken = (): string =>
@@ -73,8 +69,40 @@ const csrfToken = (): string =>
         .querySelector('meta[name="csrf-token"]')
         ?.getAttribute('content') || ''
 
+const setCsrfToken = (token: string) => {
+    const meta = document.querySelector('meta[name="csrf-token"]')
+    meta?.setAttribute('content', token)
+}
+
+const freshCsrfToken = async (): Promise<string> => {
+    const response = await fetch('/csrf-token', {
+        credentials: 'same-origin',
+        headers: {
+            Accept: 'application/json',
+            'X-Requested-With': 'XMLHttpRequest',
+        },
+    })
+
+    const payload = await response.json().catch(() => ({}))
+    const token = String(payload.token || csrfToken())
+
+    if (token) {
+        setCsrfToken(token)
+    }
+
+    return token
+}
+
 const goBack = () => {
     router.visit('/')
+}
+
+const redirectAfterUnlock = (redirect: string) => {
+    window.location.href = redirect
+
+    window.setTimeout(() => {
+        window.location.replace(redirect)
+    }, 150)
 }
 
 const startCamera = async () => {
@@ -128,39 +156,10 @@ const captureAuditImage = (): string | null => {
     return canvas.toDataURL('image/jpeg', 0.86)
 }
 
-const focusRfid = async () => {
-    if (method.value !== 'rfid') return
-
-    await nextTick()
-    rfidInput.value?.focus()
-}
-
-const switchMethod = async (nextMethod: UnlockMethod) => {
-    clearAutoFingerprintScan()
-    fingerprintPollAbort = true
-    isFingerprintScanning.value = false
-    method.value = nextMethod
-    errorText.value = ''
-    rfidBuffer.value = ''
-    password.value = ''
-    adminUsername.value = ''
-    adminPassword.value = ''
-    await focusRfid()
-}
-
-const clearAutoFingerprintScan = () => {
-    if (autoFingerprintTimeout) {
-        clearTimeout(autoFingerprintTimeout)
-        autoFingerprintTimeout = null
-    }
-
-    isAutoFingerprintScanActive = false
-    autoFingerprintScanVersion++
-}
-
 const submitUnlock = async (
-    unlockMethod: UnlockMethod = method.value,
-    credential: string = selectedCredential.value,
+    unlockMethod: UnlockMethod,
+    credential: string,
+    action: AdminAction = 'unlock',
 ) => {
     errorText.value = ''
 
@@ -170,9 +169,7 @@ const submitUnlock = async (
                 ? 'Scan an RFID card first.'
                 : unlockMethod === 'fingerprint'
                   ? 'Scan an authorized fingerprint first.'
-                  : unlockMethod === 'admin'
-                    ? 'Enter the admin password first.'
-                  : 'Enter your unlock PIN first.'
+                  : 'Enter the admin password first.'
         return
     }
 
@@ -182,15 +179,16 @@ const submitUnlock = async (
     }
 
     const auditImage = captureAuditImage()
-    if (!auditImage) {
+    if (!auditImage && unlockMethod !== 'admin') {
         errorText.value =
-            'Camera is not ready. Allow camera access before unlocking.'
+            'Camera is not ready. Allow camera access before continuing.'
         return
     }
 
     try {
         isSubmitting.value = true
         statusText.value = 'Verifying authorization...'
+        const token = await freshCsrfToken()
 
         const response = await axios.post(
             '/unlock',
@@ -201,26 +199,40 @@ const submitUnlock = async (
                         ? adminUsername.value.trim()
                         : undefined,
                 credential,
-                audit_image: auditImage,
-                _token: csrfToken(),
+                action,
+                audit_image: auditImage ?? undefined,
+                _token: token,
             },
             {
                 withCredentials: true,
+                headers: {
+                    Accept: 'application/json',
+                    'X-CSRF-TOKEN': token,
+                    'X-Requested-With': 'XMLHttpRequest',
+                },
             },
         )
 
         statusText.value = response.data.message ?? 'Timeclock unlocked.'
-        router.visit(response.data.redirect ?? '/')
+        const redirect = response.data.redirect ?? '/'
+        redirectAfterUnlock(redirect)
     } catch (error: any) {
         errorText.value = error?.response?.data?.message ?? 'Unlock failed.'
-        statusText.value =
-            'Camera audit is required to unlock the attendance system.'
-        rfidBuffer.value = ''
-        if (rfidInput.value) rfidInput.value.value = ''
-        await focusRfid()
+        statusText.value = isUnlocked.value
+            ? 'Attendance station is unlocked.'
+            : 'Attendance station is locked.'
     } finally {
         isSubmitting.value = false
     }
+}
+
+const submitAdminAction = async (action: AdminAction) => {
+    selectedAdminAction.value = action
+    await submitUnlock('admin', adminPassword.value, action)
+}
+
+const submitSelectedAdminAction = async () => {
+    await submitAdminAction(selectedAdminAction.value)
 }
 
 const isTypingInField = (target: EventTarget | null): boolean => {
@@ -238,10 +250,7 @@ const submitAutoRfidBuffer = async () => {
     const credential = autoRfidBuffer.trim()
     autoRfidBuffer = ''
 
-    if (
-        credential.length < AUTO_RFID_MIN_LENGTH ||
-        isSubmitting.value
-    ) {
+    if (credential.length < AUTO_RFID_MIN_LENGTH || isSubmitting.value) {
         return
     }
 
@@ -249,12 +258,8 @@ const submitAutoRfidBuffer = async () => {
     fingerprintPollAbort = true
     isFingerprintScanning.value = false
     method.value = 'rfid'
-    rfidBuffer.value = credential
-    password.value = ''
-    adminUsername.value = ''
-    adminPassword.value = ''
 
-    await submitUnlock('rfid', credential)
+    await submitUnlock('rfid', credential, isUnlocked.value ? 'lock' : 'unlock')
 }
 
 const onAutoRfidKeydown = (event: KeyboardEvent) => {
@@ -281,24 +286,6 @@ const onAutoRfidKeydown = (event: KeyboardEvent) => {
         () => submitAutoRfidBuffer(),
         AUTO_RFID_SUBMIT_DELAY_MS,
     )
-}
-
-const onRfidInput = () => {
-    const value = rfidInput.value?.value.trim() ?? ''
-    if (!value) return
-
-    rfidBuffer.value = value
-
-    if (rfidTimeout) clearTimeout(rfidTimeout)
-    rfidTimeout = setTimeout(() => submitUnlock(), 120)
-}
-
-const onRfidKeydown = (event: KeyboardEvent) => {
-    if (event.key !== 'Enter') return
-
-    event.preventDefault()
-    if (rfidTimeout) clearTimeout(rfidTimeout)
-    submitUnlock()
 }
 
 const fingerprintCredential = (status: BridgeStatus): string | null => {
@@ -341,44 +328,9 @@ const postBridgeCommand = async (
     }
 }
 
-const startBridgeUnlockScan = async (
-    commandId: string,
-    options: { launchBridge?: boolean } = {},
-) => {
-    const shouldLaunchBridge = options.launchBridge ?? true
-
-    try {
-        await postBridgeCommand('commands/unlock', { command_id: commandId })
-        return
-    } catch (error) {
-        if (!shouldLaunchBridge) {
-            throw error
-        }
-
-        window.location.href = `zkteco-bridge://unlock?payload=${encodeURIComponent(
-            JSON.stringify({ command_id: commandId }),
-        )}`
-    }
-
-    let lastError: any = null
-    const startedAt = Date.now()
-
-    while (Date.now() - startedAt < 12000) {
-        await new Promise((resolve) => setTimeout(resolve, 700))
-
-        try {
-            await postBridgeCommand('commands/unlock', { command_id: commandId })
-            return
-        } catch (error) {
-            lastError = error
-        }
-    }
-
-    throw lastError || new Error('Unable to connect to fingerprint scanner.')
-}
-
 const pollFingerprintUnlock = async (
     commandId: string,
+    startScan: () => Promise<void>,
     timeoutMs = 30000,
     shouldContinue: (() => boolean) | undefined = undefined,
 ) => {
@@ -404,10 +356,6 @@ const pollFingerprintUnlock = async (
 
             if (status.command_id && status.command_id !== commandId) return
 
-            if (status.message) {
-                statusText.value = status.message
-            }
-
             if (status.state === 'matched') {
                 const credential = fingerprintCredential(status)
 
@@ -424,7 +372,11 @@ const pollFingerprintUnlock = async (
 
                 clearTimeout(timeout)
                 closeFingerprintEvents()
-                await submitUnlock('fingerprint', credential)
+                await submitUnlock(
+                    'fingerprint',
+                    credential,
+                    isUnlocked.value ? 'lock' : 'unlock',
+                )
                 resolve()
                 return
             }
@@ -445,40 +397,24 @@ const pollFingerprintUnlock = async (
                 finish(JSON.parse(event.data || '{}')).catch(reject)
             })
         })
+
+        startScan().catch((error) => {
+            clearTimeout(timeout)
+            closeFingerprintEvents()
+            reject(error)
+        })
     })
 }
 
 const runFingerprintUnlock = async (
-    automatic = false,
     scanVersion = autoFingerprintScanVersion,
 ) => {
-    if (
-        isSubmitting.value ||
-        isFingerprintScanning.value
-    ) {
+    if (isSubmitting.value || isFingerprintScanning.value) {
         return false
     }
 
-    if (!automatic) {
-        clearAutoFingerprintScan()
-    }
-
-    errorText.value = ''
-    fingerprintPollAbort = true
-    closeFingerprintEvents()
-    method.value = 'fingerprint'
-    rfidBuffer.value = ''
-    password.value = ''
-    adminUsername.value = ''
-    adminPassword.value = ''
-
     const auditImage = captureAuditImage()
     if (!auditImage) {
-        if (!automatic) {
-            errorText.value =
-                'Camera is not ready. Allow camera access before unlocking.'
-        }
-
         return false
     }
 
@@ -487,32 +423,17 @@ const runFingerprintUnlock = async (
     try {
         isFingerprintScanning.value = true
         fingerprintPollAbort = false
-        statusText.value = 'Connecting to fingerprint scanner...'
 
-        await startBridgeUnlockScan(commandId, {
-            launchBridge: !automatic,
-        })
-
-        statusText.value = 'Scan an authorized fingerprint to unlock.'
         await pollFingerprintUnlock(
             commandId,
-            automatic ? AUTO_FINGERPRINT_SCAN_WINDOW_MS : 30000,
-            automatic
-                ? () => scanVersion === autoFingerprintScanVersion
-                : undefined,
+            () => postBridgeCommand('commands/unlock', { command_id: commandId }),
+            AUTO_FINGERPRINT_SCAN_WINDOW_MS,
+            () => scanVersion === autoFingerprintScanVersion,
         )
 
         return true
-    } catch (error: any) {
+    } catch {
         fingerprintPollAbort = true
-        if (!automatic) {
-            errorText.value =
-                error?.response?.data?.message ||
-                error?.message ||
-                'Unable to scan fingerprint.'
-        }
-        statusText.value =
-            'Enter PIN, scan RFID, or scan fingerprint to unlock.'
 
         return false
     } finally {
@@ -520,10 +441,14 @@ const runFingerprintUnlock = async (
     }
 }
 
-const startFingerprintUnlock = async () => {
-    await runFingerprintUnlock(false)
+const clearAutoFingerprintScan = () => {
+    if (autoFingerprintTimeout) {
+        clearTimeout(autoFingerprintTimeout)
+        autoFingerprintTimeout = null
+    }
 
-    scheduleAutoFingerprintScan()
+    isAutoFingerprintScanActive = false
+    autoFingerprintScanVersion++
 }
 
 const scheduleAutoFingerprintScan = (delay = AUTO_FINGERPRINT_RETRY_MS) => {
@@ -532,10 +457,6 @@ const scheduleAutoFingerprintScan = (delay = AUTO_FINGERPRINT_RETRY_MS) => {
     }
 
     autoFingerprintTimeout = setTimeout(async () => {
-        if (method.value !== 'fingerprint') {
-            return
-        }
-
         if (
             isAutoFingerprintScanActive ||
             isSubmitting.value ||
@@ -550,7 +471,7 @@ const scheduleAutoFingerprintScan = (delay = AUTO_FINGERPRINT_RETRY_MS) => {
         const scanVersion = ++autoFingerprintScanVersion
 
         try {
-            await runFingerprintUnlock(true, scanVersion)
+            await runFingerprintUnlock(scanVersion)
         } finally {
             if (scanVersion === autoFingerprintScanVersion) {
                 isAutoFingerprintScanActive = false
@@ -565,8 +486,6 @@ onMounted(async () => {
 
     try {
         await startCamera()
-        method.value = 'fingerprint'
-        statusText.value = 'Scan an authorized fingerprint to unlock.'
         scheduleAutoFingerprintScan(1000)
     } catch (error) {
         errorText.value =
@@ -580,13 +499,12 @@ onUnmounted(() => {
     fingerprintPollAbort = true
     closeFingerprintEvents()
     stopCamera()
-    if (rfidTimeout) clearTimeout(rfidTimeout)
     if (autoRfidTimeout) clearTimeout(autoRfidTimeout)
 })
 </script>
 
 <template>
-    <Head title="Unlock Timeclock" />
+    <Head title="Lock / Unlock" />
 
     <main class="min-h-screen bg-brand-bg px-4 py-6 text-brand-stroke md:px-8">
         <button
@@ -619,182 +537,102 @@ onUnmounted(() => {
                     <div
                         class="inline-flex items-center gap-2 rounded-full bg-brand-stroke px-4 py-2 text-xs font-black uppercase tracking-widest text-brand-headline"
                     >
-                        <LockKeyhole class="h-4 w-4" />
-                        Timeclock locked
+                        <LockKeyhole v-if="!isUnlocked" class="h-4 w-4" />
+                        <UnlockKeyhole v-else class="h-4 w-4" />
+                        {{ isUnlocked ? 'Timeclock unlocked' : 'Timeclock locked' }}
                     </div>
                     <h1 class="text-3xl font-black leading-tight md:text-4xl">
-                        Unlock attendance station
+                        Lock / Unlock station
                     </h1>
                     <p class="text-sm font-semibold text-brand-bg">
                         {{ statusText }}
                     </p>
                 </div>
 
-                <div class="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
-                    <button
-                        type="button"
-                        class="inline-flex items-center justify-center gap-2 rounded-2xl border-2 border-brand-stroke px-4 py-3 text-sm font-black transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[4px_4px_0px_0px_#001e1d]"
-                        :class="
-                            method === 'keypad' ? 'bg-brand-accent' : 'bg-white'
-                        "
-                        @click="switchMethod('keypad')"
-                    >
-                        <KeyRound class="h-4 w-4" />
-                        PIN
-                    </button>
-                    <button
-                        type="button"
-                        class="inline-flex items-center justify-center gap-2 rounded-2xl border-2 border-brand-stroke px-4 py-3 text-sm font-black transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[4px_4px_0px_0px_#001e1d]"
-                        :class="
-                            method === 'rfid' ? 'bg-brand-accent' : 'bg-white'
-                        "
-                        @click="switchMethod('rfid')"
-                    >
-                        <IdCard class="h-4 w-4" />
-                        RFID
-                    </button>
-                    <button
-                        type="button"
-                        class="inline-flex items-center justify-center gap-2 rounded-2xl border-2 border-brand-stroke px-4 py-3 text-sm font-black transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[4px_4px_0px_0px_#001e1d]"
-                        :class="
-                            method === 'fingerprint'
-                                ? 'bg-brand-accent'
-                                : 'bg-white'
-                        "
-                        @click="switchMethod('fingerprint')"
-                    >
-                        <Fingerprint class="h-4 w-4" />
-                        Finger
-                    </button>
-                    <button
-                        type="button"
-                        class="inline-flex items-center justify-center gap-2 rounded-2xl border-2 border-brand-stroke px-4 py-3 text-sm font-black transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[4px_4px_0px_0px_#001e1d]"
-                        :class="
-                            method === 'admin' ? 'bg-brand-accent' : 'bg-white'
-                        "
-                        @click="switchMethod('admin')"
-                    >
-                        <UserRound class="h-4 w-4" />
-                        Admin
-                    </button>
-                </div>
-
                 <form
-                    v-if="method === 'keypad'"
+                    method="post"
+                    action="/unlock"
                     autocomplete="off"
                     class="space-y-4"
-                    @submit.prevent="submitUnlock()"
+                    @submit.prevent="submitSelectedAdminAction"
                 >
-                    <input
-                        v-model="password"
-                        type="password"
-                        name="timeclock-unlock-password"
-                        autocomplete="off"
-                        class="w-full rounded-2xl border-2 border-brand-stroke bg-white px-4 py-4 text-lg font-bold outline-none transition-shadow focus:shadow-[4px_4px_0px_0px_#001e1d]"
-                        placeholder="Enter unlock PIN"
-                    />
+                    <input type="hidden" name="_token" :value="csrfToken()" />
+                    <input type="hidden" name="method" value="admin" />
+                    <label class="block space-y-2">
+                        <span
+                            class="text-xs font-black uppercase tracking-widest"
+                        >
+                            Admin username or email
+                        </span>
+                        <span class="relative block">
+                            <UserRound
+                                class="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2"
+                            />
+                            <input
+                                v-model="adminUsername"
+                                type="text"
+                                name="username"
+                                autocomplete="username"
+                                class="w-full rounded-2xl border-2 border-brand-stroke bg-white py-4 pl-12 pr-4 text-lg font-bold outline-none transition-shadow focus:shadow-[4px_4px_0px_0px_#001e1d]"
+                            />
+                        </span>
+                    </label>
 
-                    <button
-                        type="submit"
-                        class="inline-flex w-full items-center justify-center gap-2 rounded-2xl border-2 border-brand-stroke bg-brand-stroke px-4 py-4 text-sm font-black uppercase tracking-widest text-brand-headline shadow-[5px_5px_0px_0px_#abd1c6] transition-all duration-200 hover:-translate-y-1 hover:shadow-[7px_7px_0px_0px_#abd1c6] active:translate-x-1 active:translate-y-1 active:shadow-none"
-                        :disabled="isSubmitting"
-                    >
-                        <LoaderCircle
-                            v-if="isSubmitting"
-                            class="h-5 w-5 animate-spin"
-                        />
-                        <LockKeyhole v-else class="h-5 w-5" />
-                        Unlock timeclock
-                    </button>
-                </form>
+                    <label class="block space-y-2">
+                        <span
+                            class="text-xs font-black uppercase tracking-widest"
+                        >
+                            Admin password
+                        </span>
+                        <span class="relative block">
+                            <KeyRound
+                                class="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2"
+                            />
+                            <input
+                                v-model="adminPassword"
+                                type="password"
+                                name="credential"
+                                autocomplete="current-password"
+                                class="w-full rounded-2xl border-2 border-brand-stroke bg-white py-4 pl-12 pr-4 text-lg font-bold outline-none transition-shadow focus:shadow-[4px_4px_0px_0px_#001e1d]"
+                            />
+                        </span>
+                    </label>
 
-                <div v-else-if="method === 'rfid'" class="space-y-4">
-                    <input
-                        ref="rfidInput"
-                        type="text"
-                        autocomplete="off"
-                        class="w-full rounded-2xl border-2 border-brand-stroke bg-white px-4 py-4 text-lg font-bold outline-none transition-shadow focus:shadow-[4px_4px_0px_0px_#001e1d]"
-                        placeholder="Scan RFID card"
-                        @input="onRfidInput"
-                        @keydown="onRfidKeydown"
-                    />
+                    <div class="grid gap-3 sm:grid-cols-2">
+                        <button
+                            type="submit"
+                            name="action"
+                            :value="isUnlocked ? 'lock' : 'unlock'"
+                            class="inline-flex w-full items-center justify-center gap-2 rounded-2xl border-2 border-brand-stroke bg-brand-stroke px-4 py-4 text-sm font-black uppercase tracking-widest text-brand-headline shadow-[5px_5px_0px_0px_#abd1c6] transition-all duration-200 hover:-translate-y-1 hover:shadow-[7px_7px_0px_0px_#abd1c6] active:translate-x-1 active:translate-y-1 active:shadow-none disabled:cursor-not-allowed disabled:opacity-70"
+                            :disabled="isSubmitting || !hasAdminCredentials"
+                            @click="selectedAdminAction = isUnlocked ? 'lock' : 'unlock'"
+                        >
+                            <LoaderCircle
+                                v-if="isSubmitting"
+                                class="h-5 w-5 animate-spin"
+                            />
+                            <LockKeyhole
+                                v-else-if="isUnlocked"
+                                class="h-5 w-5"
+                            />
+                            <UnlockKeyhole v-else class="h-5 w-5" />
+                            {{ isUnlocked ? 'Lock station' : 'Unlock station' }}
+                        </button>
 
-                    <div
-                        class="rounded-2xl border-2 border-dashed border-brand-stroke bg-white/60 p-5 text-center"
-                    >
-                        <IdCard class="mx-auto mb-2 h-8 w-8" />
-                        <p class="text-sm font-black uppercase tracking-widest">
-                            Waiting for RFID scan
-                        </p>
+                        <button
+                            v-if="hasAdminCredentials"
+                            type="submit"
+                            name="action"
+                            value="dashboard"
+                            class="inline-flex w-full items-center justify-center gap-2 rounded-2xl border-2 border-brand-stroke bg-brand-accent px-4 py-4 text-sm font-black uppercase tracking-widest text-brand-stroke shadow-[5px_5px_0px_0px_#001e1d] transition-all duration-200 hover:-translate-y-1 hover:shadow-[7px_7px_0px_0px_#001e1d] active:translate-x-1 active:translate-y-1 active:shadow-none disabled:cursor-not-allowed disabled:opacity-70"
+                            :disabled="isSubmitting"
+                            @click="selectedAdminAction = 'dashboard'"
+                        >
+                            <LogIn class="h-5 w-5" />
+                            Open admin dashboard
+                        </button>
                     </div>
-                </div>
-
-                <form
-                    v-else-if="method === 'admin'"
-                    autocomplete="off"
-                    class="space-y-4"
-                    @submit.prevent="submitUnlock()"
-                >
-                    <input
-                        v-model="adminUsername"
-                        type="text"
-                        name="admin-username"
-                        autocomplete="off"
-                        class="w-full rounded-2xl border-2 border-brand-stroke bg-white px-4 py-4 text-lg font-bold outline-none transition-shadow focus:shadow-[4px_4px_0px_0px_#001e1d]"
-                        placeholder="Admin username or email"
-                    />
-
-                    <input
-                        v-model="adminPassword"
-                        type="password"
-                        name="admin-password"
-                        autocomplete="off"
-                        class="w-full rounded-2xl border-2 border-brand-stroke bg-white px-4 py-4 text-lg font-bold outline-none transition-shadow focus:shadow-[4px_4px_0px_0px_#001e1d]"
-                        placeholder="Admin password"
-                    />
-
-                    <button
-                        type="submit"
-                        class="inline-flex w-full items-center justify-center gap-2 rounded-2xl border-2 border-brand-stroke bg-brand-stroke px-4 py-4 text-sm font-black uppercase tracking-widest text-brand-headline shadow-[5px_5px_0px_0px_#abd1c6] transition-all duration-200 hover:-translate-y-1 hover:shadow-[7px_7px_0px_0px_#abd1c6] active:translate-x-1 active:translate-y-1 active:shadow-none"
-                        :disabled="isSubmitting"
-                    >
-                        <LoaderCircle
-                            v-if="isSubmitting"
-                            class="h-5 w-5 animate-spin"
-                        />
-                        <UserRound v-else class="h-5 w-5" />
-                        Open admin dashboard
-                    </button>
                 </form>
-
-                <div v-else class="space-y-4">
-                    <button
-                        type="button"
-                        class="inline-flex w-full items-center justify-center gap-2 rounded-2xl border-2 border-brand-stroke bg-brand-stroke px-4 py-4 text-sm font-black uppercase tracking-widest text-brand-headline shadow-[5px_5px_0px_0px_#abd1c6] transition-all duration-200 hover:-translate-y-1 hover:shadow-[7px_7px_0px_0px_#abd1c6] active:translate-x-1 active:translate-y-1 active:shadow-none disabled:cursor-not-allowed disabled:opacity-70"
-                        :disabled="isSubmitting || isFingerprintScanning"
-                        @click="startFingerprintUnlock"
-                    >
-                        <LoaderCircle
-                            v-if="isFingerprintScanning || isSubmitting"
-                            class="h-5 w-5 animate-spin"
-                        />
-                        <Fingerprint v-else class="h-5 w-5" />
-                        Scan fingerprint
-                    </button>
-
-                    <div
-                        class="rounded-2xl border-2 border-dashed border-brand-stroke bg-white/60 p-5 text-center"
-                    >
-                        <Fingerprint class="mx-auto mb-2 h-8 w-8" />
-                        <p class="text-sm font-black uppercase tracking-widest">
-                            {{
-                                isFingerprintScanning
-                                    ? 'Waiting for fingerprint scan'
-                                    : 'Ready for manual fingerprint unlock'
-                            }}
-                        </p>
-                    </div>
-                </div>
 
                 <div
                     v-if="errorText"
@@ -803,7 +641,6 @@ onUnmounted(() => {
                     <TriangleAlert class="mt-0.5 h-5 w-5 shrink-0" />
                     <p class="text-sm font-bold">{{ errorText }}</p>
                 </div>
-
             </div>
         </section>
     </main>

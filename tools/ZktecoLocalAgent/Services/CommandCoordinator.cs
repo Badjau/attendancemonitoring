@@ -40,12 +40,14 @@ public sealed class CommandCoordinator : IDisposable
         this.options = options.Value;
         this.logger = logger;
         this.sdk.FingerprintCaptured += OnFingerprintCaptured;
+        this.sdk.ScannerStateChanged += OnScannerStateChanged;
     }
 
     public CommandEvent Current => currentEvent;
 
     public HealthPayload Health(string? revision)
     {
+        sdk.RefreshStatus();
         var ok = sdk.IsInitialized && sdk.ScannerAvailable;
         return new HealthPayload(
             ok,
@@ -63,6 +65,11 @@ public sealed class CommandCoordinator : IDisposable
         if (request.EmployeeDatabaseId <= 0)
         {
             return Results.UnprocessableEntity(new { message = "Employee id is required." });
+        }
+
+        if (!await EnsureScannerReadyAsync(cancellationToken))
+        {
+            return ScannerUnavailable();
         }
 
         var commandId = string.IsNullOrWhiteSpace(request.CommandId) ? NewCommandId("enroll") : request.CommandId!;
@@ -83,6 +90,11 @@ public sealed class CommandCoordinator : IDisposable
 
     public async Task<IResult> StartAttendanceAsync(AttendanceCommandRequest request, CancellationToken cancellationToken)
     {
+        if (!await EnsureScannerReadyAsync(cancellationToken))
+        {
+            return ScannerUnavailable();
+        }
+
         var commandId = string.IsNullOrWhiteSpace(request.CommandId) ? NewCommandId("attendance") : request.CommandId!;
         var command = ActiveCommand.CreateAttendance(commandId, request);
 
@@ -98,6 +110,11 @@ public sealed class CommandCoordinator : IDisposable
 
     public async Task<IResult> StartUnlockAsync(UnlockCommandRequest request, CancellationToken cancellationToken)
     {
+        if (!await EnsureScannerReadyAsync(cancellationToken))
+        {
+            return ScannerUnavailable();
+        }
+
         var commandId = string.IsNullOrWhiteSpace(request.CommandId) ? NewCommandId("unlock") : request.CommandId!;
         var command = ActiveCommand.CreateUnlock(commandId, request);
 
@@ -306,6 +323,22 @@ public sealed class CommandCoordinator : IDisposable
     public void Dispose()
     {
         sdk.FingerprintCaptured -= OnFingerprintCaptured;
+        sdk.ScannerStateChanged -= OnScannerStateChanged;
+    }
+
+    private void OnScannerStateChanged(object? sender, ScannerStateChangedEventArgs args)
+    {
+        _ = Task.Run(async () =>
+        {
+            if (args.IsConnected)
+            {
+                await PublishAsync(new CommandEvent(null, AgentStates.Ready, "Fingerprint scanner reconnected and ready."), CancellationToken.None);
+                return;
+            }
+
+            ClearActive();
+            await PublishAsync(new CommandEvent(null, AgentStates.Error, args.Message ?? "Fingerprint scanner disconnected.", ErrorCode: "ScannerDisconnected"), CancellationToken.None);
+        });
     }
 
     private void OnFingerprintCaptured(object? sender, FingerprintCapturedEventArgs args)
@@ -445,6 +478,40 @@ public sealed class CommandCoordinator : IDisposable
             conflict = Results.NoContent();
             return true;
         }
+    }
+
+    private async Task<bool> EnsureScannerReadyAsync(CancellationToken cancellationToken)
+    {
+        if (sdk.IsInitialized && sdk.ScannerAvailable)
+        {
+            return true;
+        }
+
+        await PublishAsync(
+            new CommandEvent(null, AgentStates.Error, ScannerUnavailableMessage(), ErrorCode: "ScannerUnavailable"),
+            cancellationToken
+        );
+
+        return false;
+    }
+
+    private IResult ScannerUnavailable()
+    {
+        return Results.Json(new
+        {
+            message = ScannerUnavailableMessage(),
+            scanner_available = sdk.ScannerAvailable,
+            sdk_available = sdk.IsInitialized,
+            missing_dependency = sdk.MissingDependency,
+        }, statusCode: StatusCodes.Status503ServiceUnavailable);
+    }
+
+    private string ScannerUnavailableMessage()
+    {
+        return sdk.LastError
+            ?? (sdk.MissingDependency is null
+                ? "Fingerprint scanner is not ready. The agent will keep retrying automatically while the scanner is disconnected."
+                : $"Fingerprint scanner dependency is missing: {sdk.MissingDependency}.");
     }
 
     private void ClearActive()

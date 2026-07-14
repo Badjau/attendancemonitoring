@@ -17,6 +17,15 @@ const props = defineProps<{
         time_out_start: string
         duplicate_scan_window_seconds: string
         show_face_attendance_button: boolean
+        show_scan_status_messages: boolean
+    }
+    scanStatusMessages: {
+        idle: string
+        rfid_not_recognized: string
+        fingerprint_waiting: string
+        fingerprint_not_found: string
+        fingerprint_matched: string
+        attendance_recorded: string
     }
     zktecoBridgeUrl: string
 }>()
@@ -102,10 +111,10 @@ onUnmounted(() => {
         </header>
 
         <Link
-            href="/unlock?locked=1"
+            href="/unlock"
             class="fixed right-3 top-3 z-20 inline-flex items-center justify-center rounded-2xl border-2 border-brand-stroke bg-brand-stroke px-4 py-3 text-xs font-black uppercase tracking-widest text-brand-headline shadow-[4px_4px_0px_0px_#abd1c6] transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[6px_6px_0px_0px_#abd1c6] active:translate-x-1 active:translate-y-1 active:shadow-none md:right-5 md:top-5"
         >
-            Admin
+            Lock / Unlock
         </Link>
 
         <!-- Toast Notification Container -->
@@ -127,6 +136,7 @@ onUnmounted(() => {
                 <CameraCard
                     :employees="props.employeesWithFaces"
                     :attendance-schedule="props.attendanceSchedule"
+                    :scan-status-messages="props.scanStatusMessages"
                     :zkteco-bridge-url="props.zktecoBridgeUrl"
                     @employee-verified="setActiveBranch"
                 />

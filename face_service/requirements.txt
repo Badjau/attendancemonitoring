@@ -2,7 +2,7 @@ fastapi==0.115.6
 uvicorn[standard]==0.34.0
 python-multipart==0.0.20
 deepface==0.0.95
-tensorflow==2.17.1
+tensorflow==2.17.1; platform_system != "Windows"
 tensorflow-intel==2.17.1; platform_system == "Windows"
 tf-keras==2.17.0
 tensorboard==2.17.1

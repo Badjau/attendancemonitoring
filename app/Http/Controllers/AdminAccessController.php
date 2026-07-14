@@ -3,25 +3,24 @@
 namespace App\Http\Controllers;
 
 use App\Models\User;
+use App\Services\AdminCredentialAccessService;
 use App\Support\AdminAccess;
-use App\Support\PasswordVerifier;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Validation\Rule;
-use Illuminate\View\View;
 
 class AdminAccessController extends Controller
 {
-    public function showLogin(Request $request): View|RedirectResponse
+    public function __construct(protected AdminCredentialAccessService $adminCredentialAccess) {}
+
+    public function showLogin(Request $request): RedirectResponse
     {
         if ($this->hasAdminAccess($request)) {
             return redirect('/admin');
         }
 
-        return view('admin-access.login', [
-            'canRegister' => $this->canRegister($request),
-        ]);
+        return redirect()->route('timeclock.unlock');
     }
 
     public function login(Request $request): RedirectResponse
@@ -31,31 +30,24 @@ class AdminAccessController extends Controller
             'password' => ['required', 'string'],
         ]);
 
-        $user = User::query()
-            ->where('is_admin', true)
-            ->where(function ($query) use ($credentials) {
-                $query
-                    ->where('username', $credentials['username'])
-                    ->orWhere('email', $credentials['username']);
-            })
-            ->first();
+        $user = $this->adminCredentialAccess->findAdminUser($credentials['username'], $credentials['password']);
 
-        if (! $user || ! PasswordVerifier::check($credentials['password'], $user->password)) {
+        if (! $user) {
             return back()
                 ->withErrors(['username' => 'The admin username or password is incorrect.'])
                 ->onlyInput('username');
         }
 
-        $this->unlockAdminFor($request, $user);
+        $this->adminCredentialAccess->unlockAdminFor($request, $user);
 
-        return redirect()->to($this->adminRedirectPath($request, $user));
+        return redirect()->to($this->adminCredentialAccess->adminRedirectPath($request, $user));
     }
 
     public function showRegister(Request $request): View|RedirectResponse
     {
         if (! $this->canRegister($request)) {
             return redirect()
-                ->route('admin.access.login')
+                ->route('timeclock.unlock')
                 ->withErrors(['username' => 'Admin registration is locked. Sign in with an existing admin account.']);
         }
 
@@ -66,7 +58,7 @@ class AdminAccessController extends Controller
     {
         if (! $this->canRegister($request)) {
             return redirect()
-                ->route('admin.access.login')
+                ->route('timeclock.unlock')
                 ->withErrors(['username' => 'Admin registration is locked. Sign in with an existing admin account.']);
         }
 
@@ -86,7 +78,7 @@ class AdminAccessController extends Controller
             'is_it_admin' => true,
         ]);
 
-        $this->unlockAdminFor($request, $user);
+        $this->adminCredentialAccess->unlockAdminFor($request, $user);
 
         return redirect($user->is_hr ? '/admin/attendances' : '/admin');
     }
@@ -108,37 +100,6 @@ class AdminAccessController extends Controller
         $request->session()->regenerateToken();
 
         return redirect()->route('timeclock.unlock', ['locked' => 1]);
-    }
-
-    private function unlockAdminFor(Request $request, User $user): void
-    {
-        Auth::login($user);
-
-        $request->session()->regenerate();
-        $request->session()->forget([
-            'admin_unlocked_by',
-            'admin_unlocked_at',
-            'timeclock_unlocked_by',
-            'timeclock_unlocked_at',
-        ]);
-        $request->session()->put([
-            'admin_password_unlocked_by' => $user->id,
-            'admin_password_unlocked_at' => now()->toDateTimeString(),
-        ]);
-        $request->session()->save();
-    }
-
-    private function adminRedirectPath(Request $request, User $user): string
-    {
-        $fallback = $user->is_hr ? '/admin/attendances' : '/admin';
-        $intended = $request->session()->pull('url.intended', $fallback);
-        $path = parse_url($intended, PHP_URL_PATH) ?: $fallback;
-
-        if (in_array($path, ['/admin/login', '/admin/register', '/unlock'], true)) {
-            return $fallback;
-        }
-
-        return $intended;
     }
 
     private function canRegister(Request $request): bool
