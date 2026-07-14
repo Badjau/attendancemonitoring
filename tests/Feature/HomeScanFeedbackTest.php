@@ -46,7 +46,9 @@ class HomeScanFeedbackTest extends TestCase
             ],
         ]);
 
-        $this->get('/')
+        $this
+            ->withSession(['timeclock_unlocked_by' => 'test-admin'])
+            ->get('/')
             ->assertOk()
             ->assertInertia(fn (Assert $page): Assert => $page
                 ->component('Home')
@@ -63,22 +65,27 @@ class HomeScanFeedbackTest extends TestCase
 
     public function test_rfid_employee_verification_failure_returns_rfid_public_message(): void
     {
-        $this->postJson('/attendance/verify-employee', [
-            'employee_id' => 'UNKNOWN-RFID',
-            'attendance_method' => AttendanceMethod::RFID->value,
-        ])
+        $this
+            ->withSession(['timeclock_unlocked_by' => 'test-admin'])
+            ->postJson('/attendance/verify-employee', [
+                'employee_id' => 'UNKNOWN-RFID',
+                'attendance_method' => AttendanceMethod::RFID->value,
+            ])
             ->assertUnprocessable()
             ->assertJsonPath('message', 'RFID card not recognized.')
             ->assertJsonPath('errors.employee_id.0', 'RFID card not recognized.');
     }
 
-    public function test_frontend_admin_unlock_uses_full_page_navigation_for_admin_redirect(): void
+    public function test_frontend_admin_unlock_uses_native_admin_login_handoff(): void
     {
         $unlockPage = file_get_contents(resource_path('js/Pages/TimeclockUnlock.vue'));
 
-        $this->assertStringContainsString("redirect.startsWith('/admin')", $unlockPage);
+        $this->assertStringContainsString("submitAdminAction('dashboard')", $unlockPage);
+        $this->assertStringContainsString('Open admin dashboard', $unlockPage);
+        $this->assertStringContainsString("'dashboard'", $unlockPage);
         $this->assertStringContainsString('window.location.assign(redirect)', $unlockPage);
-        $this->assertStringNotContainsString('router.visit(response.data.redirect ??', $unlockPage);
+        $this->assertStringNotContainsString("form.action = '/admin/login'", $unlockPage);
+        $this->assertStringNotContainsString('form.submit()', $unlockPage);
     }
 
     public function test_face_registration_finish_does_not_reload_or_replace_the_page(): void
@@ -94,12 +101,9 @@ class HomeScanFeedbackTest extends TestCase
     {
         $cameraCard = file_get_contents(resource_path('js/Components/Home/CameraCard.vue'));
 
-        $this->assertStringContainsString(
-            "if (!automatic) {\n            setScannerStatus('fingerprint_not_found')",
-            $cameraCard,
-        );
+        $this->assertStringContainsString("if (!automatic) {\n            setTemporaryScannerError('fingerprint_not_found')", $cameraCard);
         $this->assertStringNotContainsString(
-            "} catch (error) {\n        setScannerStatus('fingerprint_not_found')",
+            "} catch (error) {\n        setTemporaryScannerError('fingerprint_not_found')",
             $cameraCard,
         );
     }
@@ -109,6 +113,6 @@ class HomeScanFeedbackTest extends TestCase
         $cameraCard = file_get_contents(resource_path('js/Components/Home/CameraCard.vue'));
 
         $this->assertStringContainsString(".includes('not recognized')", $cameraCard);
-        $this->assertStringContainsString("setScannerStatus('fingerprint_not_found')", $cameraCard);
+        $this->assertStringContainsString("setTemporaryScannerError('fingerprint_not_found')", $cameraCard);
     }
 }

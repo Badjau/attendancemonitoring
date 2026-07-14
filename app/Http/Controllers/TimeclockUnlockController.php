@@ -3,10 +3,8 @@
 namespace App\Http\Controllers;
 
 use App\Http\Requests\TimeclockUnlockRequest;
-use App\Models\Employee;
-use App\Models\User;
+use App\Services\AdminCredentialAccessService;
 use App\Services\TimeclockUnlockService;
-use App\Support\PasswordVerifier;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -17,7 +15,10 @@ use Inertia\Response;
 
 class TimeclockUnlockController extends Controller
 {
-    public function __construct(protected TimeclockUnlockService $timeclockUnlockService) {}
+    public function __construct(
+        protected TimeclockUnlockService $timeclockUnlockService,
+        protected AdminCredentialAccessService $adminCredentialAccess,
+    ) {}
 
     public function create(Request $request): Response|RedirectResponse
     {
@@ -25,16 +26,13 @@ class TimeclockUnlockController extends Controller
             $this->clearUnlockSessions($request);
         }
 
-        if ($request->session()->has('timeclock_unlocked_by')) {
-            return redirect()->route('home');
-        }
-
         return Inertia::render('TimeclockUnlock', [
+            'isUnlocked' => $request->session()->has('timeclock_unlocked_by'),
             'zktecoBridgeUrl' => config('services.zkteco.bridge_url'),
         ]);
     }
 
-    public function store(TimeclockUnlockRequest $request): JsonResponse
+    public function store(TimeclockUnlockRequest $request): JsonResponse|RedirectResponse
     {
         try {
             if ($request->input('method') === 'admin') {
@@ -48,32 +46,46 @@ class TimeclockUnlockController extends Controller
                 'admin_password_unlocked_at',
             ]);
 
-            $authorizedUser = $this->timeclockUnlockService->store($request);
-            $authorizedUser->loadMissing('employee');
-            $adminUser = $this->adminUserForAuthorizedEmployee($authorizedUser->employee);
-            $isAdmin = $adminUser || $authorizedUser->employee?->role === Employee::ROLE_ADMIN;
+            if ($request->input('action') === 'lock') {
+                $authorizedUser = $this->timeclockUnlockService->authorizedUserFor($request);
 
-            if ($adminUser) {
-                Auth::login($adminUser);
+                if (! $authorizedUser) {
+                    throw ValidationException::withMessages([
+                        'credential' => 'You are not authorized to lock this timeclock.',
+                    ]);
+                }
 
-                $request->session()->regenerate();
-                $request->session()->put([
-                    'admin_password_unlocked_by' => $adminUser->id,
-                    'admin_password_unlocked_at' => now()->toDateTimeString(),
+                $this->clearUnlockSessions($request);
+
+                return $this->unlockResponse($request, [
+                    'message' => 'Timeclock locked.',
+                    'redirect' => route('timeclock.unlock'),
                 ]);
-                $request->session()->save();
             }
 
-            return response()->json([
-                'message' => $isAdmin ? 'Admin unlocked.' : 'Timeclock unlocked.',
-                'redirect' => $isAdmin ? '/admin' : route('home'),
+            $authorizedUser = $this->timeclockUnlockService->store($request);
+            $authorizedUser->loadMissing('employee');
+
+            return $this->unlockResponse($request, [
+                'message' => 'Timeclock unlocked.',
+                'redirect' => route('home'),
             ]);
         } catch (ValidationException $e) {
+            if (! $request->expectsJson()) {
+                throw $e;
+            }
+
             return response()->json([
                 'message' => collect($e->errors())->flatten()->first() ?? 'Unlock failed.',
             ], 422);
         } catch (\Throwable $e) {
             report($e);
+
+            if (! $request->expectsJson()) {
+                return back()->withErrors([
+                    'credential' => 'Unlock failed. Please try again.',
+                ])->withInput($request->except('credential'));
+            }
 
             return response()->json([
                 'message' => 'Unlock failed. Please try again.',
@@ -90,6 +102,9 @@ class TimeclockUnlockController extends Controller
 
     private function clearUnlockSessions(Request $request): void
     {
+        $request->session()->forget(Auth::guard()->getName());
+        Auth::forgetGuards();
+
         $request->session()->forget([
             'admin_unlocked_by',
             'admin_unlocked_at',
@@ -100,56 +115,56 @@ class TimeclockUnlockController extends Controller
         ]);
     }
 
-    private function adminUserForAuthorizedEmployee(?Employee $employee): ?User
+    private function storeAdminUnlock(TimeclockUnlockRequest $request): JsonResponse|RedirectResponse
     {
-        if (! $employee) {
-            return null;
-        }
+        $user = $this->adminCredentialAccess->findAdminUser(
+            $request->string('username')->trim()->toString(),
+            $request->string('credential')->toString(),
+        );
 
-        return User::query()
-            ->where('employee_id', $employee->id)
-            ->where('is_admin', true)
-            ->first();
-    }
-
-    private function storeAdminUnlock(TimeclockUnlockRequest $request): JsonResponse
-    {
-        $username = $request->string('username')->trim()->toString();
-        $password = $request->string('credential')->toString();
-
-        $user = User::query()
-            ->where('is_admin', true)
-            ->where(function ($query) use ($username) {
-                $query
-                    ->where('username', $username)
-                    ->orWhere('email', $username);
-            })
-            ->first();
-
-        if (! $user || ! PasswordVerifier::check($password, $user->password)) {
+        if (! $user) {
             throw ValidationException::withMessages([
                 'username' => 'The admin username or password is incorrect.',
             ]);
         }
 
-        Auth::login($user);
+        $action = $request->input('action', 'dashboard');
 
-        $request->session()->regenerate();
-        $request->session()->forget([
-            'admin_unlocked_by',
-            'admin_unlocked_at',
-            'timeclock_unlocked_by',
-            'timeclock_unlocked_at',
-        ]);
-        $request->session()->put([
-            'admin_password_unlocked_by' => $user->id,
-            'admin_password_unlocked_at' => now()->toDateTimeString(),
-        ]);
-        $request->session()->save();
+        if ($action === 'lock') {
+            $this->clearUnlockSessions($request);
 
-        return response()->json([
+            return $this->unlockResponse($request, [
+                'message' => 'Timeclock locked.',
+                'redirect' => route('timeclock.unlock'),
+            ]);
+        }
+
+        if ($action === 'unlock') {
+            $this->adminCredentialAccess->unlockTimeclockFor($request, $user);
+
+            return $this->unlockResponse($request, [
+                'message' => 'Timeclock unlocked.',
+                'redirect' => route('home'),
+            ]);
+        }
+
+        $this->adminCredentialAccess->unlockAdminFor($request, $user);
+
+        return $this->unlockResponse($request, [
             'message' => 'Admin unlocked.',
-            'redirect' => '/admin',
+            'redirect' => $this->adminCredentialAccess->adminRedirectPath($request, $user),
         ]);
+    }
+
+    /**
+     * @param  array{message: string, redirect: string}  $payload
+     */
+    private function unlockResponse(TimeclockUnlockRequest $request, array $payload): JsonResponse|RedirectResponse
+    {
+        if ($request->expectsJson()) {
+            return response()->json($payload);
+        }
+
+        return redirect()->to($payload['redirect']);
     }
 }

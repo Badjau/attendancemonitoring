@@ -18,7 +18,7 @@ class EnsureAdminDashboardUnlocked
                 ], 403);
             }
 
-            return redirect()->route('admin.access.login');
+            return redirect()->route('timeclock.unlock');
         }
 
         return $next($request);

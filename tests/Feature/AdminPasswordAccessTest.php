@@ -103,7 +103,7 @@ class AdminPasswordAccessTest extends TestCase
             'name' => 'Emergency Admin',
             'username' => 'admin',
             'email' => 'admin@example.test',
-            'password' => Hash::make('M(@!+@dmin'),
+            'password' => Hash::make('password123'),
             'is_admin' => true,
             'is_it_admin' => true,
         ]);
@@ -112,7 +112,7 @@ class AdminPasswordAccessTest extends TestCase
             ->withSession(['url.intended' => url('/admin/login')])
             ->post('/admin/login', [
                 'username' => 'admin',
-                'password' => 'M(@!+@dmin',
+                'password' => 'password123',
             ]);
 
         $response->assertRedirect('/admin');
@@ -126,7 +126,7 @@ class AdminPasswordAccessTest extends TestCase
             'name' => 'Emergency Admin',
             'username' => 'admin',
             'email' => 'admin@example.test',
-            'password' => Hash::make('M(@!+@dmin'),
+            'password' => Hash::make('password123'),
             'is_admin' => true,
             'is_it_admin' => true,
         ]);
@@ -181,7 +181,7 @@ password123
             'name' => 'Emergency Admin',
             'username' => 'admin',
             'email' => 'admin@example.test',
-            'password' => Hash::make('M(@!+@dmin'),
+            'password' => Hash::make('password123'),
             'is_admin' => true,
             'is_it_admin' => true,
         ]);
@@ -199,7 +199,7 @@ password123
             'name' => 'Emergency Admin',
             'username' => 'admin',
             'email' => 'admin@example.test',
-            'password' => Hash::make('M(@!+@dmin'),
+            'password' => Hash::make('password123'),
             'is_admin' => true,
             'is_it_admin' => true,
         ]);

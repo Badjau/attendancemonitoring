@@ -3,7 +3,6 @@
 namespace App\Services;
 
 use App\Enums\Attendance\AttendanceMethod;
-use App\Models\Employee;
 use App\Models\TimeclockAuthorizedUser;
 use App\Models\TimeclockUnlockLog;
 use App\Models\User;
@@ -13,13 +12,18 @@ use Illuminate\Validation\ValidationException;
 
 class TimeclockUnlockService
 {
-    public function store(Request $request)
+    public function authorizedUserFor(Request $request): ?TimeclockAuthorizedUser
     {
-        $authorizedUser = match ($request['method']) {
+        return match ($request['method']) {
             AttendanceMethod::RFID->value => $this->findByRfidCredential($request->credential),
             AttendanceMethod::FINGERPRINT->value => $this->findByFingerprintCredential($request->credential),
             default => $this->findByPassword($request->credential),
         };
+    }
+
+    public function store(Request $request)
+    {
+        $authorizedUser = $this->authorizedUserFor($request);
 
         if (! $authorizedUser) {
             throw ValidationException::withMessages([
@@ -45,13 +49,6 @@ class TimeclockUnlockService
             'timeclock_unlocked_by' => $authorizedUser->id,
             'timeclock_unlocked_at' => now()->toDateTimeString(),
         ]);
-
-        if ($authorizedUser->employee?->role === Employee::ROLE_ADMIN) {
-            $request->session()->put([
-                'admin_unlocked_by' => $authorizedUser->employee->id,
-                'admin_unlocked_at' => now()->toDateTimeString(),
-            ]);
-        }
 
         $request->session()->save();
 

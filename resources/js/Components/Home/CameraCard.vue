@@ -531,6 +531,14 @@ const announceAttendanceGreeting = (greeting?: AttendanceGreeting) => {
     )
 }
 
+const announceAttendanceRecorded = (result: any) => {
+    window.dispatchEvent(
+        new CustomEvent('attendance:recorded', {
+            detail: result,
+        }),
+    )
+}
+
 const focusRFID = () => {
     if (!rfidInput.value) return
     if (document.activeElement === empIdInput.value) return
@@ -1224,11 +1232,6 @@ const pollZktecoBridgeStatus = async (
                     emit('employeeVerified', status.employee || status.data.employee)
                 }
 
-                window.dispatchEvent(
-                    new CustomEvent('attendance:recorded', {
-                        detail: { payload: status },
-                    }),
-                )
                 toast.add({
                     severity: 'success',
                     summary: 'Success',
@@ -1245,6 +1248,7 @@ const pollZktecoBridgeStatus = async (
                     attendance_type: status.attendance_type || attendanceType.value,
                 })
                 resetAttendanceSelection(false)
+                announceAttendanceRecorded({ payload: status })
                 finish()
                 return
             }
@@ -1436,6 +1440,7 @@ const submitAttendance = async (
     announceAttendanceGreeting(result.payload?.greeting)
     setScannerStatus('attendance_recorded')
     resetAttendanceSelection(false)
+    announceAttendanceRecorded(result)
 }
 const base64ToBlob = (base64: string, mimeType: string): Blob => {
     const byteString = atob(base64.split(',')[1])

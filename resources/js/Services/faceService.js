@@ -1,26 +1,14 @@
+
 const defaultFaceServiceUrl = 'https://127.0.0.1:8001'
 const loopbackHosts = new Set(['127.0.0.1', 'localhost', '::1'])
 
 const isLoopbackHost = (host) => loopbackHosts.has(String(host || '').toLowerCase())
 
 export const faceServiceUrl = () => {
-    const configuredUrl = import.meta.env.VITE_FACE_SERVICE_URL || defaultFaceServiceUrl
+    const configuredUrl =
+        import.meta.env.VITE_FACE_SERVICE_URL || defaultFaceServiceUrl
 
-    if (typeof window === 'undefined' || isLoopbackHost(window.location.hostname)) {
-        return configuredUrl.replace(/\/$/, '')
-    }
-
-    try {
-        const url = new URL(configuredUrl)
-
-        if (isLoopbackHost(url.hostname)) {
-            url.hostname = window.location.hostname
-        }
-
-        return url.toString().replace(/\/$/, '')
-    } catch {
-        return configuredUrl.replace(/\/$/, '')
-    }
+    return configuredUrl.replace(/\/$/, '')
 }
 
 const jsonPayload = async (response, fallbackMessage) => {
