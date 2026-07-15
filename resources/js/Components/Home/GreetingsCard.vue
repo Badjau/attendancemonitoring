@@ -119,12 +119,12 @@ onUnmounted(() => {
 <template>
     <div
         id="greeting-card"
-        class="bg-brand-card rounded-4xl p-6 border-2 border-brand-stroke shadow-[6px_6px_0px_0px_#001e1d] animate-fade-up"
+        class="rounded-2xl border border-black/5 bg-white p-4 shadow-xl shadow-black/5 animate-fade-up"
     >
         <div class="flex items-center gap-4">
             <div
                 id="greeting-icon"
-                class="w-12 h-12 shrink-0 flex items-center justify-center rounded-xl border border-brand-stroke bg-white text-xl"
+                class="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-brand-bg/10 text-xl"
             >
                 {{ icon }}
             </div>
@@ -132,13 +132,13 @@ onUnmounted(() => {
             <div class="min-w-0">
                 <p
                     id="greeting-text"
-                    class="text-lg font-bold leading-tight text-brand-stroke wrap-break-word"
+                    class="wrap-break-word text-lg font-black leading-tight text-brand-stroke"
                 >
                     {{ title ?? getDayGreeting() }}
                 </p>
                 <p
                     id="greeting-subtext"
-                    class="text-xs font-semibold leading-snug text-brand-bg opacity-70 wrap-break-word"
+                    class="wrap-break-word text-sm font-semibold leading-snug text-black/55"
                 >
                     {{ subtitle }}
                 </p>

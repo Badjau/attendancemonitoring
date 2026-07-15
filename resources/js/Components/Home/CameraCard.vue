@@ -115,9 +115,16 @@ let isAutoFingerprintScanActive = false
 let autoFingerprintScanVersion = 0
 let zktecoEvents: EventSource | null = null
 let scannerStatusHoldUntil = 0
+let rfidScanStartedAt = 0
+let rfidLastKeyAt = 0
+let rfidKeyCount = 0
 
 const lastScannedTime = ref(0)
 const SCAN_COOLDOWN_MS = 1000
+const RFID_SCAN_MIN_LENGTH = 6
+const RFID_SCAN_IDLE_RESET_MS = 120
+const RFID_SCAN_MAX_TOTAL_MS = 350
+const RFID_SCAN_MAX_AVG_KEY_MS = 45
 const AUTO_FINGERPRINT_RETRY_MS = 500
 const AUTO_FINGERPRINT_SCAN_WINDOW_MS = 120000
 const CLOCK_SYNC_INTERVAL_MS = 60 * 60 * 1000
@@ -565,10 +572,58 @@ const forceRFIDFocus = () => {
     }
 }
 
+const resetRFIDScanCapture = () => {
+    rfidScanStartedAt = 0
+    rfidLastKeyAt = 0
+    rfidKeyCount = 0
+    rfidBuffer.value = ''
+    if (rfidTimeout) clearTimeout(rfidTimeout)
+    if (rfidInput.value) rfidInput.value.value = ''
+}
+
+const trackRFIDKeystroke = (e: KeyboardEvent) => {
+    if (e.ctrlKey || e.metaKey || e.altKey || e.key.length !== 1) return
+
+    const now = performance.now()
+
+    if (
+        !rfidScanStartedAt ||
+        (rfidLastKeyAt && now - rfidLastKeyAt > RFID_SCAN_IDLE_RESET_MS)
+    ) {
+        rfidScanStartedAt = now
+        rfidKeyCount = 0
+        rfidBuffer.value = ''
+        if (rfidTimeout) clearTimeout(rfidTimeout)
+        if (rfidInput.value) rfidInput.value.value = ''
+    }
+
+    rfidLastKeyAt = now
+    rfidKeyCount += 1
+}
+
+const isLikelyRFIDScan = (data: string) => {
+    if (data.length < RFID_SCAN_MIN_LENGTH || rfidKeyCount < RFID_SCAN_MIN_LENGTH) {
+        return false
+    }
+
+    const duration = rfidLastKeyAt - rfidScanStartedAt
+    const averageKeyMs = duration / Math.max(rfidKeyCount - 1, 1)
+
+    return (
+        duration <= RFID_SCAN_MAX_TOTAL_MS ||
+        averageKeyMs <= RFID_SCAN_MAX_AVG_KEY_MS
+    )
+}
+
 const onRFIDInput = () => {
     const data = rfidInput.value?.value.trim()
 
     if (data && data.length > 0) {
+        if (!isLikelyRFIDScan(data)) {
+            if (rfidTimeout) clearTimeout(rfidTimeout)
+            return
+        }
+
         rfidBuffer.value = data
 
         if (rfidTimeout) clearTimeout(rfidTimeout)
@@ -580,12 +635,21 @@ const onRFIDInput = () => {
 }
 
 const onRFIDKeydown = (e: KeyboardEvent) => {
+    trackRFIDKeystroke(e)
+
     if (e.key === 'Enter') {
         e.preventDefault()
 
         if (rfidTimeout) clearTimeout(rfidTimeout)
 
-        submitRFIDAttendance(rfidBuffer.value || rfidInput.value?.value)
+        const scannedRfid = (rfidBuffer.value || rfidInput.value?.value || '').trim()
+
+        if (!isLikelyRFIDScan(scannedRfid)) {
+            resetRFIDScanCapture()
+            return
+        }
+
+        submitRFIDAttendance(scannedRfid)
     }
 }
 
@@ -919,8 +983,7 @@ const submitRFIDAttendance = async (rfid: any) => {
 
     const scannedRfid = rfid?.trim()
 
-    rfidBuffer.value = ''
-    if (rfidInput.value) rfidInput.value.value = ''
+    resetRFIDScanCapture()
 
     setTimeout(() => ensureRFIDFocus(), 50)
 
@@ -1507,7 +1570,7 @@ onUnmounted(() => {
 <template>
     <div
         v-if="isCameraActive"
-        class="bg-brand-card rounded-[2.5rem] p-4 shadow-[12px_12px_0px_0px_#001e1d] border-2 border-brand-stroke relative overflow-hidden flex flex-col"
+        class="relative flex flex-col overflow-hidden rounded-2xl border border-black/5 bg-white p-4 shadow-2xl shadow-black/10"
         :class="{
             'fixed -left-[9999px] top-0 h-px w-px opacity-0 pointer-events-none':
                 isSilentCameraCapture,
@@ -1515,16 +1578,16 @@ onUnmounted(() => {
         :aria-hidden="isSilentCameraCapture"
     >
         <div
-            class="absolute top-8 left-8 z-10 bg-brand-stroke rounded-full px-4 py-2 flex items-center gap-2 shadow-lg"
+            class="absolute left-8 top-8 z-10 flex items-center gap-2 rounded-full bg-brand-bg px-4 py-2 shadow-lg"
         >
-            <div class="w-2 h-2 rounded-full bg-brand-tertiary animate-pulse" />
-            <span class="text-brand-headline text-xs font-bold tracking-widest">
+            <div class="h-2 w-2 animate-pulse rounded-full bg-white" />
+            <span class="text-xs font-black text-white">
                 LIVE
             </span>
         </div>
 
         <div
-            class="absolute top-8 right-8 z-10 bg-brand-card rounded-full px-4 py-2 flex items-center gap-2 shadow-lg border border-brand-stroke"
+            class="absolute right-8 top-8 z-10 flex items-center gap-2 rounded-full border border-black/10 bg-white px-4 py-2 shadow-lg"
         >
             <LoaderCircle
                 v-if="locationLoading"
@@ -1539,7 +1602,7 @@ onUnmounted(() => {
                 class="h-4 w-4 text-yellow-600"
             />
             <MapPin v-else class="h-4 w-4 text-green-600" />
-            <span class="text-brand-stroke text-xs font-bold tracking-widest">
+            <span class="text-xs font-bold text-brand-stroke">
                 <template v-if="locationLoading">GPS...</template>
                 <template v-else-if="locationError">GPS blocked</template>
                 <template v-else-if="usingCachedLocation">Cached GPS</template>
@@ -1550,18 +1613,8 @@ onUnmounted(() => {
         </div>
 
         <div
-            class="relative aspect-video w-full overflow-hidden rounded-4xl border-2 border-brand-stroke bg-brand-stroke"
+            class="relative aspect-video w-full overflow-hidden rounded-[1.5rem] bg-brand-stroke"
         >
-            <!--            <div-->
-            <!--                v-if="isLoading"-->
-            <!--                class="absolute flex flex-col items-center gap-3 text-brand-paragraph"-->
-            <!--            >-->
-            <!--                <Camera class="w-10 h-10 animate-bounce text-brand-accent"/>-->
-            <!--                <p class="text-sm font-bold uppercase tracking-widest">-->
-            <!--                    Waking up lens...-->
-            <!--                </p>-->
-            <!--            </div>-->
-
             <video
                 ref="videoRef"
                 autoplay
@@ -1579,7 +1632,7 @@ onUnmounted(() => {
 
             <div
                 v-if="isError"
-                class="absolute inset-0 flex items-center justify-center bg-brand-stroke/90 px-6 text-center text-brand-headline"
+                class="absolute inset-0 flex items-center justify-center bg-brand-stroke/90 px-6 text-center text-white"
             >
                 <p class="text-sm font-semibold">
                     Camera blocked. Check browser permissions to proceed.
@@ -1589,24 +1642,24 @@ onUnmounted(() => {
 
         <p
             v-if="showCamera"
-            class="text-brand-stroke text-sm text-center font-bold italic mt-5"
+            class="mt-5 text-center text-sm font-bold text-black/60"
         >
             Look straight at the camera to record your attendance.
         </p>
     </div>
 
-    <div class="flex flex-col gap-8">
+    <div class="flex flex-col gap-4">
         <div
-            class="bg-brand-card rounded-4xl p-8 shadow-[8px_8px_0px_0px_#001e1d] border-2 border-brand-stroke shrink-0 animate-fade-up"
+            class="shrink-0 rounded-2xl border border-black/5 bg-white p-4 shadow-xl shadow-black/10 animate-fade-up md:p-5"
         >
-            <div class="flex flex-col items-center text-center space-y-1 mb-8">
+            <div class="mb-5 flex flex-col items-center space-y-0 text-center">
                 <p
-                    class="text-brand-bg font-bold tracking-wider uppercase text-xs"
+                    class="text-s font-bold text-brand-bg"
                 >
                     {{ currentDate }}
                 </p>
                 <h1
-                    class="text-4xl lg:text-5xl font-black tracking-tight text-brand-stroke tabular-nums"
+                    class="font-mona-sans text-3xl font-black text-brand-stroke tabular-nums lg:text-4xl"
                 >
                     {{ currentTime }}
                 </h1>
@@ -1617,20 +1670,20 @@ onUnmounted(() => {
                     <button
                         @click="handleTimeAction('time-in')"
                         :disabled="isProcessing"
-                        class="group relative bg-brand-accent hover:bg-[#ffcf81] text-brand-stroke border-2 border-brand-stroke rounded-2xl py-4 px-3 transition-all duration-200 ease-out font-bold shadow-[4px_4px_0px_0px_#001e1d] hover:-translate-y-1 hover:shadow-[6px_6px_0px_0px_#001e1d] active:translate-x-1 active:translate-y-1 active:shadow-none flex flex-col items-center gap-2"
+                        class="group relative flex items-center justify-center gap-2 rounded-xl bg-brand-bg px-3 py-3 font-black text-white shadow-lg shadow-red-950/15 transition hover:bg-brand-tertiary focus:outline-none focus:ring-4 focus:ring-brand-bg/20"
                         :class="{
-                            'ring-4 ring-brand-stroke ring-offset-2 ring-offset-brand-card shadow-none translate-x-1 translate-y-1':
+                            'ring-4 ring-brand-bg/25 ring-offset-2 ring-offset-white':
                                 attendanceType === 'time-in',
-                            'opacity-60 cursor-not-allowed hover:translate-y-0 hover:shadow-[4px_4px_0px_0px_#001e1d]':
+                            'cursor-not-allowed opacity-60':
                                 isProcessing,
                         }"
                         :aria-pressed="attendanceType === 'time-in'"
                     >
-                        <LogIn class="w-5 h-5" />
+                        <LogIn class="h-4 w-4" />
                         <span class="text-sm">Time In</span>
                         <span
                             v-if="attendanceType === 'time-in'"
-                            class="absolute right-2 top-2 h-3 w-3 rounded-full border-2 border-brand-stroke bg-green-500"
+                            class="absolute right-2 top-2 h-2.5 w-2.5 rounded-full bg-white"
                             aria-hidden="true"
                         />
                     </button>
@@ -1638,20 +1691,20 @@ onUnmounted(() => {
                     <button
                         @click="handleTimeAction('time-out')"
                         :disabled="isProcessing"
-                        class="group relative bg-brand-tertiary hover:bg-[#f07a7b] text-brand-headline border-2 border-brand-stroke rounded-2xl py-4 px-3 transition-all duration-200 ease-out font-bold shadow-[4px_4px_0px_0px_#001e1d] hover:-translate-y-1 hover:shadow-[6px_6px_0px_0px_#001e1d] active:translate-x-1 active:translate-y-1 active:shadow-none flex flex-col items-center gap-2"
+                        class="group relative flex items-center justify-center gap-2 rounded-xl border border-brand-bg/15 bg-brand-paragraph px-3 py-3 font-black text-brand-stroke shadow-sm transition hover:border-brand-bg/30 hover:bg-white focus:outline-none focus:ring-4 focus:ring-brand-bg/15"
                         :class="{
-                            'ring-4 ring-brand-stroke ring-offset-2 ring-offset-brand-card shadow-none translate-x-1 translate-y-1':
+                            'ring-4 ring-brand-bg/25 ring-offset-2 ring-offset-white':
                                 attendanceType === 'time-out',
-                            'opacity-60 cursor-not-allowed hover:translate-y-0 hover:shadow-[4px_4px_0px_0px_#001e1d]':
+                            'cursor-not-allowed opacity-60':
                                 isProcessing,
                         }"
                         :aria-pressed="attendanceType === 'time-out'"
                     >
-                        <LogOut class="w-5 h-5" />
+                        <LogOut class="h-4 w-4" />
                         <span class="text-sm">Time Out</span>
                         <span
                             v-if="attendanceType === 'time-out'"
-                            class="absolute right-2 top-2 h-3 w-3 rounded-full border-2 border-brand-stroke bg-green-500"
+                            class="absolute right-2 top-2 h-2.5 w-2.5 rounded-full bg-brand-bg"
                             aria-hidden="true"
                         />
                     </button>
@@ -1662,7 +1715,7 @@ onUnmounted(() => {
                     type="button"
                     @click="submitFaceAttendance"
                     :disabled="isProcessing"
-                    class="mt-4 flex w-full items-center justify-center gap-2 rounded-2xl border-2 border-brand-stroke bg-brand-headline px-4 py-3 text-sm font-black text-brand-stroke shadow-[4px_4px_0px_0px_#001e1d] transition-all duration-200 ease-out hover:-translate-y-1 hover:shadow-[6px_6px_0px_0px_#001e1d] active:translate-x-1 active:translate-y-1 active:shadow-none disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:translate-y-0 disabled:hover:shadow-[4px_4px_0px_0px_#001e1d]"
+                    class="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-brand-bg/15 bg-white px-4 py-2.5 text-sm font-black text-brand-stroke shadow-sm transition hover:border-brand-bg/30 hover:bg-brand-paragraph disabled:cursor-not-allowed disabled:opacity-60"
                 >
                     <Camera class="h-5 w-5" />
                     Facial Recognition
@@ -1670,14 +1723,14 @@ onUnmounted(() => {
 
                 <div
                     v-if="props.attendanceSchedule.show_scan_status_messages"
-                    class="mt-5 rounded-2xl border-2 border-brand-stroke bg-brand-headline px-4 py-3 text-center shadow-[3px_3px_0px_0px_#001e1d]"
+                    class="mt-3 rounded-xl border border-brand-bg/15 bg-brand-paragraph px-4 py-2.5 text-center"
                     :class="{
-                        'border-red-700 bg-red-100 shadow-[3px_3px_0px_0px_#7f1d1d]':
+                        'border-red-200 bg-red-50':
                             scannerStatusTone === 'error',
                     }"
                 >
                     <p
-                        class="text-brand-stroke text-xs font-black uppercase tracking-wide"
+                        class="text-xs font-black text-brand-stroke"
                         :class="{
                             'text-red-800': scannerStatusTone === 'error',
                         }"
@@ -1688,11 +1741,11 @@ onUnmounted(() => {
 
                 <div
                     v-if="isProcessing"
-                    class="mt-5 flex items-center gap-3 rounded-2xl border-2 border-brand-stroke bg-brand-headline px-4 py-3 text-left shadow-[3px_3px_0px_0px_#001e1d]"
+                    class="mt-3 flex items-center gap-3 rounded-xl border border-brand-bg/15 bg-brand-paragraph px-4 py-2.5 text-left"
                 >
                     <LoaderCircle class="h-5 w-5 shrink-0 animate-spin text-brand-stroke" />
                     <p
-                        class="text-brand-stroke font-bold tracking-wider uppercase text-xs"
+                        class="text-xs font-black text-brand-stroke"
                     >
                         {{ processingLabel }}
                     </p>
@@ -1713,7 +1766,7 @@ onUnmounted(() => {
                         <div class="flex items-center justify-center">
                             <div
                                 v-if="showEmployeeIdInputField"
-                                class="mx-auto mt-4 w-full max-w-64"
+                                class="mx-auto mt-3 w-full max-w-80"
                             >
                                 <input
                                     ref="empIdInput"
@@ -1726,50 +1779,50 @@ onUnmounted(() => {
                                     autocapitalize="off"
                                     spellcheck="false"
                                     style="-webkit-text-security: disc"
-                                    class="mb-2 h-9 w-full rounded-lg border-2 border-brand-stroke bg-brand-headline px-3 text-center text-sm font-black tracking-[0.25em] text-brand-stroke"
+                                    class="mb-2 h-12 w-full rounded-lg border border-brand-bg/20 bg-white px-3 text-center text-3xl font-black text-brand-stroke shadow-inner"
                                     @focus="onEmpIdFocus"
                                     @input="onEmpIdInput"
                                     @keydown="onEmpIdKeydown"
                                 />
 
-                                <div class="grid grid-cols-3 gap-1.5">
+                                <div class="grid grid-cols-3 gap-2">
                                     <button
                                         v-for="digit in keypadDigits.slice(0, 9)"
                                         :key="digit"
                                         type="button"
-                                        class="flex h-9 items-center justify-center rounded-lg border-2 border-brand-stroke bg-brand-headline text-sm font-black text-brand-stroke shadow-[2px_2px_0px_0px_#001e1d] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none"
+                                        class="flex h-12 items-center justify-center rounded-lg border border-brand-bg/15 bg-white text-lg font-black text-brand-stroke shadow-sm active:scale-95"
                                         @click="appendKeypadDigit(digit)"
                                     >
                                         {{ digit }}
                                     </button>
                                     <button
                                         type="button"
-                                        class="flex h-9 items-center justify-center rounded-lg border-2 border-brand-stroke bg-brand-tertiary text-brand-headline shadow-[2px_2px_0px_0px_#001e1d] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none"
+                                        class="flex h-12 items-center justify-center rounded-lg bg-brand-tertiary text-white shadow-sm active:scale-95"
                                         aria-label="Clear"
                                         @click="clearKeypad"
                                     >
-                                        <Eraser class="h-4 w-4" />
+                                        <Eraser class="h-5 w-5" />
                                     </button>
                                     <button
                                         type="button"
-                                        class="flex h-9 items-center justify-center rounded-lg border-2 border-brand-stroke bg-brand-headline text-sm font-black text-brand-stroke shadow-[2px_2px_0px_0px_#001e1d] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none"
+                                        class="flex h-12 items-center justify-center rounded-lg border border-brand-bg/15 bg-white text-lg font-black text-brand-stroke shadow-sm active:scale-95"
                                         @click="appendKeypadDigit('0')"
                                     >
                                         0
                                     </button>
                                     <button
                                         type="button"
-                                        class="flex h-9 items-center justify-center rounded-lg border-2 border-brand-stroke bg-brand-headline text-brand-stroke shadow-[2px_2px_0px_0px_#001e1d] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none"
+                                        class="flex h-12 items-center justify-center rounded-lg border border-brand-bg/15 bg-white text-brand-stroke shadow-sm active:scale-95"
                                         aria-label="Delete"
                                         @click="deleteKeypadDigit"
                                     >
-                                        <Delete class="h-4 w-4" />
+                                        <Delete class="h-5 w-5" />
                                     </button>
                                 </div>
 
                                 <button
                                     type="button"
-                                    class="mt-2 flex h-9 w-full items-center justify-center rounded-lg border-2 border-brand-stroke bg-brand-accent text-xs font-black text-brand-stroke shadow-[3px_3px_0px_0px_#001e1d] active:translate-x-1 active:translate-y-1 active:shadow-none"
+                                    class="mt-2 flex h-11 w-full items-center justify-center rounded-lg bg-brand-bg text-sm font-black text-white shadow-md shadow-red-950/10 active:scale-[0.98]"
                                     @click="submitManualAttendance"
                                 >
                                     Enter
@@ -1783,7 +1836,7 @@ onUnmounted(() => {
                             !showEmployeeIdInputField &&
                             faceStatusText !== 'Face verification ready.'
                         "
-                        class="text-brand-bg text-xs font-black uppercase tracking-wide"
+                        class="text-xs font-black text-brand-bg"
                     >
                         {{ faceStatusText }}
                     </p>

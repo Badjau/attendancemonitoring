@@ -99,57 +99,96 @@ onUnmounted(() => {
 
     <Toast />
 
-    <div class="min-h-screen p-4 md:p-8 flex flex-col antialiased">
-        <header class="fixed left-3 top-3 z-20 md:left-5 md:top-5">
-            <div class="flex items-center gap-3">
-                <img
-                    src="/images/mcasia-logo.png"
-                    alt="TimeClock logo"
-                    class="h-11 w-11 rounded-xl border-2 border-brand-stroke bg-brand-card object-contain p-1.5 shadow-[3px_3px_0px_0px_#001e1d] md:h-12 md:w-12"
-                />
+    <div class="min-h-screen bg-[#f0eeea] text-brand-stroke antialiased">
+        <header
+            class="sticky top-0 z-30 border-b border-black/5 bg-white/95 px-4 py-3 shadow-sm backdrop-blur md:px-8"
+        >
+            <div class="mx-auto flex max-w-7xl items-center justify-between gap-4">
+                <div class="flex items-center gap-3">
+                    <img
+                        src="/images/mcasia-logo.png"
+                        alt="McAsia"
+                        class="h-6 w-6 rounded bg-white object-contain p-1 shadow-sm ring-1 ring-black/10 md:h-8 md:w-8"
+                    />
+                    <div class="leading-tight">
+                        <p class="text-sm font-black text-brand-bg md:text-base">
+                            McAsia Attendance
+                        </p>
+                        <p class="text-xs font-semibold text-black/55">
+                            Workforce monitoring system
+                        </p>
+                    </div>
+                </div>
+
+                <Link
+                    href="/unlock"
+                    class="inline-flex items-center justify-center rounded-full bg-brand-bg px-5 py-3 text-xs font-black text-white shadow-lg shadow-red-950/15 transition hover:bg-brand-tertiary focus:outline-none focus:ring-4 focus:ring-brand-bg/20"
+                >
+                    Lock / Unlock
+                </Link>
             </div>
         </header>
 
-        <Link
-            href="/unlock"
-            class="fixed right-3 top-3 z-20 inline-flex items-center justify-center rounded-2xl border-2 border-brand-stroke bg-brand-stroke px-4 py-3 text-xs font-black uppercase tracking-widest text-brand-headline shadow-[4px_4px_0px_0px_#abd1c6] transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[6px_6px_0px_0px_#abd1c6] active:translate-x-1 active:translate-y-1 active:shadow-none md:right-5 md:top-5"
-        >
-            Lock / Unlock
-        </Link>
-
-        <!-- Toast Notification Container -->
-        <main
-            class="max-w-450 w-full mx-auto grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-8 grow items-stretch"
-        >
-            <!-- ================= 1. RIGHT COLUMN: Feed & Staff ================= -->
-            <FeedAndStaff
-                :today-birthday-celebrants="props.todayBirthdayCelebrants"
-                :announcements="props.announcements"
-            />
-
-            <!-- ================= 2. CENTER COLUMN: Camera ================= -->
+        <main class="mx-auto w-full max-w-[94rem] px-3 py-4 md:px-5 md:py-5">
+            
             <section
-                class="flex flex-col gap-3 col-span-1 md:col-span-2 animate-fade-up order-1 xl:order-2"
-                style="animation-delay: 0.2s"
+                class="grid grid-cols-1 gap-4 lg:grid-cols-[340px_minmax(0,1fr)_340px] xl:grid-cols-[380px_minmax(0,1.05fr)_380px]"
             >
-                <!-- Camera Card -->
-                <CameraCard
-                    :employees="props.employeesWithFaces"
-                    :attendance-schedule="props.attendanceSchedule"
-                    :scan-status-messages="props.scanStatusMessages"
-                    :zkteco-bridge-url="props.zktecoBridgeUrl"
-                    @employee-verified="setActiveBranch"
+                <FeedAndStaff
+                    :today-birthday-celebrants="props.todayBirthdayCelebrants"
+                    :announcements="props.announcements"
                 />
 
-                <!-- Greetings -->
-                <GreetingsCard />
+                <div class="flex flex-col gap-3">
+                    <GreetingsCard />
+                    <CameraCard
+                        :employees="props.employeesWithFaces"
+                        :attendance-schedule="props.attendanceSchedule"
+                        :scan-status-messages="props.scanStatusMessages"
+                        :zkteco-bridge-url="props.zktecoBridgeUrl"
+                        @employee-verified="setActiveBranch"
+                    />
+                </div>
+
+                <div class="flex flex-col gap-3">
+                    <section
+                        class="rounded-2xl bg-brand-bg p-4 text-white shadow-xl shadow-red-950/15"
+                    >
+                        <div class="grid grid-cols-3 gap-2 text-center">
+                            <div class="rounded-xl bg-white/15 p-2">
+                                <p class="text-xl font-black">
+                                    {{ props.attendanceToday.length }}
+                                </p>
+                                <p class="text-[11px] font-bold text-white/75">
+                                    Present
+                                </p>
+                            </div>
+                            <div class="rounded-xl bg-white/15 p-2">
+                                <p class="text-xl font-black">
+                                    {{ props.announcements.length }}
+                                </p>
+                                <p class="text-[11px] font-bold text-white/75">
+                                    Updates
+                                </p>
+                            </div>
+                            <div class="rounded-xl bg-white/15 p-2">
+                                <p class="text-xl font-black">
+                                    {{ props.todayBirthdayCelebrants.length }}
+                                </p>
+                                <p class="text-[11px] font-bold text-white/75">
+                                    Birthdays
+                                </p>
+                            </div>
+                        </div>
+                    </section>
+
+                    <PresentToday
+                        :attendance-today="props.attendanceToday"
+                        :active-branch="activeBranch"
+                    />
+                </div>
             </section>
 
-            <!-- ================= 3. LEFT COLUMN: Present Today ================= -->
-            <PresentToday
-                :attendance-today="props.attendanceToday"
-                :active-branch="activeBranch"
-            />
         </main>
     </div>
 </template>
@@ -180,4 +219,5 @@ onUnmounted(() => {
 .animate-fade-up {
     animation: slideIn 0.4s ease-out forwards;
 }
+
 </style>

@@ -10,13 +10,13 @@
     --font-sans: 'Instrument Sans', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji',
     'Segoe UI Symbol', 'Noto Color Emoji';
 
-    --color-brand-bg: #004643;
-    --color-brand-card: #e8e4e6;
-    --color-brand-accent: #f9bc60;
+    --color-brand-bg: #7f1218;
+    --color-brand-card: #ffffff;
+    --color-brand-accent: #f4b24f;
     --color-brand-headline: #fffffe;
-    --color-brand-paragraph: #abd1c6;
-    --color-brand-stroke: #001e1d;
-    --color-brand-tertiary: #e16162;
+    --color-brand-paragraph: #f4f1ed;
+    --color-brand-stroke: #242424;
+    --color-brand-tertiary: #b71c24;
 }
 
 @font-face {
@@ -26,8 +26,8 @@
 }
 
 body {
-    background-color: #004643;
-    color: #abd1c6;
+    background-color: #f0eeea;
+    color: #242424;
     font-family: "Instrument Sans", sans-serif;
 }
 
