@@ -1,26 +1,28 @@
 # ZKTeco Fingerprint Scanner Setup Guide
 
-This guide explains how to set up the ZKTeco fingerprint scanner integration from start to finish.
+This guide explains the current ZKTeco fingerprint setup for the Laravel attendance app.
 
 The integration has two parts:
 
 - Laravel web app: stores employees, fingerprint templates, fingerprint images, and attendance logs.
-- C# ZKTeco Bridge: talks directly to the scanner SDK, displays the scanned fingerprint, enrolls templates, matches scans, and sends data to Laravel.
+- ZKTeco Local Agent: a Windows tray/background app that talks to the USB scanner, listens on `http://127.0.0.1:8765`, syncs templates from Laravel, and sends enrollment or attendance results back to Laravel.
 
-Browsers cannot directly access USB fingerprint scanners, so the C# bridge is required.
+Browsers cannot directly access USB fingerprint scanners. The browser talks to the local agent on the same Windows PC as the scanner.
+
+The old `tools\ZKTecoBridge` project and `RegisterProtocol.ps1` flow are no longer used. Use `tools\ZktecoLocalAgent`.
 
 ## 1. Requirements
 
-Use the same Windows machine where the scanner is plugged in.
+Use the Windows machine where the scanner is plugged in.
 
 Required software:
 
-- Laragon
+- Laragon, if this PC also hosts the Laravel app
 - PHP and Composer
 - Node.js and npm
-- .NET SDK capable of building .NET Framework projects through `dotnet build`
+- .NET SDK 8
 - ZKTeco scanner driver
-- ZKTeco Finger SDK files
+- ZKTeco Finger SDK DLLs
 
 Project path used by this guide:
 
@@ -28,27 +30,15 @@ Project path used by this guide:
 C:\laragon\www\attendancemonitoring
 ```
 
-SDK path used by this guide:
-
-```text
-C:\Users\James-IT-Prog\Downloads\ZKFingerSDK 5.3_ZK10.0\ZKFingerSDK 5.3_Windows_ZK10.0
-```
-
 ## 2. Install The ZKTeco Driver
 
-Install the driver before running the bridge app.
-
-Run:
-
-```text
-C:\Users\James-IT-Prog\Downloads\ZKFingerSDK 5.3_ZK10.0\ZKFingerSDK 5.3_Windows_ZK10.0\driver\5.3.0.26\setup.exe
-```
+Install the scanner driver before running the local agent.
 
 After installation:
 
 1. Plug in the ZKTeco fingerprint scanner.
 2. Wait for Windows to finish device setup.
-3. If the bridge later says no scanner is connected, unplug and reconnect the scanner.
+3. If the agent later says no scanner is connected, unplug and reconnect the scanner.
 
 ## 3. Configure Laravel
 
@@ -66,155 +56,160 @@ Generate a scanner token:
 
 Copy the generated value.
 
-Open `.env` and add:
+Open `.env` and set:
 
 ```env
 ZKTECO_SCANNER_TOKEN=PASTE_GENERATED_TOKEN_HERE
 ZKTECO_BRIDGE_URL=http://127.0.0.1:8765
+ZKTECO_LOCAL_BRIDGE_URL=http://127.0.0.1:8765
 ```
 
-Clear Laravel config:
+Clear Laravel config and run migrations:
 
 ```powershell
 php artisan config:clear
-```
-
-Run migrations:
-
-```powershell
 php artisan migrate
 ```
 
-This creates the table:
+The fingerprint templates are stored in:
 
 ```text
 zkteco_fingerprint_templates
 ```
 
-That table stores:
+## 4. Choose The Correct Laravel API URL
 
-- employee ID
-- ZKTeco fingerprint template
-- enrolled fingerprint image
-- scanner serial/name
-- enrollment date
+`ApiBaseUrl` is the Laravel URL the local agent calls. It must include `/api/zkteco`.
 
-## 4. Configure The C# Bridge
-
-Open:
+For Laragon HTTPS, use the HTTPS site URL:
 
 ```text
-C:\laragon\www\attendancemonitoring\tools\ZKTecoBridge\App.config
+https://attendancemonitoring.test/api/zkteco
 ```
 
-Confirm these values:
+or, for LAN/server testing:
 
-```xml
-<add key="ApiBaseUrl" value="http://attendancemonitoring.test/api/zkteco" />
-<add key="ScannerToken" value="PASTE_GENERATED_TOKEN_HERE" />
-<add key="DeviceSerial" value="ZKTECO-LOCAL" />
-<add key="LocalBridgeUrl" value="http://127.0.0.1:8765/" />
+```text
+https://SERVER_IP/api/zkteco
 ```
 
-Important:
+Only use this URL if you are actually running `php artisan serve` on port `8000`:
 
-- `ScannerToken` must exactly match `ZKTECO_SCANNER_TOKEN` in Laravel `.env`.
-- `ApiBaseUrl` must point to your Laravel app.
-- If you use `php artisan serve`, use:
-
-```xml
-<add key="ApiBaseUrl" value="http://127.0.0.1:8000/api/zkteco" />
+```text
+http://127.0.0.1:8000/api/zkteco
 ```
 
-If you use Laragon virtual host, use:
+Laragon being started does not mean port `8000` is listening. Laragon Apache normally serves the app on port `80` or `443`.
 
-```xml
-<add key="ApiBaseUrl" value="http://attendancemonitoring.test/api/zkteco" />
+Keep the local agent listener as HTTP loopback:
+
+```text
+LocalListenUrl = http://127.0.0.1:8765
 ```
 
-## 5. Build The Bridge App
+Do not change `LocalListenUrl` to HTTPS unless you also implement certificate binding for the local agent.
+
+## 5. Copy The ZKTeco SDK DLLs
+
+Copy these files into:
+
+```text
+tools\ZktecoLocalAgent\lib\x86
+```
+
+Required files:
+
+- `libzkfpcsharp.dll`
+- `libzkfp.dll`
+- `ZKFPCap.dll`
+
+The agent is published as a self-contained `win-x86` app because the ZKTeco SDK DLLs are x86.
+
+## 6. Publish The Local Agent
 
 Run:
 
 ```powershell
 cd C:\laragon\www\attendancemonitoring
-dotnet build .\tools\ZKTecoBridge\ZKTecoBridge.csproj -p:Configuration=Debug -p:Platform=x86
+
+dotnet publish .\tools\ZktecoLocalAgent\ZktecoLocalAgent.csproj -c Release -r win-x86 --self-contained true -o .\tools\ZktecoLocalAgent\publish
 ```
 
-Expected output:
+Important: `dotnet build` is only a compile check. The installer copies from:
 
 ```text
-Build succeeded.
+tools\ZktecoLocalAgent\publish
 ```
 
-The executable will be created here:
+Always run `dotnet publish` before reinstalling the agent.
 
-```text
-C:\laragon\www\attendancemonitoring\tools\ZKTecoBridge\bin\x86\Debug\ZKTecoBridge.exe
+If publish fails because stale generated output is locked or corrupted, close the agent and remove generated folders:
+
+```bat
+rmdir /s /q tools\ZktecoLocalAgent\bin
+rmdir /s /q tools\ZktecoLocalAgent\obj
 ```
 
-The build may show warnings from `BitmapFormat.cs`. Those warnings are from the SDK sample helper and do not block the bridge.
+Then run `dotnet publish` again.
 
-## 6. Register Automatic Browser Launch
+## 7. Install The Local Agent
 
-This lets the web app open the bridge automatically when you click the ZKTeco enrollment button.
-
-Run this once:
+Run the installer after publishing:
 
 ```powershell
 cd C:\laragon\www\attendancemonitoring
-powershell -ExecutionPolicy Bypass -File .\tools\ZKTecoBridge\RegisterProtocol.ps1
+
+.\tools\ZktecoLocalAgent\Installer\install-agent.ps1 `
+  -ApiBaseUrl "https://attendancemonitoring.test/api/zkteco" `
+  -ScannerToken "PASTE_GENERATED_TOKEN_HERE" `
+  -DeviceSerial "ZKTECO-LOCAL"
 ```
 
-This registers the custom Windows URL protocol:
+For LAN/server testing, replace `ApiBaseUrl` with:
 
 ```text
-zkteco-bridge://
+https://SERVER_IP/api/zkteco
 ```
 
-After this setup, the browser can ask Windows to open:
+The installer:
+
+- Stops any running `ZktecoLocalAgent.exe`.
+- Copies published files to `%LOCALAPPDATA%\ZktecoLocalAgent`.
+- Writes `%LOCALAPPDATA%\ZktecoLocalAgent\appsettings.json`.
+- Registers the agent to start on Windows logon.
+- Starts the agent.
+
+The installed `appsettings.json` is the runtime config. Editing `tools\ZktecoLocalAgent\appsettings.json` does not change the already installed agent.
+
+## 8. Verify The Agent
+
+Open this on the scanner PC:
 
 ```text
-zkteco-bridge://enroll
+http://127.0.0.1:8765/health
 ```
 
-The browser may show a confirmation prompt. Click allow/open.
+Expected when the scanner and SDK are ready:
 
-## 7. Start Laravel
+- `ok: true`
+- `scanner_available: true`
+- `sdk_available: true`
 
-If using Laragon virtual host, make sure Laragon is running and your site is accessible:
+Check current state:
 
 ```text
-http://attendancemonitoring.test
+http://127.0.0.1:8765/status
 ```
 
-If using Laravel's built-in server:
-
-```powershell
-cd C:\laragon\www\attendancemonitoring
-php artisan serve
-```
-
-Then use:
+Check logs:
 
 ```text
-http://127.0.0.1:8000
+%LOCALAPPDATA%\ZktecoLocalAgent\logs
 ```
 
-Make sure `ApiBaseUrl` in `App.config` matches the URL you are using.
+The tray menu also has `Status`, `Restart`, `Open log folder`, and `Exit`.
 
-## 8. Build Frontend Assets
-
-Run:
-
-```powershell
-cd C:\laragon\www\attendancemonitoring
-npm run build
-```
-
-This includes the JavaScript used by the employee fingerprint modal.
-
-## 9. Test Laravel API
+## 9. Test The Laravel API
 
 Use the same token from `.env`.
 
@@ -222,140 +217,79 @@ Use the same token from `.env`.
 $token = "PASTE_GENERATED_TOKEN_HERE"
 
 Invoke-RestMethod `
-  -Uri "http://attendancemonitoring.test/api/zkteco/employees" `
+  -Uri "https://attendancemonitoring.test/api/zkteco/fingerprints/manifest" `
   -Headers @{ Authorization = "Bearer $token" }
 ```
 
-Expected result:
-
-```text
-data
-----
-{...}
-```
-
-If using `php artisan serve`, use:
+For LAN/server testing:
 
 ```powershell
 Invoke-RestMethod `
-  -Uri "http://127.0.0.1:8000/api/zkteco/employees" `
+  -Uri "https://SERVER_IP/api/zkteco/fingerprints/manifest" `
   -Headers @{ Authorization = "Bearer $token" }
 ```
 
-Test fingerprint list:
+If this fails from the scanner PC, fix Laravel HTTPS/network access before troubleshooting the scanner.
 
-```powershell
-Invoke-RestMethod `
-  -Uri "http://attendancemonitoring.test/api/zkteco/fingerprints" `
-  -Headers @{ Authorization = "Bearer $token" }
-```
+## 10. Test Enrollment
 
-It may return an empty `data` array before enrollment. That is normal.
+Use the browser on the same PC as the scanner.
 
-## 10. Open The Bridge Manually For First Test
+1. Confirm `http://127.0.0.1:8765/health` responds.
+2. Open the Laravel admin panel.
+3. Open the employee fingerprint registration flow.
+4. Start ZKTeco enrollment.
+5. Scan the same finger 3 times.
+6. Submit/save the enrollment when the browser prompts.
+7. Refresh the employee page and confirm the ZKTeco fingerprint summary is shown.
 
-Before relying on automatic launch, test the bridge manually once.
-
-```powershell
-cd C:\laragon\www\attendancemonitoring
-.\tools\ZKTecoBridge\bin\x86\Debug\ZKTecoBridge.exe
-```
-
-Expected behavior:
-
-- The window opens.
-- It initializes the scanner.
-- It logs local bridge listening on:
+The browser should call:
 
 ```text
-http://127.0.0.1:8765/
+http://127.0.0.1:8765/commands/...
 ```
 
-If no scanner is connected, the bridge will show an error. Install the driver and reconnect the scanner.
+No custom URL protocol registration is required.
 
-## 11. Enroll Fingerprint From Employee Registration
+## 11. Test Attendance
 
-Go to the admin panel:
-
-```text
-http://attendancemonitoring.test/admin
-```
-
-Open:
-
-```text
-Employees > View or Edit Employee > Fingerprint
-```
-
-You will see two fingerprint areas:
-
-- Browser fingerprint: WebAuthn/passkey fingerprint.
-- ZKTeco scanner fingerprint: USB scanner enrollment.
-
-For ZKTeco enrollment:
-
-1. Open the employee.
-2. Go to the fingerprint registration modal/step.
-3. Click **Start ZKTeco enrollment**.
-4. If the bridge is already open, it will receive the employee immediately.
-5. If the bridge is closed, the browser will try to open `ZKTecoBridge.exe`.
-6. Allow the browser prompt if shown.
-7. Scan the same finger 3 times.
-8. Wait for the bridge to show enrollment success.
-
-After enrollment:
-
-1. Refresh the employee page.
-2. The fingerprint summary should show a ZKTeco scanner fingerprint.
-3. The employee listing should show the enrolled fingerprint image in the `Fingerprint` column.
-
-## 12. Test Attendance By Fingerprint
-
-Open the bridge app.
-
-Make sure it logs that fingerprint templates were synced.
-
-Then scan an enrolled finger.
-
-Expected behavior:
-
-- The bridge displays the scanned fingerprint image.
-- The bridge identifies the employee locally using the ZKTeco SDK.
-- The bridge posts attendance to Laravel.
-- Laravel creates an attendance record with:
+1. Confirm the agent is running.
+2. Open the attendance/timeclock page in the browser on the scanner PC.
+3. Start the fingerprint attendance action.
+4. Scan an enrolled finger.
+5. Complete the browser flow.
+6. Confirm Laravel creates an attendance record with:
 
 ```text
 attendance_method = fingerprint
 ```
 
-Check the attendance list in admin.
-
-## 13. How The Data Flow Works
+## 12. Data Flow
 
 Enrollment:
 
 ```text
 Admin employee page
-  -> Start ZKTeco enrollment
-  -> Browser calls local bridge
-  -> Bridge activates selected employee
-  -> Scanner captures finger 3 times
+  -> Browser calls local agent at 127.0.0.1:8765
+  -> Agent captures the same finger 3 times
   -> SDK merges scans into one template
-  -> Bridge sends template + image to Laravel
+  -> Browser commits enrollment
+  -> Agent sends template + image to Laravel
   -> Laravel stores it in zkteco_fingerprint_templates
 ```
 
 Attendance:
 
 ```text
-Scanner captures finger
-  -> Bridge compares scan against synced templates
-  -> Bridge finds matching employee
-  -> Bridge sends attendance request to Laravel
+Timeclock page
+  -> Browser starts a local agent attendance command
+  -> Agent compares scan against synced templates
+  -> Browser completes photo/facial verification when required
+  -> Agent sends attendance request to Laravel
   -> Laravel records attendance
 ```
 
-## 14. Important Files
+## 13. Important Files
 
 Laravel API:
 
@@ -364,56 +298,63 @@ app\Http\Controllers\Api\ZktecoFingerprintController.php
 routes\api.php
 ```
 
-Fingerprint storage:
+Browser integration:
 
 ```text
-app\Models\ZktecoFingerprintTemplate.php
-database\migrations\2026_05_25_000001_create_zkteco_fingerprint_templates_table.php
-```
-
-Employee registration UI:
-
-```text
-resources\views\filament\admin\employees\fingerprint-enrollment.blade.php
-resources\views\filament\admin\employees\fingerprint-summary.blade.php
 resources\js\filament-fingerprint-enrollment.js
 ```
 
-Employee listing fingerprint preview:
+Local agent source:
 
 ```text
-app\Filament\Admin\Resources\Employees\Tables\EmployeesTable.php
+tools\ZktecoLocalAgent\ZktecoLocalAgent.csproj
+tools\ZktecoLocalAgent\Program.cs
+tools\ZktecoLocalAgent\Services\LaravelApiClient.cs
+tools\ZktecoLocalAgent\Services\TemplateSyncService.cs
+tools\ZktecoLocalAgent\Installer\install-agent.ps1
 ```
 
-C# bridge:
+Installed agent:
 
 ```text
-tools\ZKTecoBridge\ZKTecoBridge.csproj
-tools\ZKTecoBridge\MainForm.cs
-tools\ZKTecoBridge\App.config
-tools\ZKTecoBridge\RegisterProtocol.ps1
+%LOCALAPPDATA%\ZktecoLocalAgent
 ```
 
-## 15. Troubleshooting
+## 14. Troubleshooting
 
-### Bridge says no scanner connected
+### Fingerprint sync failed: connection refused on 127.0.0.1:8000
 
-Check:
+The installed agent is pointing to Laravel's built-in dev server URL, but `php artisan serve` is not running.
 
-- Driver is installed.
-- Scanner is plugged in.
-- Scanner appears in Windows Device Manager.
-- No other app is using the scanner.
-
-Reinstall driver if needed:
+Open:
 
 ```text
-C:\Users\James-IT-Prog\Downloads\ZKFingerSDK 5.3_ZK10.0\ZKFingerSDK 5.3_Windows_ZK10.0\driver\5.3.0.26\setup.exe
+%LOCALAPPDATA%\ZktecoLocalAgent\appsettings.json
 ```
+
+Set `ApiBaseUrl` to the real Laravel URL, for example:
+
+```json
+"ApiBaseUrl": "https://attendancemonitoring.test/api/zkteco"
+```
+
+Keep:
+
+```json
+"LocalListenUrl": "http://127.0.0.1:8765"
+```
+
+Restart the agent after editing the installed config.
+
+### install-https-autostart was run but the agent still uses 127.0.0.1:8000
+
+`tools\install-https-autostart.cmd` configures Apache HTTPS, firewall rules, the Laravel `APP_URL`, and the Apache watchdog scheduled task. It does not install or reconfigure the fingerprint agent.
+
+Run `dotnet publish`, then `tools\ZktecoLocalAgent\Installer\install-agent.ps1` with the correct `ApiBaseUrl`.
 
 ### Invalid scanner token
 
-The token in Laravel `.env` and bridge `App.config` do not match.
+The token in Laravel `.env` and the installed agent config do not match.
 
 Check:
 
@@ -421,10 +362,10 @@ Check:
 ZKTECO_SCANNER_TOKEN=...
 ```
 
-And:
+and:
 
-```xml
-<add key="ScannerToken" value="..." />
+```text
+%LOCALAPPDATA%\ZktecoLocalAgent\appsettings.json
 ```
 
 Then run:
@@ -433,69 +374,38 @@ Then run:
 php artisan config:clear
 ```
 
-Restart the bridge.
+Restart the agent.
 
-### Browser button does not open the bridge
+### Agent says no scanner connected
 
-Run the protocol registration command again:
+Check:
 
-```powershell
-cd C:\laragon\www\attendancemonitoring
-powershell -ExecutionPolicy Bypass -File .\tools\ZKTecoBridge\RegisterProtocol.ps1
-```
+- Driver is installed.
+- Scanner is plugged in.
+- Scanner appears in Windows Device Manager.
+- No other app is using the scanner.
+- The required ZKTeco SDK DLLs exist in the published and installed agent folder.
 
-Then click **Start ZKTeco enrollment** again.
+### Browser cannot connect to 127.0.0.1:8765
 
-The browser may ask permission to open the app. Allow it.
+Check:
 
-### Bridge opens but does not connect to Laravel
+- `ZktecoLocalAgent.exe` is running.
+- `http://127.0.0.1:8765/health` responds on the scanner PC.
+- The browser is running on the same PC as the USB scanner.
 
-Check `ApiBaseUrl` in:
+### Fingerprint templates do not refresh after connection loss or Laravel restart
+
+The current local agent retries sync automatically and can try configured fallback URLs. Confirm the installed agent was republished/reinstalled after agent code changes.
+
+Check:
 
 ```text
-tools\ZKTecoBridge\App.config
+%LOCALAPPDATA%\ZktecoLocalAgent\appsettings.json
+%LOCALAPPDATA%\ZktecoLocalAgent\logs
 ```
 
-If Laravel is on Laragon virtual host:
-
-```xml
-<add key="ApiBaseUrl" value="http://attendancemonitoring.test/api/zkteco" />
-```
-
-If Laravel is on `php artisan serve`:
-
-```xml
-<add key="ApiBaseUrl" value="http://127.0.0.1:8000/api/zkteco" />
-```
-
-Restart the bridge after changing `App.config`.
-
-### Fingerprint enrollment crashes with `Value cannot be null. Parameter name: arr`
-
-This was caused by an invalid stored template being loaded into the SDK. The bridge now skips invalid templates.
-
-If it still happens:
-
-1. Rebuild the bridge.
-2. Restart the bridge.
-3. Check the `zkteco_fingerprint_templates` table for rows with empty `template_base64`.
-
-### Employee listing does not show fingerprint image
-
-Only ZKTeco enrollments created through the bridge store `fingerprint_image_base64`.
-
-Older rows may have templates without an image. Re-enroll the employee to store the preview image.
-
-### Attendance fails because of location/geofence
-
-The attendance service may require location if the employee has strict zone rules.
-
-For fixed scanner terminals, either:
-
-- configure a scanner location in the bridge/API payload, or
-- adjust geofence rules for employees using the scanner.
-
-## 16. Maintenance Notes
+## 15. Maintenance
 
 When changing frontend JavaScript:
 
@@ -503,10 +413,15 @@ When changing frontend JavaScript:
 npm run build
 ```
 
-When changing C# bridge code:
+When changing C# local agent code:
 
 ```powershell
-dotnet build .\tools\ZKTecoBridge\ZKTecoBridge.csproj -p:Configuration=Debug -p:Platform=x86
+dotnet publish .\tools\ZktecoLocalAgent\ZktecoLocalAgent.csproj -c Release -r win-x86 --self-contained true -o .\tools\ZktecoLocalAgent\publish
+
+.\tools\ZktecoLocalAgent\Installer\install-agent.ps1 `
+  -ApiBaseUrl "https://attendancemonitoring.test/api/zkteco" `
+  -ScannerToken "PASTE_GENERATED_TOKEN_HERE" `
+  -DeviceSerial "ZKTECO-LOCAL"
 ```
 
 When changing `.env`:
@@ -521,20 +436,18 @@ When adding/changing database tables:
 php artisan migrate
 ```
 
-## 17. Quick Full Setup Checklist
+## 16. Quick Setup Checklist
 
-1. Install ZKTeco driver.
-2. Plug in scanner.
+1. Install the ZKTeco driver.
+2. Plug in the scanner.
 3. Add `ZKTECO_SCANNER_TOKEN` to Laravel `.env`.
-4. Add same token to `tools\ZKTecoBridge\App.config`.
-5. Confirm `ApiBaseUrl` in `App.config`.
-6. Run `php artisan config:clear`.
-7. Run `php artisan migrate`.
-8. Run `npm run build`.
-9. Build bridge with `dotnet build`.
-10. Register protocol with `RegisterProtocol.ps1`.
-11. Open admin employee fingerprint registration.
-12. Click **Start ZKTeco enrollment**.
-13. Scan the same finger 3 times.
-14. Refresh employee listing and confirm fingerprint image appears.
-15. Scan enrolled finger in bridge and confirm attendance record is created.
+4. Set `ZKTECO_BRIDGE_URL` and `ZKTECO_LOCAL_BRIDGE_URL` to `http://127.0.0.1:8765`.
+5. Run `php artisan config:clear`.
+6. Run `php artisan migrate`.
+7. Copy the ZKTeco SDK DLLs into `tools\ZktecoLocalAgent\lib\x86`.
+8. Run `dotnet publish` for `tools\ZktecoLocalAgent\ZktecoLocalAgent.csproj`.
+9. Run `tools\ZktecoLocalAgent\Installer\install-agent.ps1` with the correct HTTPS `ApiBaseUrl`.
+10. Open `http://127.0.0.1:8765/health`.
+11. Run `npm run build` if frontend assets changed.
+12. Test ZKTeco enrollment from the employee fingerprint page.
+13. Test fingerprint attendance from the scanner PC.

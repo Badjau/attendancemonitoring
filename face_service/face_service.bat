@@ -62,6 +62,6 @@ if errorlevel 1 (
 )
 
 echo Starting face recognition service at https://127.0.0.1:8001
-python -m uvicorn app.main:app --host 0.0.0.0 --port 8001 --ssl-keyfile "%SSL_KEY%" --ssl-certfile "%SSL_CERT%"
+python run.py
 
 pause

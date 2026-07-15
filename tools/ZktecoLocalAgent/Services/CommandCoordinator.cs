@@ -98,12 +98,15 @@ public sealed class CommandCoordinator : IDisposable
         var commandId = string.IsNullOrWhiteSpace(request.CommandId) ? NewCommandId("attendance") : request.CommandId!;
         var command = ActiveCommand.CreateAttendance(commandId, request);
 
-        if (!TryStart(command, out var conflict))
+        if (!TryStartAttendance(command, out var conflict))
         {
             return conflict;
         }
 
         pendingAttendanceMatch = null;
+        pendingEnrollmentTemplate = null;
+        enrollmentTemplates.Clear();
+        enrollmentPreviewImages.Clear();
         await PublishAsync(Event(commandId, AgentStates.WaitingForScan, "Waiting for registered fingerprint scan."), cancellationToken);
         return Results.Ok(new { command_id = commandId, message = "Fingerprint agent is ready. Scan a registered finger." });
     }
@@ -118,11 +121,15 @@ public sealed class CommandCoordinator : IDisposable
         var commandId = string.IsNullOrWhiteSpace(request.CommandId) ? NewCommandId("unlock") : request.CommandId!;
         var command = ActiveCommand.CreateUnlock(commandId, request);
 
-        if (!TryStart(command, out var conflict))
+        if (!TryStartUnlock(command, out var conflict))
         {
             return conflict;
         }
 
+        pendingAttendanceMatch = null;
+        pendingEnrollmentTemplate = null;
+        enrollmentTemplates.Clear();
+        enrollmentPreviewImages.Clear();
         await PublishAsync(Event(commandId, AgentStates.WaitingForScan, "Waiting for unlock fingerprint scan."), cancellationToken);
         return Results.Ok(new { command_id = commandId, message = "Fingerprint agent is ready. Scan an authorized finger." });
     }
@@ -434,10 +441,20 @@ public sealed class CommandCoordinator : IDisposable
 
     private async Task HandleAttendanceCaptureAsync(ActiveCommand command, byte[] capturedTemplate)
     {
+        if (!IsActive(command))
+        {
+            return;
+        }
+
         var match = sdk.Identify(capturedTemplate);
         if (match is null)
         {
             await PublishAsync(new CommandEvent(command.CommandId, AgentStates.WaitingForScan, "Fingerprint not recognized. Scan again."), CancellationToken.None);
+            return;
+        }
+
+        if (!IsActive(command))
+        {
             return;
         }
 
@@ -448,10 +465,20 @@ public sealed class CommandCoordinator : IDisposable
 
     private async Task HandleUnlockCaptureAsync(ActiveCommand command, byte[] capturedTemplate)
     {
+        if (!IsActive(command))
+        {
+            return;
+        }
+
         var match = sdk.Identify(capturedTemplate);
         if (match is null)
         {
             await PublishAsync(new CommandEvent(command.CommandId, AgentStates.WaitingForScan, "Fingerprint not recognized. Scan again."), CancellationToken.None);
+            return;
+        }
+
+        if (!IsActive(command))
+        {
             return;
         }
 
@@ -477,6 +504,56 @@ public sealed class CommandCoordinator : IDisposable
             activeCommand = command;
             conflict = Results.NoContent();
             return true;
+        }
+    }
+
+    private bool TryStartUnlock(ActiveCommand command, out IResult conflict)
+    {
+        lock (gate)
+        {
+            if (activeCommand?.Kind == CommandKind.Enrollment)
+            {
+                conflict = Results.Conflict(new
+                {
+                    message = "A fingerprint enrollment is already running.",
+                    command_id = activeCommand.CommandId,
+                    state = currentEvent.State,
+                });
+                return false;
+            }
+
+            activeCommand = command;
+            conflict = Results.NoContent();
+            return true;
+        }
+    }
+
+    private bool TryStartAttendance(ActiveCommand command, out IResult conflict)
+    {
+        lock (gate)
+        {
+            if (activeCommand?.Kind == CommandKind.Enrollment)
+            {
+                conflict = Results.Conflict(new
+                {
+                    message = "A fingerprint enrollment is already running.",
+                    command_id = activeCommand.CommandId,
+                    state = currentEvent.State,
+                });
+                return false;
+            }
+
+            activeCommand = command;
+            conflict = Results.NoContent();
+            return true;
+        }
+    }
+
+    private bool IsActive(ActiveCommand command)
+    {
+        lock (gate)
+        {
+            return activeCommand?.CommandId == command.CommandId && activeCommand.Kind == command.Kind;
         }
     }
 

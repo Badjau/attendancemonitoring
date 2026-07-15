@@ -36,7 +36,7 @@ var builder = WebApplication.CreateBuilder(new WebApplicationOptions
 });
 
 builder.Host.UseSerilog();
-builder.Configuration.AddJsonFile("appsettings.json", optional: true);
+builder.Configuration.AddJsonFile("appsettings.json", optional: true, reloadOnChange: true);
 builder.Configuration.AddEnvironmentVariables("ZKTECO_AGENT_");
 builder.Services.Configure<AgentOptions>(builder.Configuration.GetSection("ZktecoAgent"));
 builder.Services.AddSingleton<TemplateCache>();
@@ -50,7 +50,12 @@ builder.Services.AddHttpClient<LaravelApiClient>()
     {
         var options = provider.GetRequiredService<IOptions<AgentOptions>>().Value;
 
-        var handler = new SocketsHttpHandler();
+        var handler = new SocketsHttpHandler
+        {
+            ConnectTimeout = TimeSpan.FromSeconds(5),
+            PooledConnectionLifetime = TimeSpan.FromSeconds(30),
+        };
+
         if (options.AllowInvalidServerCertificate)
         {
             handler.SslOptions.RemoteCertificateValidationCallback = (_, _, _, _) => true;

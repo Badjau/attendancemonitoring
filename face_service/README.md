@@ -20,8 +20,12 @@ and anti-spoofing model weights.
 ## Run
 
 ```bat
-uvicorn app.main:app --host 0.0.0.0 --port 8001 --ssl-keyfile C:/laragon/etc/ssl/laragon.key --ssl-certfile C:/laragon/etc/ssl/laragon.crt
+python run.py
 ```
+
+`run.py` selects the Windows selector event loop before Uvicorn starts. This
+avoids noisy `WinError 10054` connection teardown tracebacks after requests
+complete.
 
 Laravel/Vite should use:
 

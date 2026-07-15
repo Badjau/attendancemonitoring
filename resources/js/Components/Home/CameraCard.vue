@@ -149,15 +149,10 @@ const setScannerStatus = (
     key: keyof ScanStatusMessages,
     options: { tone?: ScannerStatusTone; force?: boolean } = {},
 ) => {
-    const heldKeys: Array<keyof ScanStatusMessages> = [
-        'idle',
-        'fingerprint_waiting',
-    ]
-
     if (
         !options.force &&
         Date.now() < scannerStatusHoldUntil &&
-        heldKeys.includes(key)
+        scannerStatusTone.value === 'error'
     ) {
         return
     }
@@ -178,7 +173,7 @@ const setTemporaryScannerError = (
         clearTimeout(scannerStatusResetTimeout)
     }
 
-    scannerStatusHoldUntil = Date.now() + 3000
+    scannerStatusHoldUntil = Date.now() + 5000
     scannerStatusText.value = scanStatusMessage(key)
     scannerStatusTone.value = 'error'
     scannerStatusResetTimeout = setTimeout(() => {
@@ -186,7 +181,7 @@ const setTemporaryScannerError = (
         scannerStatusText.value = scanStatusMessage('idle')
         scannerStatusTone.value = 'default'
         scannerStatusResetTimeout = null
-    }, 3000)
+    }, 5000)
 }
 
 const employeeFullName = (employee: VerifiedEmployee): string =>
@@ -773,10 +768,12 @@ const verifyEmployeeIdentifier = async (
 
         if (method === 'rfid') {
             setTemporaryScannerError('rfid_not_recognized')
+        } else if (method === 'fingerprint') {
+            setTemporaryScannerError('fingerprint_not_found')
         } else {
             faceStatusText.value = message
         }
-        resetAttendanceSelection(method !== 'rfid')
+        resetAttendanceSelection(method !== 'rfid' && method !== 'fingerprint')
 
         return null
     }
@@ -790,7 +787,7 @@ const verifyLiveFaceMatchesEmployee = async (
             severity: 'error',
             summary: 'Camera',
             detail: 'Camera not ready. Please allow camera access.',
-            life: 5000,
+            life: 3000,
         })
         return null
     }
@@ -951,6 +948,7 @@ const submitRFIDAttendance = async (rfid: any) => {
         }
     } catch (e) {
         console.error('Error submitting RFID attendance:', e)
+        setTemporaryScannerError('rfid_not_recognized')
         stopProcessing()
         scheduleAutoFingerprintScan()
     }
@@ -1067,7 +1065,7 @@ const runFingerprintAttendance = async (
                         : 'Unable to start fingerprint attendance.',
                 life: 5000,
             })
-            resetAttendanceSelection()
+            resetAttendanceSelection(false)
         }
 
         return false

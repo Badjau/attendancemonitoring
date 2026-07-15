@@ -3,6 +3,14 @@ namespace ZktecoLocalAgent;
 public sealed class AgentOptions
 {
     public string ApiBaseUrl { get; set; } = "http://attendancemonitoring.test/api/zkteco";
+    public string[] ApiFallbackBaseUrls { get; set; } =
+    [
+        "http://attendancemonitoring.test/api/zkteco",
+        "http://127.0.0.1/api/zkteco",
+        "http://localhost/api/zkteco",
+        "http://localhost:8000/api/zkteco",
+        "http://127.0.0.1:8000/api/zkteco",
+    ];
     public string ScannerToken { get; set; } = "";
     public string LocalListenUrl { get; set; } = "http://127.0.0.1:8765";
     public string DeviceSerial { get; set; } = "ZKTECO-LOCAL";

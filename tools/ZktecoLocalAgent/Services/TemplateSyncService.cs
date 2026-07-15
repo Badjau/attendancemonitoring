@@ -98,8 +98,14 @@ public sealed class TemplateSyncService : BackgroundService
 
     private static string SummarizeException(Exception exception)
     {
+        if (exception is AggregateException aggregateException)
+        {
+            exception = aggregateException.Flatten();
+        }
+
         var messages = new List<string>();
-        for (var current = exception; current is not null; current = current.InnerException)
+
+        foreach (var current in FlattenExceptions(exception))
         {
             if (!string.IsNullOrWhiteSpace(current.Message))
             {
@@ -108,5 +114,23 @@ public sealed class TemplateSyncService : BackgroundService
         }
 
         return string.Join(" | ", messages.Distinct());
+    }
+
+    private static IEnumerable<Exception> FlattenExceptions(Exception exception)
+    {
+        if (exception is AggregateException aggregateException)
+        {
+            foreach (var innerException in aggregateException.InnerExceptions.SelectMany(FlattenExceptions))
+            {
+                yield return innerException;
+            }
+
+            yield break;
+        }
+
+        for (var current = exception; current is not null; current = current.InnerException)
+        {
+            yield return current;
+        }
     }
 }

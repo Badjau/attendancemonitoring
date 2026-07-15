@@ -544,7 +544,7 @@ onUnmounted(() => {
                     <h1 class="text-3xl font-black leading-tight md:text-4xl">
                         Lock / Unlock station
                     </h1>
-                    <p class="text-sm font-semibold text-brand-bg">
+                    <p class="text-lg font-semibold text-brand-bg">
                         {{ statusText }}
                     </p>
                 </div>
