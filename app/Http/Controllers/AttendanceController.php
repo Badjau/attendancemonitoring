@@ -40,6 +40,8 @@ class AttendanceController extends Controller
                     'position' => $employee->position,
                     'branch' => $employee->branch,
                     'profile_url' => $verifiedEmployee['profile_url'],
+                    'face_ready' => $verifiedEmployee['face_ready'],
+                    'face_enrollment_count' => $verifiedEmployee['face_enrollment_count'],
                 ],
             ]);
         } catch (ValidationException $e) {

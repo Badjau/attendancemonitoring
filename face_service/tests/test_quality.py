@@ -3,7 +3,12 @@ import pytest
 from fastapi import HTTPException
 
 from app.config import Settings
-from app.recognition import analyze_single_face
+from app.recognition import analyze_single_face, recognize
+
+
+class MemoryStore:
+    def embeddings(self):
+        return [{"employee_id": "EMP-001", "embedding": np.ones(128)}]
 
 
 def test_rejects_no_face(monkeypatch):
@@ -77,3 +82,28 @@ def test_enrollment_does_not_require_anti_spoofing(monkeypatch):
 
     assert analysis.embedding.shape == (128,)
     assert analysis.spoofing["checked"] is False
+
+
+def test_recognition_rejects_dark_frames_before_matching(monkeypatch):
+    from app import recognition
+
+    monkeypatch.setattr(recognition, "DeepFace", type("Fake", (), {
+        "extract_faces": staticmethod(lambda **kwargs: [{
+            "facial_area": {"x": 20, "y": 20, "w": 200, "h": 200},
+            "confidence": 0.99,
+            "is_real": True,
+            "antispoof_score": 0.98,
+        }]),
+        "represent": staticmethod(lambda **kwargs: [{"embedding": np.ones(128)}]),
+    }))
+
+    result = recognize(
+        b"image",
+        np.zeros((260, 260, 3), dtype=np.uint8),
+        MemoryStore(),
+        Settings(min_blur_score=0),
+    )
+
+    assert result["matched"] is False
+    assert result["message"] == "Too dark."
+    assert result["quality"]["brightness"] == 0.0

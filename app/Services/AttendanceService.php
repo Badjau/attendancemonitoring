@@ -50,6 +50,8 @@ class AttendanceService
             }
         }
 
+        $this->ensureEmployeeAuthCooldownHasElapsed($employee, $now);
+
         $requestedAttendanceType = $request->string('attendance_type')->toString();
         $attendanceType = in_array($requestedAttendanceType, [Type::TimeIn->value, Type::TimeOut->value], true)
             ? $requestedAttendanceType
@@ -88,8 +90,12 @@ class AttendanceService
         $this->ensureEmployeeCanRecordAttendance($employee);
 
         $profileUrl = $employee->employeeProfileUrl();
+        $faceEnrollmentCount = $employee->faceEmbeddings()->count();
+
         return [
             'profile_url' => $profileUrl,
+            'face_enrollment_count' => $faceEnrollmentCount,
+            'face_ready' => $faceEnrollmentCount >= 3,
             'employee' => $employee,
         ];
     }
@@ -182,6 +188,54 @@ class AttendanceService
             })
             ->latest('updated_at')
             ->latest('id')
+            ->first();
+    }
+
+    private function ensureEmployeeAuthCooldownHasElapsed(Employee $employee, Carbon $now): void
+    {
+        $cooldownMinutes = $this->attendanceScheduleSettings->sameEmployeeAuthCooldownMinutes();
+
+        if ($cooldownMinutes <= 0) {
+            return;
+        }
+
+        $lastAuthenticatedAt = $this->latestEmployeeAuthenticatedAt($employee, $now);
+
+        if (! $lastAuthenticatedAt) {
+            return;
+        }
+
+        $nextAllowedAt = $lastAuthenticatedAt->copy()->addMinutes($cooldownMinutes);
+
+        if ($now->greaterThanOrEqualTo($nextAllowedAt)) {
+            return;
+        }
+
+        $remainingMinutes = max(1, (int) ceil($now->diffInSeconds($nextAllowedAt) / 60));
+
+        throw ValidationException::withMessages([
+            'employee_id' => "Attendance was already recorded recently. Please wait {$remainingMinutes} minute".($remainingMinutes === 1 ? '' : 's').' before trying again.',
+        ]);
+    }
+
+    private function latestEmployeeAuthenticatedAt(Employee $employee, Carbon $now): ?Carbon
+    {
+        $nowValue = $now->format('Y-m-d H:i:s');
+        $lastTimeIn = $this->model
+            ->where('employee_id', $employee->id)
+            ->whereNotNull('time_in')
+            ->where('time_in', '<=', $nowValue)
+            ->max('time_in');
+        $lastTimeOut = $this->model
+            ->where('employee_id', $employee->id)
+            ->whereNotNull('time_out')
+            ->where('time_out', '<=', $nowValue)
+            ->max('time_out');
+
+        return collect([$lastTimeIn, $lastTimeOut])
+            ->filter()
+            ->map(fn (string $value): Carbon => Carbon::parse($value, 'Asia/Manila'))
+            ->sortByDesc(fn (Carbon $value): int => $value->getTimestamp())
             ->first();
     }
 

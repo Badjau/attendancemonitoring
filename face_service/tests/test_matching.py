@@ -70,7 +70,7 @@ def test_known_employee_matches(monkeypatch):
             {"employee_id": "EMP-001", "embedding": np.array([1.0, 0.0, 0.0])},
             {"employee_id": "EMP-002", "embedding": np.array([0.0, 1.0, 0.0])},
         ]),
-        Settings(),
+        Settings(min_brightness=0, min_blur_score=0),
     )
 
     assert result["matched"] is True
@@ -89,7 +89,7 @@ def test_targeted_verification_only_matches_requested_employee(monkeypatch):
             {"employee_id": "EMP-001", "embedding": np.array([1.0, 0.0, 0.0])},
             {"employee_id": "EMP-002", "embedding": np.array([1.0, 0.0, 0.0])},
         ]),
-        Settings(),
+        Settings(min_brightness=0, min_blur_score=0),
     )
 
     assert result["matched"] is True
@@ -107,7 +107,7 @@ def test_targeted_verification_rejects_other_employee_face(monkeypatch):
             {"employee_id": "EMP-001", "embedding": np.array([1.0, 0.0, 0.0])},
             {"employee_id": "EMP-002", "embedding": np.array([0.0, 1.0, 0.0])},
         ]),
-        Settings(),
+        Settings(min_brightness=0, min_blur_score=0),
     )
 
     assert result["matched"] is False
@@ -122,7 +122,7 @@ def test_targeted_verification_missing_vectors_returns_not_enrolled(monkeypatch)
         np.zeros((240, 240, 3), dtype=np.uint8),
         "EMP-404",
         MemoryStore([]),
-        Settings(),
+        Settings(min_brightness=0, min_blur_score=0),
     )
 
     assert result["matched"] is False
@@ -136,7 +136,7 @@ def test_unknown_employee_is_rejected(monkeypatch):
         b"image",
         np.zeros((240, 240, 3), dtype=np.uint8),
         MemoryStore([{"employee_id": "EMP-001", "embedding": np.array([1.0, 0.0, 0.0])}]),
-        Settings(),
+        Settings(min_brightness=0, min_blur_score=0),
     )
 
     assert result["matched"] is False
@@ -150,7 +150,7 @@ def test_multiple_faces_fail_recognition_with_step_out_message(monkeypatch):
         b"image",
         np.zeros((240, 240, 3), dtype=np.uint8),
         MemoryStore([{"employee_id": "EMP-001", "embedding": np.array([1.0, 0.0, 0.0])}]),
-        Settings(),
+        Settings(min_brightness=0, min_blur_score=0),
     )
 
     assert result["matched"] is False
@@ -195,7 +195,7 @@ def test_ambiguous_match_is_rejected(monkeypatch):
             {"employee_id": "EMP-001", "embedding": np.array([1.0, 0.0, 0.0])},
             {"employee_id": "EMP-002", "embedding": np.array([0.9999, 0.01, 0.0])},
         ]),
-        Settings(),
+        Settings(min_brightness=0, min_blur_score=0),
     )
 
     assert result["matched"] is False
@@ -219,7 +219,7 @@ def test_spoofed_face_is_rejected(monkeypatch):
         b"image",
         np.zeros((240, 240, 3), dtype=np.uint8),
         MemoryStore([{"employee_id": "EMP-001", "embedding": np.array([1.0, 0.0, 0.0])}]),
-        Settings(),
+        Settings(min_brightness=0, min_blur_score=0),
     )
 
     assert result["matched"] is False
@@ -247,7 +247,7 @@ def test_anti_spoofing_unsupported_does_not_crash(monkeypatch):
         b"image",
         np.zeros((240, 240, 3), dtype=np.uint8),
         MemoryStore([{"employee_id": "EMP-001", "embedding": np.array([1.0, 0.0, 0.0])}]),
-        Settings(require_anti_spoofing=False),
+        Settings(require_anti_spoofing=False, min_brightness=0, min_blur_score=0),
     )
 
     assert result["matched"] is True
@@ -275,7 +275,7 @@ def test_required_anti_spoofing_rejects_when_unavailable(monkeypatch):
         b"image",
         np.zeros((240, 240, 3), dtype=np.uint8),
         MemoryStore([{"employee_id": "EMP-001", "embedding": np.array([1.0, 0.0, 0.0])}]),
-        Settings(require_anti_spoofing=True),
+        Settings(require_anti_spoofing=True, min_brightness=0, min_blur_score=0),
     )
 
     assert result["matched"] is False

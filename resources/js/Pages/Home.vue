@@ -16,8 +16,14 @@ const props = defineProps<{
         time_in_start: string
         time_out_start: string
         duplicate_scan_window_seconds: string
+        same_employee_auth_cooldown_minutes: string
         face_capture_width_ratio: string
         face_capture_height_ratio: string
+        face_verification_window_ms: string
+        face_usable_frame_target: string
+        face_required_match_count: string
+        face_only_usable_frame_target: string
+        face_only_required_match_count: string
         show_face_attendance_button: boolean
         show_scan_status_messages: boolean
     }
@@ -107,11 +113,13 @@ onUnmounted(() => {
         >
             <div class="mx-auto flex max-w-7xl items-center justify-between gap-4">
                 <div class="flex items-center gap-3">
-                    <img
-                        src="/images/mcasia-logo.png"
-                        alt="McAsia"
-                        class="h-12 w-12 rounded bg-white object-contain p-1 shadow-sm ring-1 ring-black/10 md:h-12 md:w-12"
-                    />
+                    <a href="/">
+                        <img 
+                            src="/images/mcasia-logo.png" 
+                            alt="McAsia" 
+                            class="h-12 w-12 rounded bg-white object-contain p-1 shadow-sm ring-1 ring-black/10 md:h-12 md:w-12" 
+                        />
+                    </a>
                     <div class="leading-tight">
                         <p class="text-sm font-black text-brand-bg md:text-base">
                             McAsia Attendance

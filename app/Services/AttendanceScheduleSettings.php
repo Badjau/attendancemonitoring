@@ -12,8 +12,14 @@ class AttendanceScheduleSettings
         'time_in_start' => '08:00',
         'time_out_start' => '18:00',
         'duplicate_scan_window_seconds' => '60',
+        'same_employee_auth_cooldown_minutes' => '60',
         'face_capture_width_ratio' => '0.50',
         'face_capture_height_ratio' => '0.68',
+        'face_verification_window_ms' => '6000',
+        'face_usable_frame_target' => '3',
+        'face_required_match_count' => '2',
+        'face_only_usable_frame_target' => '5',
+        'face_only_required_match_count' => '3',
         'show_face_attendance_button' => false,
         'show_scan_status_messages' => true,
         'scan_status_idle' => 'RFID and fingerprint scanners are listening.',
@@ -42,8 +48,14 @@ class AttendanceScheduleSettings
             'time_in_start' => $this->setting('time_in_start'),
             'time_out_start' => $this->setting('time_out_start'),
             'duplicate_scan_window_seconds' => (string) $this->duplicateScanWindowSeconds(),
+            'same_employee_auth_cooldown_minutes' => (string) $this->sameEmployeeAuthCooldownMinutes(),
             'face_capture_width_ratio' => (string) $this->faceCaptureWidthRatio(),
             'face_capture_height_ratio' => (string) $this->faceCaptureHeightRatio(),
+            'face_verification_window_ms' => (string) $this->faceVerificationWindowMs(),
+            'face_usable_frame_target' => (string) $this->faceUsableFrameTarget(),
+            'face_required_match_count' => (string) $this->faceRequiredMatchCount(),
+            'face_only_usable_frame_target' => (string) $this->faceOnlyUsableFrameTarget(),
+            'face_only_required_match_count' => (string) $this->faceOnlyRequiredMatchCount(),
             'show_face_attendance_button' => $this->showFaceAttendanceButton(),
             'show_scan_status_messages' => $this->showScanStatusMessages(),
         ];
@@ -81,6 +93,11 @@ class AttendanceScheduleSettings
         return max(0, min(3600, (int) $value));
     }
 
+    public function sameEmployeeAuthCooldownMinutes(): int
+    {
+        return $this->integerSetting('same_employee_auth_cooldown_minutes', 0, 1440);
+    }
+
     public function faceCaptureWidthRatio(): float
     {
         return $this->ratioSetting('face_capture_width_ratio');
@@ -89,6 +106,31 @@ class AttendanceScheduleSettings
     public function faceCaptureHeightRatio(): float
     {
         return $this->ratioSetting('face_capture_height_ratio');
+    }
+
+    public function faceVerificationWindowMs(): int
+    {
+        return $this->integerSetting('face_verification_window_ms', 4000, 15000);
+    }
+
+    public function faceUsableFrameTarget(): int
+    {
+        return $this->integerSetting('face_usable_frame_target', 3, 10);
+    }
+
+    public function faceRequiredMatchCount(): int
+    {
+        return min($this->faceUsableFrameTarget(), $this->integerSetting('face_required_match_count', 2, 10));
+    }
+
+    public function faceOnlyUsableFrameTarget(): int
+    {
+        return $this->integerSetting('face_only_usable_frame_target', 3, 10);
+    }
+
+    public function faceOnlyRequiredMatchCount(): int
+    {
+        return min($this->faceOnlyUsableFrameTarget(), $this->integerSetting('face_only_required_match_count', 2, 10));
     }
 
     public function showFaceAttendanceButton(): bool
@@ -152,6 +194,14 @@ class AttendanceScheduleSettings
         $ratio = is_numeric($value) ? (float) $value : (float) self::DEFAULTS[$key];
 
         return round(max(0.25, min(1.0, $ratio)), 2);
+    }
+
+    private function integerSetting(string $key, int $min, int $max): int
+    {
+        $value = $this->getAllSettings()[$key] ?? self::DEFAULTS[$key];
+        $integer = is_numeric($value) ? (int) $value : (int) self::DEFAULTS[$key];
+
+        return max($min, min($max, $integer));
     }
 
     private function getAllSettings(): array

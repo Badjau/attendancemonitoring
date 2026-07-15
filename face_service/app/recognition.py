@@ -144,6 +144,22 @@ def frame_diagnostics(rgb: np.ndarray) -> dict:
     }
 
 
+def quality_rejection_message(quality: dict, settings: Settings) -> str | None:
+    if quality["width"] < settings.min_face_size or quality["height"] < settings.min_face_size:
+        return "Move closer."
+
+    if quality["brightness"] < settings.min_brightness:
+        return "Too dark."
+
+    if quality["brightness"] > settings.max_brightness:
+        return "Reduce glare."
+
+    if quality["blur_score"] < settings.min_blur_score:
+        return "Hold still."
+
+    return None
+
+
 def detector_backends(settings: Settings) -> list[str]:
     backends = [settings.detector_backend]
 
@@ -702,11 +718,39 @@ def recognize(content: bytes, rgb: np.ndarray, store: FaceStore, settings: Setti
             "spoofing_checked": spoofing["checked"],
         }
 
+    quality = face_quality(rgb, face["facial_area"])
+    quality["detector_backend"] = face.get("detector_backend", settings.detector_backend)
+    quality_message = quality_rejection_message(quality, settings)
+
+    if quality_message is not None:
+        logger.info(
+            "face_recognition_result matched=False reason=quality message=%s width=%s height=%s brightness=%s blur_score=%s detector=%s",
+            quality_message,
+            quality["width"],
+            quality["height"],
+            quality["brightness"],
+            quality["blur_score"],
+            quality["detector_backend"],
+        )
+        return {
+            "matched": False,
+            "employee_id": None,
+            "confidence": 0.0,
+            "distance": None,
+            "margin": None,
+            "face_count": face_count,
+            "message": quality_message,
+            "quality": quality,
+            "spoofing_score": spoofing["score"],
+            "spoofing_passed": spoofing["is_real"],
+            "spoofing_checked": spoofing["checked"],
+        }
+
     try:
         probe = embedding_for_single_face(
             rgb,
             settings,
-            detector_backend=face.get("detector_backend", settings.detector_backend),
+            detector_backend=quality["detector_backend"],
         )
     except HTTPException:
         logger.warning("face_recognition_result matched=False reason=encoding_failed")
@@ -718,6 +762,7 @@ def recognize(content: bytes, rgb: np.ndarray, store: FaceStore, settings: Setti
             "margin": None,
             "face_count": face_count,
             "message": "Face could not be encoded.",
+            "quality": quality,
             "spoofing_score": spoofing["score"],
             "spoofing_passed": spoofing["is_real"],
             "spoofing_checked": spoofing["checked"],
@@ -734,6 +779,7 @@ def recognize(content: bytes, rgb: np.ndarray, store: FaceStore, settings: Setti
             "margin": None,
             "face_count": face_count,
             "message": "No enrolled face embeddings are available.",
+            "quality": quality,
             "spoofing_score": spoofing["score"],
             "spoofing_passed": spoofing["is_real"],
             "spoofing_checked": spoofing["checked"],
@@ -778,6 +824,7 @@ def recognize(content: bytes, rgb: np.ndarray, store: FaceStore, settings: Setti
             "margin": margin,
             "face_count": face_count,
             "message": "Face not recognized.",
+            "quality": quality,
             "spoofing_score": spoofing["score"],
             "spoofing_passed": spoofing["is_real"],
             "spoofing_checked": spoofing["checked"],
@@ -800,6 +847,7 @@ def recognize(content: bytes, rgb: np.ndarray, store: FaceStore, settings: Setti
             "margin": margin,
             "face_count": face_count,
             "message": "Face match is ambiguous. Please try again.",
+            "quality": quality,
             "spoofing_score": spoofing["score"],
             "spoofing_passed": spoofing["is_real"],
             "spoofing_checked": spoofing["checked"],
@@ -820,6 +868,7 @@ def recognize(content: bytes, rgb: np.ndarray, store: FaceStore, settings: Setti
         "margin": margin,
         "face_count": face_count,
         "message": "Face matched.",
+        "quality": quality,
         "spoofing_score": spoofing["score"],
         "spoofing_passed": spoofing["is_real"],
         "spoofing_checked": spoofing["checked"],

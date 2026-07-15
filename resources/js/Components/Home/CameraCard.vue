@@ -14,7 +14,12 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useToast } from 'primevue'
 import { useGeolocator } from '@/Composables/useGeolocator.js'
 import { useSyncStore } from '@/Stores/sync.js'
-import { detectFaces, recognizeFace, verifyEmployeeFace } from '@/Services/faceService.js'
+import {
+    detectFaces,
+    faceServiceHealth,
+    recognizeFace,
+    verifyEmployeeFace,
+} from '@/Services/faceService.js'
 
 type AttendanceAction = 'time-in' | 'time-out'
 type AttendanceMethod = 'rfid' | 'keypad' | 'fingerprint' | 'face'
@@ -31,17 +36,40 @@ type VerifiedEmployee = {
     position: string
     branch?: string | null
     profile_url?: string | null
+    face_ready?: boolean
+    face_enrollment_count?: number
 }
 type LiveFaceMatch = {
     employee: VerifiedEmployee
     image: string
 }
+type FaceAttemptResult = {
+    matched: boolean
+    employeeId?: string | null
+    image: string
+    message: string
+    faceCount: number
+}
+type FaceWindowResult = {
+    matched: boolean
+    employeeId?: string | null
+    image?: string
+    validFrames: number
+    matchedFrames: number
+    message: string
+}
 type AttendanceSchedule = {
     time_in_start: string
     time_out_start: string
     duplicate_scan_window_seconds: string
+    same_employee_auth_cooldown_minutes: string
     face_capture_width_ratio: string
     face_capture_height_ratio: string
+    face_verification_window_ms: string
+    face_usable_frame_target: string
+    face_required_match_count: string
+    face_only_usable_frame_target: string
+    face_only_required_match_count: string
     show_face_attendance_button: boolean
 }
 type ScanStatusMessages = {
@@ -137,9 +165,9 @@ const FACE_MULTI_WARNING_MESSAGE =
     'Multiple faces detected. Please step out of the camera view.'
 const FACE_WAITING_MESSAGE = 'Waiting for face...'
 const FACE_DETECTION_POLL_MS = 900
-const FACE_WAIT_TIMEOUT_MS = 6000
-const FACE_WAIT_RETRY_MS = 350
-const FACE_CAPTURE_STABILIZE_MS = 1500
+const FACE_FRAME_RETRY_MS = 450
+const FACE_SERVICE_UNAVAILABLE_MESSAGE = 'Face service unavailable.'
+const FACE_READY_REQUIRED_COUNT = 3
 let clockOffsetMs = 0
 const ratioSetting = (value: string | number | undefined, fallback: number): number => {
     const ratio = Number(value)
@@ -148,11 +176,44 @@ const ratioSetting = (value: string | number | undefined, fallback: number): num
 
     return Math.max(0.25, Math.min(1, ratio))
 }
+const integerSetting = (
+    value: string | number | undefined,
+    fallback: number,
+    min: number,
+    max: number,
+): number => {
+    const integer = Number(value)
+
+    if (!Number.isFinite(integer)) return fallback
+
+    return Math.max(min, Math.min(max, Math.trunc(integer)))
+}
 const faceActiveZoneWidthRatio = computed(() =>
     ratioSetting(props.attendanceSchedule.face_capture_width_ratio, 0.5),
 )
 const faceActiveZoneHeightRatio = computed(() =>
     ratioSetting(props.attendanceSchedule.face_capture_height_ratio, 0.68),
+)
+const faceVerificationWindowMs = computed(() =>
+    integerSetting(props.attendanceSchedule.face_verification_window_ms, 6000, 4000, 15000),
+)
+const scopedFaceUsableFrameTarget = computed(() =>
+    integerSetting(props.attendanceSchedule.face_usable_frame_target, 3, 3, 10),
+)
+const scopedFaceRequiredMatchCount = computed(() =>
+    Math.min(
+        scopedFaceUsableFrameTarget.value,
+        integerSetting(props.attendanceSchedule.face_required_match_count, 2, 2, 10),
+    ),
+)
+const faceOnlyUsableFrameTarget = computed(() =>
+    integerSetting(props.attendanceSchedule.face_only_usable_frame_target, 5, 3, 10),
+)
+const faceOnlyRequiredMatchCount = computed(() =>
+    Math.min(
+        faceOnlyUsableFrameTarget.value,
+        integerSetting(props.attendanceSchedule.face_only_required_match_count, 3, 2, 10),
+    ),
 )
 const hasMultipleFacesInView = ref(false)
 const liveFaceCount = ref(0)
@@ -488,63 +549,179 @@ const startLiveFaceDetection = () => {
     }, FACE_DETECTION_POLL_MS)
 }
 
-const ensureSingleFaceInView = async (): Promise<boolean> => {
+const faceGuidanceFromMessage = (message = ''): string => {
+    const normalized = message.toLowerCase()
+
+    if (normalized.includes('multiple')) return FACE_MULTI_WARNING_MESSAGE
+    if (normalized.includes('move closer')) return 'Move closer'
+    if (normalized.includes('too dark')) return 'Too dark'
+    if (normalized.includes('glare') || normalized.includes('too bright')) {
+        return 'Reduce glare.'
+    }
+    if (normalized.includes('blur') || normalized.includes('hold still')) {
+        return 'Hold still'
+    }
+    if (normalized.includes('no face') || normalized.includes('waiting')) {
+        return FACE_WAITING_MESSAGE
+    }
+    if (normalized.includes('face service unavailable')) {
+        return FACE_SERVICE_UNAVAILABLE_MESSAGE
+    }
+
+    return message || FACE_WAITING_MESSAGE
+}
+
+const isRetryableFaceGuidance = (message = ''): boolean => {
+    const guidance = faceGuidanceFromMessage(message)
+
+    return [
+        FACE_WAITING_MESSAGE,
+        'Move closer',
+        'Too dark',
+        'Hold still',
+        'Reduce glare.',
+    ].includes(guidance)
+}
+
+const showFaceWindowFailure = (message: string) => {
+    const guidance = faceGuidanceFromMessage(message)
+
+    toast.add({
+        severity: guidance === FACE_MULTI_WARNING_MESSAGE ? 'warn' : 'error',
+        summary: 'Face Verification',
+        detail: guidance === FACE_WAITING_MESSAGE
+            ? 'No face detected. Look straight at the camera and try again.'
+            : guidance,
+        life: 5000,
+    })
+    cameraGuidanceMessage.value =
+        guidance === FACE_WAITING_MESSAGE ? 'No face detected.' : guidance
+}
+
+const faceAttemptIsUsable = (attempt: FaceAttemptResult): boolean =>
+    attempt.faceCount === 1 && !isRetryableFaceGuidance(attempt.message)
+
+const captureFaceAttempt = async (
+    verifier: (image: string, imageBlob: Blob) => Promise<any>,
+): Promise<FaceAttemptResult | null> => {
+    const image = captureImage()
+    if (!image) return null
+
+    const result = await verifier(image, base64ToBlob(image, 'image/jpeg'))
+    const message = String(result.message || '')
+    const faceCount = Number(result.face_count ?? 0)
+
+    return {
+        matched: Boolean(result.matched),
+        employeeId: result.employee_id ?? null,
+        image,
+        message,
+        faceCount,
+    }
+}
+
+const runFaceVerificationWindow = async (
+    options: {
+        verifier: (image: string, imageBlob: Blob) => Promise<any>
+        expectedEmployeeId?: string
+        targetFrames: number
+        requiredMatches: number
+        statusPrefix: string
+    },
+): Promise<FaceWindowResult> => {
     const startedAt = Date.now()
+    const matchesByEmployee = new Map<string, { count: number; image: string }>()
+    let validFrames = 0
+    let matchedFrames = 0
+    let matchedImage = ''
+    let lastMessage = FACE_WAITING_MESSAGE
 
-    while (Date.now() - startedAt < FACE_WAIT_TIMEOUT_MS) {
-        const faceCount = await checkLiveFaceCount()
+    while (
+        Date.now() - startedAt < faceVerificationWindowMs.value &&
+        validFrames < options.targetFrames
+    ) {
+        const attempt = await captureFaceAttempt(options.verifier)
 
-        if (faceCount === 1) {
-            cameraGuidanceMessage.value = 'Hold still...'
-            await new Promise((resolve) =>
-                setTimeout(resolve, FACE_CAPTURE_STABILIZE_MS),
-            )
+        if (!attempt) {
+            lastMessage = 'Camera photo could not be captured.'
+            break
+        }
 
-            const stableFaceCount = await checkLiveFaceCount()
+        lastMessage = attempt.message
+        const guidance = faceGuidanceFromMessage(attempt.message)
+        cameraGuidanceMessage.value = guidance
 
-            if (stableFaceCount === 1) return true
-
-            if (stableFaceCount !== null && stableFaceCount > 1) {
-                toast.add({
-                    severity: 'warn',
-                    summary: 'Face Verification',
-                    detail: FACE_MULTI_WARNING_MESSAGE,
-                    life: 4000,
-                })
-                cameraGuidanceMessage.value = FACE_MULTI_WARNING_MESSAGE
-
-                return false
+        if (attempt.faceCount > 1 || guidance === FACE_MULTI_WARNING_MESSAGE) {
+            return {
+                matched: false,
+                validFrames,
+                matchedFrames,
+                message: FACE_MULTI_WARNING_MESSAGE,
             }
+        }
 
-            cameraGuidanceMessage.value = FACE_WAITING_MESSAGE
+        if (!faceAttemptIsUsable(attempt)) {
+            await new Promise((resolve) => setTimeout(resolve, FACE_FRAME_RETRY_MS))
             continue
         }
 
-        if (faceCount !== null && faceCount > 1) {
-            toast.add({
-                severity: 'warn',
-                summary: 'Face Verification',
-                detail: FACE_MULTI_WARNING_MESSAGE,
-                life: 4000,
-            })
-            cameraGuidanceMessage.value = FACE_MULTI_WARNING_MESSAGE
+        validFrames++
 
-            return false
+        if (options.expectedEmployeeId) {
+            const expected = normalizeEmployeeCode(options.expectedEmployeeId)
+            const actual = normalizeEmployeeCode(attempt.employeeId)
+
+            if (attempt.matched && actual === expected) {
+                matchedFrames++
+                matchedImage = attempt.image
+            }
+        } else if (attempt.matched && attempt.employeeId) {
+            const employeeId = normalizeEmployeeCode(attempt.employeeId)
+            const current = matchesByEmployee.get(employeeId) ?? {
+                count: 0,
+                image: attempt.image,
+            }
+            current.count++
+            current.image = attempt.image
+            matchesByEmployee.set(employeeId, current)
+
+            if (current.count > matchedFrames) {
+                matchedFrames = current.count
+                matchedImage = current.image
+            }
         }
 
-        cameraGuidanceMessage.value = FACE_WAITING_MESSAGE
-        await new Promise((resolve) => setTimeout(resolve, FACE_WAIT_RETRY_MS))
+        faceStatusText.value =
+            `${options.statusPrefix}\n\n${matchedFrames}/${options.requiredMatches} matches from ${validFrames}/${options.targetFrames} usable frames.`
+
+        if (matchedFrames >= options.requiredMatches) {
+            const employeeId = options.expectedEmployeeId
+                ? options.expectedEmployeeId
+                : [...matchesByEmployee.entries()]
+                      .find(([, match]) => match.count >= options.requiredMatches)?.[0]
+
+            return {
+                matched: true,
+                employeeId,
+                image: matchedImage,
+                validFrames,
+                matchedFrames,
+                message: 'Face matched.',
+            }
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, FACE_FRAME_RETRY_MS))
     }
 
-    toast.add({
-        severity: 'warn',
-        summary: 'Face Verification',
-        detail: 'No face detected. Look straight at the camera and try again.',
-        life: 4000,
-    })
-    cameraGuidanceMessage.value = 'No face detected.'
-
-    return false
+    return {
+        matched: false,
+        validFrames,
+        matchedFrames,
+        message:
+            validFrames === 0
+                ? lastMessage
+                : 'Face frames did not agree. Please try again.',
+    }
 }
 
 const loadClockOffset = () => {
@@ -620,6 +797,11 @@ const openCameraForCapture = async (
     const loadFaceVerification = options.loadFaceVerification ?? true
 
     showEmployeeIdInputField.value = true
+    if (loadFaceVerification) {
+        faceStatusText.value = 'Checking face service...'
+        await faceServiceHealth()
+    }
+
     isCameraActive.value = true
     isSilentCameraCapture.value = options.silent ?? !loadFaceVerification
     await nextTick()
@@ -934,25 +1116,36 @@ const postWebAuthnJson = async (
     return payload
 }
 
-const captureAttendanceImage = (): string | null => {
-    const image = captureImage()
-
-    if (!image) {
-        toast.add({
-            severity: 'error',
-            summary: 'Error',
-            detail: 'Camera not ready. Please allow camera access.',
-            life: 5000,
-        })
-
-        return null
-    }
-
-    return image
-}
-
 const normalizeEmployeeCode = (employeeId: unknown): string =>
     String(employeeId ?? '').trim()
+
+const employeeHasReadyFace = (employee: VerifiedEmployee): boolean => {
+    if (employee.face_ready !== undefined) {
+        return Boolean(employee.face_ready)
+    }
+
+    return Number(employee.face_enrollment_count ?? 0) >= FACE_READY_REQUIRED_COUNT
+}
+
+const requireReadyFaceEnrollment = (employee: VerifiedEmployee): boolean => {
+    if (employeeHasReadyFace(employee)) return true
+
+    const enrollmentCount = Number(employee.face_enrollment_count ?? 0)
+    const message =
+        enrollmentCount > 0
+            ? `Face enrollment is incomplete (${enrollmentCount}/${FACE_READY_REQUIRED_COUNT}).`
+            : 'Employee has no ready face enrollment.'
+
+    toast.add({
+        severity: 'error',
+        summary: 'Face Verification',
+        detail: message,
+        life: 6000,
+    })
+    faceStatusText.value = message
+
+    return false
+}
 
 const verifyEmployeeIdentifier = async (
     employeeIdentifier: string,
@@ -1016,48 +1209,46 @@ const verifyLiveFaceMatchesEmployee = async (
 
     try {
         faceStatusText.value = `Checking face for ${employeeFullName(employee)}...`
-        if (!(await ensureSingleFaceInView())) {
-            return null
-        }
+        const result = await runFaceVerificationWindow({
+            expectedEmployeeId: employee.employee_id,
+            targetFrames: scopedFaceUsableFrameTarget.value,
+            requiredMatches: scopedFaceRequiredMatchCount.value,
+            statusPrefix: `Checking face for ${employeeFullName(employee)}...`,
+            verifier: (_image, imageBlob) =>
+                verifyEmployeeFace(employee.employee_id, imageBlob),
+        })
 
-        const image = captureImage()
-        if (!image) {
-            throw new Error('Camera photo could not be captured.')
-        }
-
-        const result = await verifyEmployeeFace(
-            employee.employee_id,
-            base64ToBlob(image, 'image/jpeg'),
-        )
-        if (
-            !result.matched ||
-            normalizeEmployeeCode(result.employee_id) !==
-                normalizeEmployeeCode(employee.employee_id)
-        ) {
-            toast.add({
-                severity: 'error',
-                summary: 'Face Verification',
-                detail: `Face does not match ${employeeFullName(employee)}.`,
-                life: 6000,
-            })
-            faceStatusText.value = result.message || 'Face mismatch.'
+        if (!result.matched || !result.image) {
+            const message =
+                result.message === 'Face frames did not agree. Please try again.'
+                    ? `Face does not consistently match ${employeeFullName(employee)}.`
+                    : result.message
+            showFaceWindowFailure(message)
+            faceStatusText.value = faceGuidanceFromMessage(message)
             return null
         }
 
         faceStatusText.value = `Face matched ${employeeFullName(employee)}.`
         return {
             employee,
-            image,
+            image: result.image,
         }
     } catch (error) {
         console.error('Face verification failed:', error)
+        const message =
+            error instanceof Error
+                ? faceGuidanceFromMessage(error.message)
+                : 'Unable to verify face.'
         toast.add({
             severity: 'error',
             summary: 'Face Verification',
-            detail: 'Unable to verify face. Check lighting and registered face image.',
+            detail:
+                message === FACE_SERVICE_UNAVAILABLE_MESSAGE
+                    ? FACE_SERVICE_UNAVAILABLE_MESSAGE
+                    : 'Unable to verify face. Check lighting and registered face image.',
             life: 6000,
         })
-        faceStatusText.value = 'Unable to verify face.'
+        faceStatusText.value = message
         return null
     }
 }
@@ -1068,8 +1259,28 @@ const verifyEmployeeAndSubmit = async (
 ): Promise<boolean> => {
     const employee = await verifyEmployeeIdentifier(employeeIdentifier, method)
     if (!employee) return false
+    if (!requireReadyFaceEnrollment(employee)) {
+        resetAttendanceSelection(method !== 'rfid' && method !== 'fingerprint')
+        return false
+    }
 
-    await openCameraForCapture({ loadFaceVerification: true })
+    try {
+        await openCameraForCapture({ loadFaceVerification: true })
+    } catch (error) {
+        const message =
+            error instanceof Error
+                ? faceGuidanceFromMessage(error.message)
+                : FACE_SERVICE_UNAVAILABLE_MESSAGE
+        toast.add({
+            severity: 'error',
+            summary: 'Face Verification',
+            detail: message,
+            life: 6000,
+        })
+        faceStatusText.value = message
+        resetAttendanceSelection(method !== 'rfid' && method !== 'fingerprint')
+        return false
+    }
 
     const matchedFace = await verifyLiveFaceMatchesEmployee(employee)
     if (!matchedFace) {
@@ -1094,50 +1305,39 @@ const submitFaceAttendance = async () => {
         startProcessing('face', 'Opening face recognition...')
         await openCameraForCapture({ loadFaceVerification: true })
 
-        if (!(await ensureSingleFaceInView())) {
-            resetAttendanceSelection()
-            return
-        }
-
-        const image = captureAttendanceImage()
-        if (!image) {
-            resetAttendanceSelection()
-            return
-        }
-
         faceStatusText.value = 'Recognizing face...'
-        const result = await recognizeFace(base64ToBlob(image, 'image/jpeg'))
+        const result = await runFaceVerificationWindow({
+            targetFrames: faceOnlyUsableFrameTarget.value,
+            requiredMatches: faceOnlyRequiredMatchCount.value,
+            statusPrefix: 'Recognizing face...',
+            verifier: (_image, imageBlob) => recognizeFace(imageBlob),
+        })
 
-        if (!result.matched || !result.employee_id) {
-            toast.add({
-                severity: 'error',
-                summary: 'Face Recognition',
-                detail: result.message || 'No registered face matched.',
-                life: 6000,
-            })
-            faceStatusText.value = result.message || 'No registered face matched.'
+        if (!result.matched || !result.employeeId || !result.image) {
+            showFaceWindowFailure(result.message || 'No registered face matched.')
             resetAttendanceSelection()
             return
         }
 
-        const employee = await verifyEmployeeIdentifier(result.employee_id, 'face')
+        const employee = await verifyEmployeeIdentifier(result.employeeId, 'face')
         if (!employee) return
 
         await submitAttendance(
             employee.employee_id,
             'face',
             employeeFullName(employee),
-            image,
+            result.image,
         )
     } catch (error) {
         console.error('Error submitting face attendance:', error)
+        const message =
+            error instanceof Error
+                ? faceGuidanceFromMessage(error.message)
+                : 'Unable to record face attendance.'
         toast.add({
             severity: 'error',
             summary: 'Face Recognition',
-            detail:
-                error instanceof Error
-                    ? error.message
-                    : 'Unable to record face attendance.',
+            detail: message,
             life: 6000,
         })
         stopProcessing()
@@ -1420,7 +1620,30 @@ const pollZktecoBridgeStatus = async (
                     return
                 }
 
-                await openCameraForCapture({ loadFaceVerification: true })
+                if (!requireReadyFaceEnrollment(employee)) {
+                    resetAttendanceSelection()
+                    fail(new Error('Employee has no ready face enrollment.'))
+                    return
+                }
+
+                try {
+                    await openCameraForCapture({ loadFaceVerification: true })
+                } catch (error) {
+                    const message =
+                        error instanceof Error
+                            ? faceGuidanceFromMessage(error.message)
+                            : FACE_SERVICE_UNAVAILABLE_MESSAGE
+                    toast.add({
+                        severity: 'error',
+                        summary: 'Face Verification',
+                        detail: message,
+                        life: 6000,
+                    })
+                    faceStatusText.value = message
+                    resetAttendanceSelection()
+                    fail(new Error(message))
+                    return
+                }
 
                 const matchedFace = await verifyLiveFaceMatchesEmployee(employee)
 
@@ -1843,7 +2066,7 @@ onUnmounted(() => {
                 data-face-auth-status="checking-employee"
                 class="flex min-h-40 w-full items-center justify-center rounded-xl border border-brand-bg/15 bg-brand-paragraph px-4 py-7 text-center"
             >
-                <p class="text-sm font-black leading-snug text-brand-stroke md:text-base">
+                <p class="whitespace-pre-line text-sm font-black leading-snug text-brand-stroke md:text-base">
                     {{ faceStatusText }}
                 </p>
             </div>

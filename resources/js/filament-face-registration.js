@@ -1,10 +1,16 @@
 import {
     enrollFace,
     faceEnrollmentStatus,
+    faceServiceHealth,
     faceServiceUrl,
 } from './Services/faceService.js'
 
-window.faceRegistration = ({ employeeId, hasRegisteredFace = false }) => ({
+window.faceRegistration = ({
+    employeeId,
+    hasRegisteredFace = false,
+    faceCaptureWidthRatio = 0.5,
+    faceCaptureHeightRatio = 0.68,
+}) => ({
     video: null,
     captureCanvas: null,
     stream: null,
@@ -23,10 +29,19 @@ window.faceRegistration = ({ employeeId, hasRegisteredFace = false }) => ({
     serviceConnectionFailed: false,
     enrollmentCount: 0,
     requiredCount: 3,
+    poseLabels: ['front-facing', 'slight left', 'slight right'],
     ready: false,
     isUpdatingExisting: hasRegisteredFace,
     hasResetExisting: false,
     serviceUrl: faceServiceUrl(),
+
+    get currentPoseLabel() {
+        return this.poseLabels[Math.min(this.enrollmentCount, this.poseLabels.length - 1)]
+    },
+
+    get captureZoneStyle() {
+        return `width: ${this.ratioSetting(faceCaptureWidthRatio, 0.5) * 100}%; height: ${this.ratioSetting(faceCaptureHeightRatio, 0.68) * 100}%;`
+    },
 
     get canSave() {
         return (
@@ -52,12 +67,7 @@ window.faceRegistration = ({ employeeId, hasRegisteredFace = false }) => ({
         let serviceError = null
 
         try {
-            await this.startCamera()
-        } catch (error) {
-            cameraError = error
-        }
-
-        try {
+            await faceServiceHealth()
             await this.loadStatus()
         } catch (error) {
             serviceError = error
@@ -70,6 +80,13 @@ window.faceRegistration = ({ employeeId, hasRegisteredFace = false }) => ({
                 'Unable to connect to the face service. Check the face service URL, HTTPS certificate, and CORS allowed origins.'
             this.message = this.statusText
             this.success = false
+            return
+        }
+
+        try {
+            await this.startCamera()
+        } catch (error) {
+            cameraError = error
         }
 
         if (cameraError) {
@@ -85,8 +102,8 @@ window.faceRegistration = ({ employeeId, hasRegisteredFace = false }) => ({
 
         if (!serviceError) {
             this.statusText = this.isUpdatingExisting
-                ? `Capture 1 of ${this.requiredCount}.`
-                : 'Capture a clear face image.'
+                ? `Capture 1 of ${this.requiredCount}: ${this.currentPoseLabel}.`
+                : `Capture ${this.enrollmentCount + 1} of ${this.requiredCount}: ${this.currentPoseLabel}.`
         }
     },
 
@@ -100,7 +117,7 @@ window.faceRegistration = ({ employeeId, hasRegisteredFace = false }) => ({
         this.enrollmentCount = this.isUpdatingExisting ? 0 : status.enrollment_count
         this.ready = this.isUpdatingExisting ? false : status.ready
         this.statusText = this.isUpdatingExisting
-            ? `Capture 1 of ${this.requiredCount}.`
+            ? `Capture 1 of ${this.requiredCount}: ${this.currentPoseLabel}.`
             : this.statusText
     },
 
@@ -143,14 +160,26 @@ window.faceRegistration = ({ employeeId, hasRegisteredFace = false }) => ({
             return null
         }
 
-        this.captureCanvas.width = this.video.videoWidth
-        this.captureCanvas.height = this.video.videoHeight
+        const widthRatio = this.ratioSetting(faceCaptureWidthRatio, 0.5)
+        const heightRatio = this.ratioSetting(faceCaptureHeightRatio, 0.68)
+        const sourceWidth = Math.round(this.video.videoWidth * widthRatio)
+        const sourceHeight = Math.round(this.video.videoHeight * heightRatio)
+        const sourceX = Math.round((this.video.videoWidth - sourceWidth) / 2)
+        const sourceY = Math.round((this.video.videoHeight - sourceHeight) / 2)
+        const scale = Math.min(1, 960 / sourceWidth)
+
+        this.captureCanvas.width = Math.round(sourceWidth * scale)
+        this.captureCanvas.height = Math.round(sourceHeight * scale)
 
         const context = this.captureCanvas.getContext('2d')
         if (!context) return null
 
         context.drawImage(
             this.video,
+            sourceX,
+            sourceY,
+            sourceWidth,
+            sourceHeight,
             0,
             0,
             this.captureCanvas.width,
@@ -166,6 +195,14 @@ window.faceRegistration = ({ employeeId, hasRegisteredFace = false }) => ({
         }
 
         return new Blob([buffer], { type: 'image/jpeg' })
+    },
+
+    ratioSetting(value, fallback) {
+        const ratio = Number(value)
+
+        if (!Number.isFinite(ratio)) return fallback
+
+        return Math.max(0.25, Math.min(1, ratio))
     },
 
     async prepareCaptureForReview() {
@@ -195,7 +232,7 @@ window.faceRegistration = ({ employeeId, hasRegisteredFace = false }) => ({
         this.faceClear = true
         this.isReviewingCapture = true
         this.isCapturing = false
-        this.statusText = 'Review the captured face image.'
+        this.statusText = `Review ${this.currentPoseLabel} capture.`
         this.message = 'Save this capture or retake it.'
     },
 
@@ -231,7 +268,7 @@ window.faceRegistration = ({ employeeId, hasRegisteredFace = false }) => ({
         this.success = false
         this.faceClear = false
         this.faceCount = 0
-        this.statusText = 'Capture a clear face image.'
+        this.statusText = `Capture ${this.enrollmentCount + 1} of ${this.requiredCount}: ${this.currentPoseLabel}.`
     },
 
     async save() {
@@ -250,7 +287,7 @@ window.faceRegistration = ({ employeeId, hasRegisteredFace = false }) => ({
             const payload = await enrollFace(
                 employeeId,
                 this.capturedBlob,
-                '',
+                this.currentPoseLabel,
                 shouldResetExisting,
             )
 
@@ -263,7 +300,7 @@ window.faceRegistration = ({ employeeId, hasRegisteredFace = false }) => ({
             this.message = payload.message || 'Enrollment capture saved.'
             this.statusText = this.ready
                 ? 'Face registration is complete. Click Done to close this modal.'
-                : `Capture ${this.enrollmentCount + 1} of ${this.requiredCount}.`
+                : `Capture ${this.enrollmentCount + 1} of ${this.requiredCount}: ${this.currentPoseLabel}.`
             this.capturedBlob = null
             this.capturedPreview = ''
             this.isReviewingCapture = false

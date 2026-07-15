@@ -9,6 +9,7 @@ class RecognizeResponse(BaseModel):
     margin: float | None = None
     face_count: int
     message: str
+    quality: dict | None = None
     spoofing_score: float | None = None
     spoofing_passed: bool | None = None
     spoofing_checked: bool = False

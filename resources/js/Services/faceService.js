@@ -11,6 +11,26 @@ export const faceServiceUrl = () => {
     return configuredUrl.replace(/\/$/, '')
 }
 
+export const faceServiceHealth = async (timeoutMs = 2500) => {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), timeoutMs)
+
+    try {
+        const response = await fetch(`${faceServiceUrl()}/health`, {
+            signal: controller.signal,
+            headers: {
+                Accept: 'application/json',
+            },
+        })
+
+        return jsonPayload(response, 'Face service unavailable.')
+    } catch (error) {
+        throw new Error('Face service unavailable.')
+    } finally {
+        clearTimeout(timeout)
+    }
+}
+
 const jsonPayload = async (response, fallbackMessage) => {
     const payload = await response.json().catch(() => ({}))
 
