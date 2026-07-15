@@ -12,6 +12,8 @@ class AttendanceScheduleSettings
         'time_in_start' => '08:00',
         'time_out_start' => '18:00',
         'duplicate_scan_window_seconds' => '60',
+        'face_capture_width_ratio' => '0.50',
+        'face_capture_height_ratio' => '0.68',
         'show_face_attendance_button' => false,
         'show_scan_status_messages' => true,
         'scan_status_idle' => 'RFID and fingerprint scanners are listening.',
@@ -40,6 +42,8 @@ class AttendanceScheduleSettings
             'time_in_start' => $this->setting('time_in_start'),
             'time_out_start' => $this->setting('time_out_start'),
             'duplicate_scan_window_seconds' => (string) $this->duplicateScanWindowSeconds(),
+            'face_capture_width_ratio' => (string) $this->faceCaptureWidthRatio(),
+            'face_capture_height_ratio' => (string) $this->faceCaptureHeightRatio(),
             'show_face_attendance_button' => $this->showFaceAttendanceButton(),
             'show_scan_status_messages' => $this->showScanStatusMessages(),
         ];
@@ -75,6 +79,16 @@ class AttendanceScheduleSettings
         $value = $this->getAllSettings()['duplicate_scan_window_seconds'] ?? self::DEFAULTS['duplicate_scan_window_seconds'];
 
         return max(0, min(3600, (int) $value));
+    }
+
+    public function faceCaptureWidthRatio(): float
+    {
+        return $this->ratioSetting('face_capture_width_ratio');
+    }
+
+    public function faceCaptureHeightRatio(): float
+    {
+        return $this->ratioSetting('face_capture_height_ratio');
     }
 
     public function showFaceAttendanceButton(): bool
@@ -130,6 +144,14 @@ class AttendanceScheduleSettings
         }
 
         return self::DEFAULTS[$key];
+    }
+
+    private function ratioSetting(string $key): float
+    {
+        $value = $this->getAllSettings()[$key] ?? self::DEFAULTS[$key];
+        $ratio = is_numeric($value) ? (float) $value : (float) self::DEFAULTS[$key];
+
+        return round(max(0.25, min(1.0, $ratio)), 2);
     }
 
     private function getAllSettings(): array

@@ -62,9 +62,6 @@ const closeAnnouncement = () => {
                         <Bell class="h-5 w-5" />
                     </div>
                     <div>
-                        <p class="text-xs font-black text-brand-bg">
-                            Company desk
-                        </p>
                         <h2 class="text-2xl font-black text-brand-stroke">
                             Announcements
                         </h2>

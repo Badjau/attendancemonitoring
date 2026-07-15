@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     anti_spoofing: bool = True
     require_anti_spoofing: bool = False
     save_failed_detection_frames: bool = True
-    match_threshold: float = 0.50
+    match_threshold: float = 0.4
     ambiguous_margin: float = 0.04
     min_enrollments: int = 3
     min_face_size: int = 120

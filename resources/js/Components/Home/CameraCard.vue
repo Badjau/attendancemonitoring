@@ -14,7 +14,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useToast } from 'primevue'
 import { useGeolocator } from '@/Composables/useGeolocator.js'
 import { useSyncStore } from '@/Stores/sync.js'
-import { recognizeFace, verifyEmployeeFace } from '@/Services/faceService.js'
+import { detectFaces, recognizeFace, verifyEmployeeFace } from '@/Services/faceService.js'
 
 type AttendanceAction = 'time-in' | 'time-out'
 type AttendanceMethod = 'rfid' | 'keypad' | 'fingerprint' | 'face'
@@ -40,8 +40,9 @@ type AttendanceSchedule = {
     time_in_start: string
     time_out_start: string
     duplicate_scan_window_seconds: string
+    face_capture_width_ratio: string
+    face_capture_height_ratio: string
     show_face_attendance_button: boolean
-    show_scan_status_messages: boolean
 }
 type ScanStatusMessages = {
     idle: string
@@ -108,6 +109,7 @@ let interval: ReturnType<typeof setInterval>
 let clockSyncInterval: ReturnType<typeof setInterval>
 let focusInterval: ReturnType<typeof setInterval>
 let faceDetectionInterval: ReturnType<typeof setInterval> | null = null
+let liveFaceDetectionInterval: ReturnType<typeof setInterval> | null = null
 let autoFingerprintTimeout: ReturnType<typeof setTimeout> | null = null
 let scannerStatusResetTimeout: ReturnType<typeof setTimeout> | null = null
 let rfidTimeout: any = null
@@ -131,9 +133,30 @@ const CLOCK_SYNC_INTERVAL_MS = 60 * 60 * 1000
 const CLOCK_OFFSET_STORAGE_KEY = 'timeclock.clockOffsetMs'
 const CLOCK_TIME_ZONE = 'Asia/Manila'
 const ATTENDANCE_IMAGE_MAX_WIDTH = 960
-const FACE_ACTIVE_ZONE_WIDTH_RATIO = 0.58
-const FACE_ACTIVE_ZONE_HEIGHT_RATIO = 0.78
+const FACE_MULTI_WARNING_MESSAGE =
+    'Multiple faces detected. Please step out of the camera view.'
+const FACE_WAITING_MESSAGE = 'Waiting for face...'
+const FACE_DETECTION_POLL_MS = 900
+const FACE_WAIT_TIMEOUT_MS = 6000
+const FACE_WAIT_RETRY_MS = 350
+const FACE_CAPTURE_STABILIZE_MS = 1500
 let clockOffsetMs = 0
+const ratioSetting = (value: string | number | undefined, fallback: number): number => {
+    const ratio = Number(value)
+
+    if (!Number.isFinite(ratio)) return fallback
+
+    return Math.max(0.25, Math.min(1, ratio))
+}
+const faceActiveZoneWidthRatio = computed(() =>
+    ratioSetting(props.attendanceSchedule.face_capture_width_ratio, 0.5),
+)
+const faceActiveZoneHeightRatio = computed(() =>
+    ratioSetting(props.attendanceSchedule.face_capture_height_ratio, 0.68),
+)
+const hasMultipleFacesInView = ref(false)
+const liveFaceCount = ref(0)
+const cameraGuidanceMessage = ref('')
 const isLocationReady = computed(
     () =>
         Boolean(coords.value) &&
@@ -149,6 +172,27 @@ const processingLabel = computed(() =>
     faceStatusText.value && faceStatusText.value !== 'Face verification ready.'
         ? faceStatusText.value
         : 'Processing, please wait...',
+)
+const showFaceCheckOnly = computed(() =>
+    isProcessing.value &&
+    isCameraActive.value &&
+    faceStatusText.value.startsWith('Checking face for '),
+)
+const cameraGuidanceText = computed(() => {
+    if (cameraGuidanceMessage.value === FACE_WAITING_MESSAGE) {
+        return 'Look straight into the camera. Waiting for face...'
+    }
+
+    if (cameraGuidanceMessage.value) {
+        return cameraGuidanceMessage.value
+    }
+
+    return 'Look straight into the camera to record your attendance.'
+})
+const cameraGuidanceIsWarning = computed(() =>
+    [FACE_MULTI_WARNING_MESSAGE, 'No face detected.'].includes(
+        cameraGuidanceMessage.value,
+    ),
 )
 const scanStatusMessage = (key: keyof ScanStatusMessages): string =>
     props.scanStatusMessages[key]
@@ -276,6 +320,7 @@ const waitForCameraFrame = async (timeoutMs = 2500): Promise<boolean> => {
 }
 
 const stopCamera = (): any => {
+    stopLiveFaceDetection()
     stream?.getTracks().forEach((track) => track.stop())
     stream = null
     if (videoRef.value) videoRef.value.srcObject = null
@@ -294,6 +339,17 @@ const clearFaceDetectorOverlay = () => {
     const canvas = overlayRef.value
     const context = canvas?.getContext('2d')
     if (canvas && context) context.clearRect(0, 0, canvas.width, canvas.height)
+}
+
+const stopLiveFaceDetection = () => {
+    if (liveFaceDetectionInterval) {
+        clearInterval(liveFaceDetectionInterval)
+        liveFaceDetectionInterval = null
+    }
+
+    hasMultipleFacesInView.value = false
+    liveFaceCount.value = 0
+    cameraGuidanceMessage.value = ''
 }
 
 const clearAutoFingerprintScan = () => {
@@ -333,8 +389,8 @@ const startFaceDetectorOverlay = () => {
         context.setTransform(ratio, 0, 0, ratio, 0, 0)
         context.clearRect(0, 0, rect.width, rect.height)
 
-        const zoneWidth = rect.width * FACE_ACTIVE_ZONE_WIDTH_RATIO
-        const zoneHeight = rect.height * FACE_ACTIVE_ZONE_HEIGHT_RATIO
+        const zoneWidth = rect.width * faceActiveZoneWidthRatio.value
+        const zoneHeight = rect.height * faceActiveZoneHeightRatio.value
         const zoneX = (rect.width - zoneWidth) / 2
         const zoneY = (rect.height - zoneHeight) / 2
 
@@ -363,8 +419,8 @@ const captureImage = (): string | null => {
 
     if (video.videoWidth <= 0 || video.videoHeight <= 0) return null
 
-    const sourceWidth = Math.round(video.videoWidth * FACE_ACTIVE_ZONE_WIDTH_RATIO)
-    const sourceHeight = Math.round(video.videoHeight * FACE_ACTIVE_ZONE_HEIGHT_RATIO)
+    const sourceWidth = Math.round(video.videoWidth * faceActiveZoneWidthRatio.value)
+    const sourceHeight = Math.round(video.videoHeight * faceActiveZoneHeightRatio.value)
     const sourceX = Math.round((video.videoWidth - sourceWidth) / 2)
     const sourceY = Math.round((video.videoHeight - sourceHeight) / 2)
     const scale = Math.min(1, ATTENDANCE_IMAGE_MAX_WIDTH / sourceWidth)
@@ -388,6 +444,107 @@ const captureImage = (): string | null => {
     )
 
     return canvas.toDataURL('image/jpeg', 0.72)
+}
+
+const checkLiveFaceCount = async (): Promise<number | null> => {
+    if (!isCameraActive.value || !isVideoReady.value || isSilentCameraCapture.value) {
+        return null
+    }
+
+    const image = captureImage()
+    if (!image) return null
+
+    try {
+        const result = await detectFaces(base64ToBlob(image, 'image/jpeg'))
+        const faceCount = Number(result.face_count || 0)
+        const hasMultipleFaces = faceCount > 1
+        liveFaceCount.value = faceCount
+        hasMultipleFacesInView.value = hasMultipleFaces
+
+        if (hasMultipleFaces) {
+            cameraGuidanceMessage.value = result.message || FACE_MULTI_WARNING_MESSAGE
+            return faceCount
+        }
+
+        if (faceCount === 0) {
+            cameraGuidanceMessage.value = FACE_WAITING_MESSAGE
+            return faceCount
+        }
+
+        cameraGuidanceMessage.value = ''
+
+        return faceCount
+    } catch (error) {
+        console.error('Face detection failed:', error)
+        return null
+    }
+}
+
+const startLiveFaceDetection = () => {
+    stopLiveFaceDetection()
+    void checkLiveFaceCount()
+    liveFaceDetectionInterval = setInterval(() => {
+        void checkLiveFaceCount()
+    }, FACE_DETECTION_POLL_MS)
+}
+
+const ensureSingleFaceInView = async (): Promise<boolean> => {
+    const startedAt = Date.now()
+
+    while (Date.now() - startedAt < FACE_WAIT_TIMEOUT_MS) {
+        const faceCount = await checkLiveFaceCount()
+
+        if (faceCount === 1) {
+            cameraGuidanceMessage.value = 'Hold still...'
+            await new Promise((resolve) =>
+                setTimeout(resolve, FACE_CAPTURE_STABILIZE_MS),
+            )
+
+            const stableFaceCount = await checkLiveFaceCount()
+
+            if (stableFaceCount === 1) return true
+
+            if (stableFaceCount !== null && stableFaceCount > 1) {
+                toast.add({
+                    severity: 'warn',
+                    summary: 'Face Verification',
+                    detail: FACE_MULTI_WARNING_MESSAGE,
+                    life: 4000,
+                })
+                cameraGuidanceMessage.value = FACE_MULTI_WARNING_MESSAGE
+
+                return false
+            }
+
+            cameraGuidanceMessage.value = FACE_WAITING_MESSAGE
+            continue
+        }
+
+        if (faceCount !== null && faceCount > 1) {
+            toast.add({
+                severity: 'warn',
+                summary: 'Face Verification',
+                detail: FACE_MULTI_WARNING_MESSAGE,
+                life: 4000,
+            })
+            cameraGuidanceMessage.value = FACE_MULTI_WARNING_MESSAGE
+
+            return false
+        }
+
+        cameraGuidanceMessage.value = FACE_WAITING_MESSAGE
+        await new Promise((resolve) => setTimeout(resolve, FACE_WAIT_RETRY_MS))
+    }
+
+    toast.add({
+        severity: 'warn',
+        summary: 'Face Verification',
+        detail: 'No face detected. Look straight at the camera and try again.',
+        life: 4000,
+    })
+    cameraGuidanceMessage.value = 'No face detected.'
+
+    return false
 }
 
 const loadClockOffset = () => {
@@ -480,6 +637,7 @@ const openCameraForCapture = async (
 
     faceStatusText.value = 'Face camera ready.'
     startFaceDetectorOverlay()
+    startLiveFaceDetection()
 }
 
 const handleTimeAction = async (actionName: AttendanceAction) => {
@@ -858,6 +1016,10 @@ const verifyLiveFaceMatchesEmployee = async (
 
     try {
         faceStatusText.value = `Checking face for ${employeeFullName(employee)}...`
+        if (!(await ensureSingleFaceInView())) {
+            return null
+        }
+
         const image = captureImage()
         if (!image) {
             throw new Error('Camera photo could not be captured.')
@@ -931,6 +1093,11 @@ const submitFaceAttendance = async () => {
     try {
         startProcessing('face', 'Opening face recognition...')
         await openCameraForCapture({ loadFaceVerification: true })
+
+        if (!(await ensureSingleFaceInView())) {
+            resetAttendanceSelection()
+            return
+        }
 
         const image = captureAttendanceImage()
         if (!image) {
@@ -1643,8 +1810,11 @@ onUnmounted(() => {
         <p
             v-if="showCamera"
             class="mt-5 text-center text-sm font-bold text-black/60"
+            :class="{
+                'text-red-700': cameraGuidanceIsWarning,
+            }"
         >
-            Look straight at the camera to record your attendance.
+            {{ cameraGuidanceText }}
         </p>
     </div>
 
@@ -1652,7 +1822,10 @@ onUnmounted(() => {
         <div
             class="shrink-0 rounded-2xl border border-black/5 bg-white p-4 shadow-xl shadow-black/10 animate-fade-up md:p-5"
         >
-            <div class="mb-5 flex flex-col items-center space-y-0 text-center">
+            <div
+                v-if="!showFaceCheckOnly"
+                class="mb-5 flex flex-col items-center space-y-0 text-center"
+            >
                 <p
                     class="text-s font-bold text-brand-bg"
                 >
@@ -1665,7 +1838,17 @@ onUnmounted(() => {
                 </h1>
             </div>
 
-            <div class="w-full">
+            <div
+                v-if="showFaceCheckOnly"
+                data-face-auth-status="checking-employee"
+                class="flex min-h-40 w-full items-center justify-center rounded-xl border border-brand-bg/15 bg-brand-paragraph px-4 py-7 text-center"
+            >
+                <p class="text-sm font-black leading-snug text-brand-stroke md:text-base">
+                    {{ faceStatusText }}
+                </p>
+            </div>
+
+            <div v-else class="w-full">
                 <div class="grid grid-cols-2 gap-4">
                     <button
                         @click="handleTimeAction('time-in')"
@@ -1722,7 +1905,7 @@ onUnmounted(() => {
                 </button>
 
                 <div
-                    v-if="props.attendanceSchedule.show_scan_status_messages"
+                    data-scanner-status-version="20260715-always-on"
                     class="mt-3 rounded-xl border border-brand-bg/15 bg-brand-paragraph px-4 py-2.5 text-center"
                     :class="{
                         'border-red-200 bg-red-50':

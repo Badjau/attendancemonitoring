@@ -588,6 +588,36 @@ def analyze_single_face(content: bytes, rgb: np.ndarray, settings: Settings) -> 
     )
 
 
+def detect_faces(rgb: np.ndarray, settings: Settings) -> dict:
+    ensure_recognizer_available()
+    faces = extract_faces_once(
+        rgb=rgb,
+        detector_backend=settings.detector_backend,
+        anti_spoofing=False,
+    )
+
+    fallback_backend = settings.fallback_detector_backend.strip()
+    if not faces and fallback_backend and fallback_backend != settings.detector_backend:
+        faces = extract_faces_once(
+            rgb=rgb,
+            detector_backend=fallback_backend,
+            anti_spoofing=False,
+        )
+
+    face_count = len(faces)
+    message = "Face detection ready."
+
+    if face_count == 0:
+        message = "No face detected."
+    elif face_count > 1:
+        message = "Multiple faces detected. Please step out of the camera view."
+
+    return {
+        "face_count": face_count,
+        "message": message,
+    }
+
+
 def recognize(content: bytes, rgb: np.ndarray, store: FaceStore, settings: Settings) -> dict:
     extraction = extract_faces_with_spoofing(
         rgb,
@@ -630,7 +660,7 @@ def recognize(content: bytes, rgb: np.ndarray, store: FaceStore, settings: Setti
             "distance": None,
             "margin": None,
             "face_count": face_count,
-            "message": "Only one face is allowed in the frame.",
+            "message": "Multiple faces detected. Please step out of the camera view.",
             "spoofing_checked": False,
         }
 

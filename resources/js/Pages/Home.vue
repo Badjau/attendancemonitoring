@@ -16,6 +16,8 @@ const props = defineProps<{
         time_in_start: string
         time_out_start: string
         duplicate_scan_window_seconds: string
+        face_capture_width_ratio: string
+        face_capture_height_ratio: string
         show_face_attendance_button: boolean
         show_scan_status_messages: boolean
     }
@@ -108,7 +110,7 @@ onUnmounted(() => {
                     <img
                         src="/images/mcasia-logo.png"
                         alt="McAsia"
-                        class="h-6 w-6 rounded bg-white object-contain p-1 shadow-sm ring-1 ring-black/10 md:h-8 md:w-8"
+                        class="h-12 w-12 rounded bg-white object-contain p-1 shadow-sm ring-1 ring-black/10 md:h-12 md:w-12"
                     />
                     <div class="leading-tight">
                         <p class="text-sm font-black text-brand-bg md:text-base">
@@ -122,9 +124,9 @@ onUnmounted(() => {
 
                 <Link
                     href="/unlock"
-                    class="inline-flex items-center justify-center rounded-full bg-brand-bg px-5 py-3 text-xs font-black text-white shadow-lg shadow-red-950/15 transition hover:bg-brand-tertiary focus:outline-none focus:ring-4 focus:ring-brand-bg/20"
+                    class="inline-flex items-center justify-center rounded-full bg-brand-bg px-3 py-2 text-2xl font-black text-white shadow-lg shadow-red-950/15 transition hover:bg-brand-tertiary focus:outline-none focus:ring-4 focus:ring-brand-bg/20"
                 >
-                    Lock / Unlock
+                    🔐
                 </Link>
             </div>
         </header>

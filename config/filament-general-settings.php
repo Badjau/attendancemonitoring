@@ -40,6 +40,20 @@ return [
                     'required' => true,
                     'rules' => ['required', 'integer', 'min:0', 'max:3600'],
                 ],
+                'face_capture_width_ratio' => [
+                    'type' => TypeFieldEnum::Text->value,
+                    'label' => 'Face Capture Width Ratio',
+                    'placeholder' => '0.50',
+                    'required' => true,
+                    'rules' => ['required', 'numeric', 'min:0.25', 'max:1'],
+                ],
+                'face_capture_height_ratio' => [
+                    'type' => TypeFieldEnum::Text->value,
+                    'label' => 'Face Capture Height Ratio',
+                    'placeholder' => '0.68',
+                    'required' => true,
+                    'rules' => ['required', 'numeric', 'min:0.25', 'max:1'],
+                ],
                 'show_face_attendance_button' => [
                     'type' => TypeFieldEnum::Boolean->value,
                     'label' => 'Show Facial Recognition Attendance Button',

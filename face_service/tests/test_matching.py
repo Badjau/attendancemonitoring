@@ -1,7 +1,12 @@
+from io import BytesIO
+
 import numpy as np
+from fastapi.testclient import TestClient
+from PIL import Image
 
 from app.config import Settings
-from app.recognition import recognize, verify_employee_face
+from app.main import app
+from app.recognition import detect_faces, recognize, verify_employee_face
 
 
 class MemoryStore:
@@ -27,6 +32,31 @@ def patch_recognizer(monkeypatch, embedding):
         }]),
         "represent": staticmethod(lambda **kwargs: [{"embedding": embedding}]),
     }))
+
+
+def patch_multi_face_recognizer(monkeypatch):
+    from app import recognition
+
+    monkeypatch.setattr(recognition, "DeepFace", type("Fake", (), {
+        "extract_faces": staticmethod(lambda **kwargs: [
+            {
+                "facial_area": {"x": 10, "y": 10, "w": 100, "h": 100},
+                "confidence": 0.99,
+            },
+            {
+                "facial_area": {"x": 130, "y": 10, "w": 100, "h": 100},
+                "confidence": 0.98,
+            },
+        ]),
+        "represent": staticmethod(lambda **kwargs: [{"embedding": np.array([1.0, 0.0, 0.0])}]),
+    }))
+
+
+def jpeg_bytes() -> bytes:
+    buffer = BytesIO()
+    Image.fromarray(np.full((240, 240, 3), 128, dtype=np.uint8)).save(buffer, format="JPEG")
+
+    return buffer.getvalue()
 
 
 def test_known_employee_matches(monkeypatch):
@@ -111,6 +141,47 @@ def test_unknown_employee_is_rejected(monkeypatch):
 
     assert result["matched"] is False
     assert result["employee_id"] is None
+
+
+def test_multiple_faces_fail_recognition_with_step_out_message(monkeypatch):
+    patch_multi_face_recognizer(monkeypatch)
+
+    result = recognize(
+        b"image",
+        np.zeros((240, 240, 3), dtype=np.uint8),
+        MemoryStore([{"employee_id": "EMP-001", "embedding": np.array([1.0, 0.0, 0.0])}]),
+        Settings(),
+    )
+
+    assert result["matched"] is False
+    assert result["face_count"] == 2
+    assert result["message"] == "Multiple faces detected. Please step out of the camera view."
+
+
+def test_detect_faces_reports_multiple_faces_with_step_out_message(monkeypatch):
+    patch_multi_face_recognizer(monkeypatch)
+
+    result = detect_faces(np.zeros((240, 240, 3), dtype=np.uint8), Settings())
+
+    assert result == {
+        "face_count": 2,
+        "message": "Multiple faces detected. Please step out of the camera view.",
+    }
+
+
+def test_detect_endpoint_reports_multiple_faces(monkeypatch):
+    patch_multi_face_recognizer(monkeypatch)
+
+    response = TestClient(app).post(
+        "/api/detect",
+        files={"image": ("frame.jpg", jpeg_bytes(), "image/jpeg")},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "face_count": 2,
+        "message": "Multiple faces detected. Please step out of the camera view.",
+    }
 
 
 def test_ambiguous_match_is_rejected(monkeypatch):

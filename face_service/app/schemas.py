@@ -14,6 +14,11 @@ class RecognizeResponse(BaseModel):
     spoofing_checked: bool = False
 
 
+class DetectResponse(BaseModel):
+    face_count: int
+    message: str
+
+
 class EnrollmentResponse(BaseModel):
     employee_id: str
     enrollment_count: int

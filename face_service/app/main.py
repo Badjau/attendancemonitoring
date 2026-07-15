@@ -16,6 +16,7 @@ from .recognition import (
     DEEPFACE_IMPORT_ERROR,
     DeepFace,
     analyze_single_face,
+    detect_faces,
     read_upload_image,
     recognize,
     verify_employee_face,
@@ -23,6 +24,7 @@ from .recognition import (
 from .schemas import (
     CacheRefreshResponse,
     DeleteEmployeeResponse,
+    DetectResponse,
     EmployeeStatusResponse,
     EnrollmentResponse,
     RecognizeResponse,
@@ -235,6 +237,22 @@ async def recognize_face(
         "recognize_request_completed matched=%s employee_id=%s message=%s",
         result.get("matched"),
         result.get("employee_id"),
+        result.get("message"),
+    )
+    return result
+
+
+@app.post("/api/detect", response_model=DetectResponse)
+async def detect_face_count(
+    image: UploadFile = File(...),
+    settings: Settings = Depends(get_settings),
+) -> dict:
+    logger.info("detect_request_started filename=%s content_type=%s", image.filename, image.content_type)
+    _, rgb = await read_upload_image(image)
+    result = detect_faces(rgb, settings)
+    logger.info(
+        "detect_request_completed face_count=%s message=%s",
+        result.get("face_count"),
         result.get("message"),
     )
     return result

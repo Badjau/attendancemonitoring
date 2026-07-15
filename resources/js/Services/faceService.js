@@ -60,6 +60,21 @@ export const verifyEmployeeFace = async (employeeId, imageBlob) => {
     return jsonPayload(response, 'Face verification failed.')
 }
 
+export const detectFaces = async (imageBlob) => {
+    const formData = new FormData()
+    formData.append('image', imageBlob, `face_detect_${Date.now()}.jpg`)
+
+    const response = await fetch(`${faceServiceUrl()}/api/detect`, {
+        method: 'POST',
+        headers: {
+            Accept: 'application/json',
+        },
+        body: formData,
+    })
+
+    return jsonPayload(response, 'Face detection failed.')
+}
+
 export const enrollFace = async (employeeId, imageBlob, poseLabel = '', resetExisting = false) => {
     const formData = new FormData()
     formData.append('image', imageBlob, `face_enrollment_${employeeId}_${Date.now()}.jpg`)
