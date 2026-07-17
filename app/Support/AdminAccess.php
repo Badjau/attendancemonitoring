@@ -12,6 +12,7 @@ class AdminAccess
     public const HR_RESOURCE_KEYS = [
         'announcements',
         'attendances',
+        'branches',
         'departments',
         'employees',
         'zones',

@@ -98,6 +98,7 @@ const props = defineProps<{
     attendanceSchedule: AttendanceSchedule
     scanStatusMessages: ScanStatusMessages
     zktecoBridgeUrl: string
+    geolocator?: any
 }>()
 
 const emit = defineEmits<{
@@ -106,6 +107,7 @@ const emit = defineEmits<{
 
 const toast = useToast()
 const syncStore = useSyncStore()
+const activeGeolocator = props.geolocator ?? useGeolocator()
 const {
     coords,
     error: locationError,
@@ -115,7 +117,7 @@ const {
     usingCachedLocation,
     locationSource,
     getLocation,
-} = useGeolocator()
+} = activeGeolocator
 
 const attendanceType = ref<AttendanceAction | ''>('')
 const videoRef = ref<HTMLVideoElement | null>(null)

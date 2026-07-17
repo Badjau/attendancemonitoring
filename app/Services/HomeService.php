@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\Announcement;
 use App\Models\Attendance;
+use App\Models\Branch;
 use App\Models\Employee;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\Cache;
@@ -15,11 +16,13 @@ class HomeService
         $today = today()->toDateString();
         $branch = trim((string) $branch);
 
-        return Attendance::with(['employee.media'])
+        return Attendance::with(['employee.branches', 'employee.media'])
             ->where('attendance_date', $today)
             ->when($branch !== '', function ($query) use ($branch): void {
                 $query->whereHas('employee', function ($query) use ($branch): void {
-                    $query->whereRaw('LOWER(TRIM(branch)) = ?', [strtolower($branch)]);
+                    $query->whereHas('branches', function ($query) use ($branch): void {
+                        $query->whereRaw('LOWER(TRIM(name)) = ?', [strtolower($branch)]);
+                    });
                 });
             })
             ->whereIn('id', function ($query) use ($today) {
@@ -54,12 +57,29 @@ class HomeService
         });
     }
 
+    public function getActiveBranches(): \Illuminate\Support\Collection
+    {
+        return Branch::query()
+            ->active()
+            ->orderBy('name')
+            ->get(['id', 'name', 'latitude', 'longitude', 'radius_meters'])
+            ->map(fn (Branch $branch): array => [
+                'id' => $branch->id,
+                'name' => $branch->name,
+                'latitude' => $branch->latitude,
+                'longitude' => $branch->longitude,
+                'radius_meters' => $branch->radius_meters,
+            ])
+            ->values();
+    }
+
     public function getEmployeesWithFaces(): \Illuminate\Support\Collection
     {
         // Limit to 100 employees max to prevent loading all employees into memory
         // This is better for systems with many employees
         return Employee::with('media')
-            ->select(['id', 'employee_id', 'first_name', 'last_name', 'position', 'branch'])
+            ->with('branches')
+            ->select(['id', 'employee_id', 'first_name', 'last_name', 'position'])
             ->limit(100)
             ->get()
             ->map(fn (Employee $employee): array => [
@@ -77,7 +97,8 @@ class HomeService
     public function getRegisteredEmployeeFacesExcept(?int $employeeId = null): array
     {
         $query = Employee::with('media')
-            ->select(['id', 'employee_id', 'first_name', 'last_name', 'branch']);
+            ->with('branches')
+            ->select(['id', 'employee_id', 'first_name', 'last_name']);
 
         if ($employeeId) {
             $query->whereKeyNot($employeeId);

@@ -33,8 +33,9 @@ class ZktecoFingerprintController extends Controller
                 });
             })
             ->orderBy('employee_id')
+            ->with('branches')
             ->limit(25)
-            ->get(['id', 'employee_id', 'first_name', 'last_name', 'position', 'branch']);
+            ->get(['id', 'employee_id', 'first_name', 'last_name', 'position']);
 
         return response()->json([
             'data' => $employees->map(fn (Employee $employee): array => $this->employeePayload($employee))->values(),
@@ -46,7 +47,7 @@ class ZktecoFingerprintController extends Controller
         $this->authorizeScanner($request);
 
         $templates = ZktecoFingerprintTemplate::query()
-            ->with('employee:id,employee_id,first_name,last_name,position,branch')
+            ->with('employee.branches')
             ->orderBy('employee_id')
             ->orderBy('finger_index')
             ->paginate(500, ['*'], 'page', $request->query('page', 1));
@@ -130,7 +131,7 @@ class ZktecoFingerprintController extends Controller
             'enrolled_at' => now(),
         ]);
 
-        $template->load('employee:id,employee_id,first_name,last_name,position,branch');
+        $template->load('employee.branches');
 
         return response()->json([
             'message' => 'Fingerprint enrolled successfully.',
@@ -183,7 +184,7 @@ class ZktecoFingerprintController extends Controller
         ]);
 
         $attendance = $this->attendanceService->recordAttendance($attendanceRequest);
-        $attendance->load('employee:id,employee_id,first_name,last_name,position,branch');
+        $attendance->load('employee.branches');
 
         return response()->json([
             'message' => 'Attendance recorded successfully.',

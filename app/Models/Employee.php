@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
@@ -21,12 +22,6 @@ class Employee extends Model implements HasMedia, WebAuthnAuthenticatable
     public const ROLE_ADMIN = 'admin';
 
     public const ROLE_EMPLOYEE = 'employee';
-
-    public const BRANCHES = [
-        'Esquivel',
-        'Apo',
-        'Cebu',
-    ];
 
     protected $fillable = [
         'department_id',
@@ -49,7 +44,7 @@ class Employee extends Model implements HasMedia, WebAuthnAuthenticatable
 
     protected $hidden = ['password'];
 
-    protected $appends = ['name'];
+    protected $appends = ['name', 'branch'];
 
     public function registerMediaCollections(): void
     {
@@ -68,10 +63,50 @@ class Employee extends Model implements HasMedia, WebAuthnAuthenticatable
         return "{$this->first_name} {$this->last_name}";
     }
 
+    protected function branch(): Attribute
+    {
+        return Attribute::get(function (?string $value): string {
+            if ($this->relationLoaded('branches')) {
+                return $this->primaryBranch()?->name
+                    ?? $this->branches->first()?->name
+                    ?? (string) $value;
+            }
+
+            return (string) ($this->primaryBranch()->name ?? $value ?? '');
+        });
+    }
+
+    public function branchNames(): string
+    {
+        $branches = $this->relationLoaded('branches')
+            ? $this->branches
+            : $this->branches()->get();
+
+        return $branches
+            ->sortByDesc(fn (Branch $branch): bool => (bool) $branch->pivot?->is_primary)
+            ->pluck('name')
+            ->implode(', ');
+    }
+
+    public function primaryBranch(): ?Branch
+    {
+        if ($this->relationLoaded('branches')) {
+            return $this->branches->firstWhere('pivot.is_primary', true)
+                ?? $this->branches->first();
+        }
+
+        return $this->branches()
+            ->wherePivot('is_primary', true)
+            ->first()
+            ?? $this->branches()->first();
+    }
+
     public static function branchOptions(): array
     {
-        return collect(self::BRANCHES)
-            ->mapWithKeys(fn (string $branch): array => [$branch => $branch])
+        return Branch::query()
+            ->active()
+            ->orderBy('name')
+            ->pluck('name', 'id')
             ->all();
     }
 
@@ -107,6 +142,13 @@ class Employee extends Model implements HasMedia, WebAuthnAuthenticatable
                 $q->whereNull('zone_employee.expiry_date')
                     ->orWhere('zone_employee.expiry_date', '>=', today());
             });
+    }
+
+    public function branches(): BelongsToMany
+    {
+        return $this->belongsToMany(Branch::class)
+            ->withPivot('is_primary')
+            ->withTimestamps();
     }
 
     public function department(): BelongsTo

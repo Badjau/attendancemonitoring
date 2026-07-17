@@ -30,6 +30,7 @@ class AttendanceController extends Controller
         try {
             $verifiedEmployee = $this->attendanceService->verifyEmployee($request);
             $employee = $verifiedEmployee['employee'];
+            $employee->loadMissing('branches');
 
             return response()->json([
                 'employee' => [
@@ -60,7 +61,7 @@ class AttendanceController extends Controller
     {
         try {
             $attendance = $this->attendanceService->recordAttendance($request);
-            $attendance->load('employee');
+            $attendance->load('employee.branches');
             $employee = $attendance->employee;
 
             if ($request->expectsJson()) {

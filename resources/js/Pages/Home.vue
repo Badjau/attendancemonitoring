@@ -1,16 +1,24 @@
 <script setup lang="ts">
 import { Head, Link, router } from '@inertiajs/vue3'
-import { onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import FeedAndStaff from '@/Components/Home/FeedAndStaff.vue'
 import PresentToday from '@/Components/Home/PresentToday.vue'
 import CameraCard from '@/Components/Home/CameraCard.vue'
 import GreetingsCard from '@/Components/Home/GreetingsCard.vue'
 import Toast from '@/Components/Toast.vue'
+import { useGeolocator } from '@/Composables/useGeolocator.js'
 
 const props = defineProps<{
     attendanceToday: any
     todayBirthdayCelebrants: any
     announcements: any
+    branches: Array<{
+        id: number
+        name: string
+        latitude: number | null
+        longitude: number | null
+        radius_meters: number | null
+    }>
     employeesWithFaces: any
     attendanceSchedule: {
         time_in_start: string
@@ -42,6 +50,12 @@ const props = defineProps<{
 }>()
 
 const activeBranch = ref('')
+const geolocator = useGeolocator()
+const detectedBranch = ref<any>(null)
+let locationWarmupInterval: ReturnType<typeof setInterval>
+const LOCATION_WARMUP_RETRY_MS = 5000
+const BRANCH_SWITCH_MIN_MARGIN_METERS = 75
+const BRANCH_SWITCH_MAX_MARGIN_METERS = 300
 
 const employeeIdFromPayload = (payload: any) =>
     payload?.employee?.employee_id ??
@@ -96,12 +110,150 @@ const handleAttendanceRecorded = (event: Event) => {
     refreshAttendanceToday(employeeId, branch)
 }
 
+const distanceInMeters = (
+    lat1: number,
+    lon1: number,
+    lat2: number,
+    lon2: number,
+) => {
+    const earthRadius = 6371000
+    const latDelta = ((lat2 - lat1) * Math.PI) / 180
+    const lonDelta = ((lon2 - lon1) * Math.PI) / 180
+    const startLat = (lat1 * Math.PI) / 180
+    const endLat = (lat2 * Math.PI) / 180
+    const a =
+        Math.sin(latDelta / 2) ** 2 +
+        Math.cos(startLat) * Math.cos(endLat) * Math.sin(lonDelta / 2) ** 2
+
+    return earthRadius * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)))
+}
+
+const branchCandidates = computed(() => {
+    const latitude = geolocator.coords.value?.latitude
+    const longitude = geolocator.coords.value?.longitude
+
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+        return []
+    }
+
+    return props.branches
+        .filter(
+            (branch) =>
+                Number.isFinite(Number(branch.latitude)) &&
+                Number.isFinite(Number(branch.longitude)) &&
+                (Number(branch.latitude) !== 0 || Number(branch.longitude) !== 0),
+        )
+        .map((branch) => ({
+            ...branch,
+            distance: distanceInMeters(
+                latitude,
+                longitude,
+                Number(branch.latitude),
+                Number(branch.longitude),
+            ),
+            radius: Number(branch.radius_meters || 150),
+        }))
+        .sort((a, b) => a.distance - b.distance)
+})
+
+const branchSwitchMargin = computed(() => {
+    const accuracy = Number(geolocator.coords.value?.accuracy || 0)
+    const accuracyMargin = Number.isFinite(accuracy) ? accuracy * 1.5 : 0
+
+    return Math.min(
+        BRANCH_SWITCH_MAX_MARGIN_METERS,
+        Math.max(BRANCH_SWITCH_MIN_MARGIN_METERS, accuracyMargin),
+    )
+})
+
+const locationSubtitle = computed(() => {
+    if (detectedBranch.value) {
+        return detectedBranch.value.name
+    }
+
+    if (geolocator.loading.value) {
+        return 'Locating branch...'
+    }
+
+    if (geolocator.error.value) {
+        return 'Location unavailable'
+    }
+
+    return 'Branch location not set'
+})
+
+const warmLocation = () => {
+    if (
+        geolocator.loading.value ||
+        (Number.isFinite(geolocator.coords.value?.latitude) &&
+            Number.isFinite(geolocator.coords.value?.longitude))
+    ) {
+        return
+    }
+
+    geolocator.getLocation().catch(() => null)
+}
+
+const handleWindowOnline = () => {
+    warmLocation()
+}
+
+watch(
+    branchCandidates,
+    (candidates) => {
+        const closestBranch = candidates[0]
+
+        if (!closestBranch) return
+
+        if (!detectedBranch.value) {
+            detectedBranch.value = closestBranch
+            return
+        }
+
+        if (closestBranch.id === detectedBranch.value.id) {
+            detectedBranch.value = closestBranch
+            return
+        }
+
+        const currentBranch = candidates.find(
+            (branch) => branch.id === detectedBranch.value.id,
+        )
+
+        if (!currentBranch) {
+            detectedBranch.value = closestBranch
+            return
+        }
+
+        const isClearlyCloser =
+            closestBranch.distance + branchSwitchMargin.value <
+            currentBranch.distance
+        const isInsideClosestRadius =
+            closestBranch.distance <=
+            closestBranch.radius + branchSwitchMargin.value
+        const isOutsideCurrentRadius =
+            currentBranch.distance >
+            currentBranch.radius + branchSwitchMargin.value
+
+        if (isClearlyCloser && (isInsideClosestRadius || isOutsideCurrentRadius)) {
+            detectedBranch.value = closestBranch
+        }
+    },
+    { immediate: true },
+)
+
 onMounted(() => {
     window.addEventListener('attendance:recorded', handleAttendanceRecorded)
+    window.addEventListener('online', handleWindowOnline)
+    warmLocation()
+    geolocator.startLocationWatch()
+    locationWarmupInterval = setInterval(warmLocation, LOCATION_WARMUP_RETRY_MS)
 })
 
 onUnmounted(() => {
     window.removeEventListener('attendance:recorded', handleAttendanceRecorded)
+    window.removeEventListener('online', handleWindowOnline)
+    geolocator.stopLocationWatch()
+    clearInterval(locationWarmupInterval)
 })
 </script>
 
@@ -128,7 +280,7 @@ onUnmounted(() => {
                             McAsia Attendance
                         </p>
                         <p class="text-xs font-semibold text-black/55">
-                            Workforce monitoring system
+                            {{ locationSubtitle }}
                         </p>
                     </div>
                 </div>
@@ -159,6 +311,7 @@ onUnmounted(() => {
                         :attendance-schedule="props.attendanceSchedule"
                         :scan-status-messages="props.scanStatusMessages"
                         :zkteco-bridge-url="props.zktecoBridgeUrl"
+                        :geolocator="geolocator"
                         @employee-verified="setActiveBranch"
                     />
                 </div>
