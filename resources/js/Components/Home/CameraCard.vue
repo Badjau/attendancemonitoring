@@ -58,6 +58,12 @@ type FaceWindowResult = {
     matchedFrames: number
     message: string
 }
+type RectBox = {
+    x: number
+    y: number
+    width: number
+    height: number
+}
 type AttendanceSchedule = {
     time_in_start: string
     time_out_start: string
@@ -168,6 +174,9 @@ const FACE_DETECTION_POLL_MS = 900
 const FACE_FRAME_RETRY_MS = 450
 const FACE_SERVICE_UNAVAILABLE_MESSAGE = 'Face service unavailable.'
 const FACE_READY_REQUIRED_COUNT = 3
+const VISIBLE_FACE_GUIDE_ASPECT_RATIO = 1.45
+const VISIBLE_FACE_GUIDE_MAX_WIDTH = 340
+const VISIBLE_FACE_GUIDE_MIN_WIDTH = 220
 let clockOffsetMs = 0
 const ratioSetting = (value: string | number | undefined, fallback: number): number => {
     const ratio = Number(value)
@@ -432,6 +441,61 @@ const pauseAutoFingerprintScan = () => {
     isAutoFingerprintScanActive = false
 }
 
+const visibleFaceGuideBox = (width: number, height: number): RectBox => {
+    const minimumWidth = Math.min(VISIBLE_FACE_GUIDE_MIN_WIDTH, width * 0.72)
+    const maxHeight = height * faceActiveZoneHeightRatio.value
+    const guideWidth = Math.max(
+        1,
+        Math.min(
+            Math.max(width * faceActiveZoneWidthRatio.value, minimumWidth),
+            VISIBLE_FACE_GUIDE_MAX_WIDTH,
+            width * 0.72,
+            maxHeight / VISIBLE_FACE_GUIDE_ASPECT_RATIO,
+        ),
+    )
+    const guideHeight = guideWidth * VISIBLE_FACE_GUIDE_ASPECT_RATIO
+
+    return {
+        x: (width - guideWidth) / 2,
+        y: (height - guideHeight) / 2,
+        width: guideWidth,
+        height: guideHeight,
+    }
+}
+
+const visibleBoxToVideoSourceBox = (box: RectBox, video: HTMLVideoElement): RectBox | null => {
+    const targetWidth = video.clientWidth
+    const targetHeight = video.clientHeight
+    const sourceWidth = video.videoWidth
+    const sourceHeight = video.videoHeight
+
+    if (
+        targetWidth <= 0 ||
+        targetHeight <= 0 ||
+        sourceWidth <= 0 ||
+        sourceHeight <= 0
+    ) {
+        return null
+    }
+
+    const scale = Math.max(targetWidth / sourceWidth, targetHeight / sourceHeight)
+    const renderedWidth = sourceWidth * scale
+    const renderedHeight = sourceHeight * scale
+    const offsetX = (targetWidth - renderedWidth) / 2
+    const offsetY = targetHeight - renderedHeight
+    const sourceX = Math.max(0, (box.x - offsetX) / scale)
+    const sourceY = Math.max(0, (box.y - offsetY) / scale)
+    const sourceRight = Math.min(sourceWidth, (box.x + box.width - offsetX) / scale)
+    const sourceBottom = Math.min(sourceHeight, (box.y + box.height - offsetY) / scale)
+
+    return {
+        x: sourceX,
+        y: sourceY,
+        width: Math.max(1, sourceRight - sourceX),
+        height: Math.max(1, sourceBottom - sourceY),
+    }
+}
+
 const startFaceDetectorOverlay = () => {
     clearFaceDetectorOverlay()
 
@@ -450,10 +514,11 @@ const startFaceDetectorOverlay = () => {
         context.setTransform(ratio, 0, 0, ratio, 0, 0)
         context.clearRect(0, 0, rect.width, rect.height)
 
-        const zoneWidth = rect.width * faceActiveZoneWidthRatio.value
-        const zoneHeight = rect.height * faceActiveZoneHeightRatio.value
-        const zoneX = (rect.width - zoneWidth) / 2
-        const zoneY = (rect.height - zoneHeight) / 2
+        const guide = visibleFaceGuideBox(rect.width, rect.height)
+        const zoneX = guide.x
+        const zoneY = guide.y
+        const zoneWidth = guide.width
+        const zoneHeight = guide.height
 
         context.fillStyle = 'rgba(0, 30, 29, 0.42)'
         context.fillRect(0, 0, rect.width, zoneY)
@@ -480,10 +545,22 @@ const captureImage = (): string | null => {
 
     if (video.videoWidth <= 0 || video.videoHeight <= 0) return null
 
-    const sourceWidth = Math.round(video.videoWidth * faceActiveZoneWidthRatio.value)
-    const sourceHeight = Math.round(video.videoHeight * faceActiveZoneHeightRatio.value)
-    const sourceX = Math.round((video.videoWidth - sourceWidth) / 2)
-    const sourceY = Math.round((video.videoHeight - sourceHeight) / 2)
+    const visibleGuide = visibleFaceGuideBox(video.clientWidth, video.clientHeight)
+    const visibleSourceBox = !isSilentCameraCapture.value
+        ? visibleBoxToVideoSourceBox(visibleGuide, video)
+        : null
+    const sourceWidth = Math.round(
+        visibleSourceBox?.width ?? video.videoWidth * faceActiveZoneWidthRatio.value,
+    )
+    const sourceHeight = Math.round(
+        visibleSourceBox?.height ?? video.videoHeight * faceActiveZoneHeightRatio.value,
+    )
+    const sourceX = Math.round(
+        visibleSourceBox?.x ?? (video.videoWidth - sourceWidth) / 2,
+    )
+    const sourceY = Math.round(
+        visibleSourceBox?.y ?? (video.videoHeight - sourceHeight) / 2,
+    )
     const scale = Math.min(1, ATTENDANCE_IMAGE_MAX_WIDTH / sourceWidth)
 
     canvas.width = Math.round(sourceWidth * scale)
@@ -1959,294 +2036,320 @@ onUnmounted(() => {
 
 <template>
     <div
-        v-if="isCameraActive"
-        class="relative flex flex-col overflow-hidden rounded-2xl border border-black/5 bg-white p-4 shadow-2xl shadow-black/10"
-        :class="{
-            'fixed -left-[9999px] top-0 h-px w-px opacity-0 pointer-events-none':
-                isSilentCameraCapture,
-        }"
-        :aria-hidden="isSilentCameraCapture"
+        v-if="isSilentCameraCapture"
+        class="pointer-events-none fixed -left-[9999px] top-0 h-px w-px overflow-hidden opacity-0"
+        aria-hidden="true"
     >
-        <div
-            class="absolute left-8 top-8 z-10 flex items-center gap-2 rounded-full bg-brand-bg px-4 py-2 shadow-lg"
-        >
-            <div class="h-2 w-2 animate-pulse rounded-full bg-white" />
-            <span class="text-xs font-black text-white">
-                LIVE
-            </span>
-        </div>
-
-        <div
-            class="absolute right-8 top-8 z-10 flex items-center gap-2 rounded-full border border-black/10 bg-white px-4 py-2 shadow-lg"
-        >
-            <LoaderCircle
-                v-if="locationLoading"
-                class="h-4 w-4 animate-spin text-brand-stroke"
-            />
-            <TriangleAlert
-                v-else-if="locationError"
-                class="h-4 w-4 text-red-600"
-            />
-            <TriangleAlert
-                v-else-if="accuracyWarning || usingCachedLocation"
-                class="h-4 w-4 text-yellow-600"
-            />
-            <MapPin v-else class="h-4 w-4 text-green-600" />
-            <span class="text-xs font-bold text-brand-stroke">
-                <template v-if="locationLoading">GPS...</template>
-                <template v-else-if="locationError">GPS blocked</template>
-                <template v-else-if="usingCachedLocation">Cached GPS</template>
-                <template v-else-if="accuracyWarning">Low GPS</template>
-                <template v-else-if="isLocationReady">GPS ready</template>
-                <template v-else>GPS pending</template>
-            </span>
-        </div>
-
-        <div
-            class="relative aspect-video w-full overflow-hidden rounded-[1.5rem] bg-brand-stroke"
-        >
-            <video
-                ref="videoRef"
-                autoplay
-                playsinline
-                muted
-                class="home-camera-video h-full w-full object-cover"
-                :class="{ loaded: isVideoReady }"
-            />
-
-            <canvas
-                ref="overlayRef"
-                class="absolute inset-0 h-full w-full pointer-events-none"
-            />
-            <canvas ref="canvasRef" style="display: none" />
-
-            <div
-                v-if="isError"
-                class="absolute inset-0 flex items-center justify-center bg-brand-stroke/90 px-6 text-center text-white"
-            >
-                <p class="text-sm font-semibold">
-                    Camera blocked. Check browser permissions to proceed.
-                </p>
-            </div>
-        </div>
-
-        <p
-            v-if="showCamera"
-            class="mt-5 text-center text-sm font-bold text-black/60"
-            :class="{
-                'text-red-700': cameraGuidanceIsWarning,
-            }"
-        >
-            {{ cameraGuidanceText }}
-        </p>
+        <video
+            ref="videoRef"
+            autoplay
+            playsinline
+            muted
+            class="home-camera-video h-full w-full object-cover"
+            :class="{ loaded: isVideoReady }"
+        />
+        <canvas
+            ref="overlayRef"
+            class="absolute inset-0 h-full w-full pointer-events-none"
+        />
+        <canvas ref="canvasRef" style="display: none" />
     </div>
 
-    <div class="flex flex-col gap-4">
+    <div class="flex flex-1 flex-col gap-4">
         <div
-            class="shrink-0 rounded-2xl border border-black/5 bg-white p-4 shadow-xl shadow-black/10 animate-fade-up md:p-5"
+            class="shrink-0 rounded-2xl border border-black/5 bg-white shadow-xl shadow-black/10 animate-fade-up"
+            :class="showCamera ? 'overflow-hidden p-0' : 'p-4 md:p-5'"
         >
             <div
-                v-if="!showFaceCheckOnly"
-                class="mb-5 flex flex-col items-center space-y-0 text-center"
+                v-if="showCamera"
+                class="relative flex min-h-[24rem] w-full overflow-hidden bg-brand-stroke lg:min-h-[calc(100vh-15rem)]"
             >
-                <p
-                    class="text-s font-bold text-brand-bg"
-                >
-                    {{ currentDate }}
-                </p>
-                <h1
-                    class="font-mona-sans text-3xl font-black text-brand-stroke tabular-nums lg:text-4xl"
-                >
-                    {{ currentTime }}
-                </h1>
-            </div>
+                <video
+                    ref="videoRef"
+                    autoplay
+                    playsinline
+                    muted
+                    class="home-camera-video absolute inset-0 h-full w-full object-cover object-bottom"
+                    :class="{ loaded: isVideoReady }"
+                />
 
-            <div
-                v-if="showFaceCheckOnly"
-                data-face-auth-status="checking-employee"
-                class="flex min-h-40 w-full items-center justify-center rounded-xl border border-brand-bg/15 bg-brand-paragraph px-4 py-7 text-center"
-            >
-                <p class="whitespace-pre-line text-sm font-black leading-snug text-brand-stroke md:text-base">
-                    {{ faceStatusText }}
-                </p>
-            </div>
-
-            <div v-else class="w-full">
-                <div class="grid grid-cols-2 gap-4">
-                    <button
-                        @click="handleTimeAction('time-in')"
-                        :disabled="isProcessing"
-                        class="group relative flex items-center justify-center gap-2 rounded-xl bg-brand-bg px-3 py-3 font-black text-white shadow-lg shadow-red-950/15 transition hover:bg-brand-tertiary focus:outline-none focus:ring-4 focus:ring-brand-bg/20"
-                        :class="{
-                            'ring-4 ring-brand-bg/25 ring-offset-2 ring-offset-white':
-                                attendanceType === 'time-in',
-                            'cursor-not-allowed opacity-60':
-                                isProcessing,
-                        }"
-                        :aria-pressed="attendanceType === 'time-in'"
-                    >
-                        <LogIn class="h-4 w-4" />
-                        <span class="text-sm">Time In</span>
-                        <span
-                            v-if="attendanceType === 'time-in'"
-                            class="absolute right-2 top-2 h-2.5 w-2.5 rounded-full bg-white"
-                            aria-hidden="true"
-                        />
-                    </button>
-
-                    <button
-                        @click="handleTimeAction('time-out')"
-                        :disabled="isProcessing"
-                        class="group relative flex items-center justify-center gap-2 rounded-xl border border-brand-bg/15 bg-brand-paragraph px-3 py-3 font-black text-brand-stroke shadow-sm transition hover:border-brand-bg/30 hover:bg-white focus:outline-none focus:ring-4 focus:ring-brand-bg/15"
-                        :class="{
-                            'ring-4 ring-brand-bg/25 ring-offset-2 ring-offset-white':
-                                attendanceType === 'time-out',
-                            'cursor-not-allowed opacity-60':
-                                isProcessing,
-                        }"
-                        :aria-pressed="attendanceType === 'time-out'"
-                    >
-                        <LogOut class="h-4 w-4" />
-                        <span class="text-sm">Time Out</span>
-                        <span
-                            v-if="attendanceType === 'time-out'"
-                            class="absolute right-2 top-2 h-2.5 w-2.5 rounded-full bg-brand-bg"
-                            aria-hidden="true"
-                        />
-                    </button>
-                </div>
-
-                <button
-                    v-if="props.attendanceSchedule.show_face_attendance_button"
-                    type="button"
-                    @click="submitFaceAttendance"
-                    :disabled="isProcessing"
-                    class="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-brand-bg/15 bg-white px-4 py-2.5 text-sm font-black text-brand-stroke shadow-sm transition hover:border-brand-bg/30 hover:bg-brand-paragraph disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                    <Camera class="h-5 w-5" />
-                    Facial Recognition
-                </button>
+                <canvas
+                    ref="overlayRef"
+                    class="absolute inset-0 h-full w-full pointer-events-none"
+                />
+                <canvas ref="canvasRef" style="display: none" />
 
                 <div
-                    data-scanner-status-version="20260715-always-on"
-                    class="mt-3 rounded-xl border border-brand-bg/15 bg-brand-paragraph px-4 py-2.5 text-center"
-                    :class="{
-                        'border-red-200 bg-red-50':
-                            scannerStatusTone === 'error',
-                    }"
+                    class="absolute left-4 top-4 z-10 flex items-center gap-2 rounded-full bg-brand-bg px-4 py-2 shadow-lg md:left-6 md:top-6"
                 >
-                    <p
-                        class="text-xs font-black text-brand-stroke"
-                        :class="{
-                            'text-red-800': scannerStatusTone === 'error',
-                        }"
-                    >
-                        {{ scannerStatusText }}
+                    <div class="h-2 w-2 animate-pulse rounded-full bg-white" />
+                    <span class="text-xs font-black text-white">
+                        LIVE
+                    </span>
+                </div>
+
+                <div
+                    class="absolute right-4 top-4 z-10 flex items-center gap-2 rounded-full border border-black/10 bg-white px-4 py-2 shadow-lg md:right-6 md:top-6"
+                >
+                    <LoaderCircle
+                        v-if="locationLoading"
+                        class="h-4 w-4 animate-spin text-brand-stroke"
+                    />
+                    <TriangleAlert
+                        v-else-if="locationError"
+                        class="h-4 w-4 text-red-600"
+                    />
+                    <TriangleAlert
+                        v-else-if="accuracyWarning || usingCachedLocation"
+                        class="h-4 w-4 text-yellow-600"
+                    />
+                    <MapPin v-else class="h-4 w-4 text-green-600" />
+                    <span class="text-xs font-bold text-brand-stroke">
+                        <template v-if="locationLoading">GPS...</template>
+                        <template v-else-if="locationError">GPS blocked</template>
+                        <template v-else-if="usingCachedLocation">Cached GPS</template>
+                        <template v-else-if="accuracyWarning">Low GPS</template>
+                        <template v-else-if="isLocationReady">GPS ready</template>
+                        <template v-else>GPS pending</template>
+                    </span>
+                </div>
+
+                <div
+                    v-if="isError"
+                    class="absolute inset-0 flex items-center justify-center bg-brand-stroke/90 px-6 text-center text-white"
+                >
+                    <p class="text-sm font-semibold">
+                        Camera blocked. Check browser permissions to proceed.
                     </p>
                 </div>
 
                 <div
-                    v-if="isProcessing"
-                    class="mt-3 flex items-center gap-3 rounded-xl border border-brand-bg/15 bg-brand-paragraph px-4 py-2.5 text-left"
+                    class="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/75 via-black/35 to-transparent px-6 pb-6 pt-16 text-center"
                 >
-                    <LoaderCircle class="h-5 w-5 shrink-0 animate-spin text-brand-stroke" />
                     <p
-                        class="text-xs font-black text-brand-stroke"
+                        class="text-sm font-black text-white drop-shadow"
+                        :class="{
+                            'text-red-100': cameraGuidanceIsWarning,
+                        }"
                     >
-                        {{ processingLabel }}
+                        {{ cameraGuidanceText }}
                     </p>
-                </div>
-
-                <div class="flex flex-col justify-center gap-3" v-else>
-                    <div class="w-full">
-                        <input
-                            ref="rfidInput"
-                            type="text"
-                            autocomplete="off"
-                            class="absolute -top-96"
-                            style="opacity: 0; pointer-events: none"
-                            @input="onRFIDInput"
-                            @keydown="onRFIDKeydown"
-                        />
-
-                        <div class="flex items-center justify-center">
-                            <div
-                                v-if="showEmployeeIdInputField"
-                                class="mx-auto mt-3 w-full max-w-80"
-                            >
-                                <input
-                                    ref="empIdInput"
-                                    v-model="employeePassword"
-                                    type="text"
-                                    name="keypad-attendance-pin"
-                                    autocomplete="off"
-                                    inputmode="numeric"
-                                    pattern="[0-9]*"
-                                    autocapitalize="off"
-                                    spellcheck="false"
-                                    style="-webkit-text-security: disc"
-                                    class="mb-2 h-12 w-full rounded-lg border border-brand-bg/20 bg-white px-3 text-center text-3xl font-black text-brand-stroke shadow-inner"
-                                    @focus="onEmpIdFocus"
-                                    @input="onEmpIdInput"
-                                    @keydown="onEmpIdKeydown"
-                                />
-
-                                <div class="grid grid-cols-3 gap-2">
-                                    <button
-                                        v-for="digit in keypadDigits.slice(0, 9)"
-                                        :key="digit"
-                                        type="button"
-                                        class="flex h-12 items-center justify-center rounded-lg border border-brand-bg/15 bg-white text-lg font-black text-brand-stroke shadow-sm active:scale-95"
-                                        @click="appendKeypadDigit(digit)"
-                                    >
-                                        {{ digit }}
-                                    </button>
-                                    <button
-                                        type="button"
-                                        class="flex h-12 items-center justify-center rounded-lg bg-brand-tertiary text-white shadow-sm active:scale-95"
-                                        aria-label="Clear"
-                                        @click="clearKeypad"
-                                    >
-                                        <Eraser class="h-5 w-5" />
-                                    </button>
-                                    <button
-                                        type="button"
-                                        class="flex h-12 items-center justify-center rounded-lg border border-brand-bg/15 bg-white text-lg font-black text-brand-stroke shadow-sm active:scale-95"
-                                        @click="appendKeypadDigit('0')"
-                                    >
-                                        0
-                                    </button>
-                                    <button
-                                        type="button"
-                                        class="flex h-12 items-center justify-center rounded-lg border border-brand-bg/15 bg-white text-brand-stroke shadow-sm active:scale-95"
-                                        aria-label="Delete"
-                                        @click="deleteKeypadDigit"
-                                    >
-                                        <Delete class="h-5 w-5" />
-                                    </button>
-                                </div>
-
-                                <button
-                                    type="button"
-                                    class="mt-2 flex h-11 w-full items-center justify-center rounded-lg bg-brand-bg text-sm font-black text-white shadow-md shadow-red-950/10 active:scale-[0.98]"
-                                    @click="submitManualAttendance"
-                                >
-                                    Enter
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-
                     <p
                         v-if="
-                            !showEmployeeIdInputField &&
+                            faceStatusText &&
                             faceStatusText !== 'Face verification ready.'
                         "
-                        class="text-xs font-black text-brand-bg"
+                        class="mt-1 text-xs font-black text-white/85 drop-shadow"
                     >
                         {{ faceStatusText }}
                     </p>
                 </div>
+            </div>
+
+            <div v-else class="w-full">
+                <div
+                    v-if="!showFaceCheckOnly"
+                    class="mb-5 flex flex-col items-center space-y-0 text-center"
+                >
+                    <p
+                        class="text-s font-bold text-brand-bg"
+                    >
+                        {{ currentDate }}
+                    </p>
+                    <h1
+                        class="font-mona-sans text-3xl font-black text-brand-stroke tabular-nums lg:text-4xl"
+                    >
+                        {{ currentTime }}
+                    </h1>
+                </div>
+
+                <div
+                    v-if="showFaceCheckOnly"
+                    data-face-auth-status="checking-employee"
+                    class="flex min-h-40 w-full items-center justify-center rounded-xl border border-brand-bg/15 bg-brand-paragraph px-4 py-7 text-center"
+                >
+                    <p class="whitespace-pre-line text-sm font-black leading-snug text-brand-stroke md:text-base">
+                        {{ faceStatusText }}
+                    </p>
+                </div>
+
+                <template v-else>
+                    <div class="grid grid-cols-2 gap-4">
+                        <button
+                            @click="handleTimeAction('time-in')"
+                            :disabled="isProcessing"
+                            class="group relative flex items-center justify-center gap-2 rounded-xl bg-brand-bg px-3 py-3 font-black text-white shadow-lg shadow-red-950/15 transition hover:bg-brand-tertiary focus:outline-none focus:ring-4 focus:ring-brand-bg/20"
+                            :class="{
+                                'ring-4 ring-brand-bg/25 ring-offset-2 ring-offset-white':
+                                    attendanceType === 'time-in',
+                                'cursor-not-allowed opacity-60':
+                                    isProcessing,
+                            }"
+                            :aria-pressed="attendanceType === 'time-in'"
+                        >
+                            <LogIn class="h-4 w-4" />
+                            <span class="text-sm">Time In</span>
+                            <span
+                                v-if="attendanceType === 'time-in'"
+                                class="absolute right-2 top-2 h-2.5 w-2.5 rounded-full bg-white"
+                                aria-hidden="true"
+                            />
+                        </button>
+
+                        <button
+                            @click="handleTimeAction('time-out')"
+                            :disabled="isProcessing"
+                            class="group relative flex items-center justify-center gap-2 rounded-xl border border-brand-bg/15 bg-brand-paragraph px-3 py-3 font-black text-brand-stroke shadow-sm transition hover:border-brand-bg/30 hover:bg-white focus:outline-none focus:ring-4 focus:ring-brand-bg/15"
+                            :class="{
+                                'ring-4 ring-brand-bg/25 ring-offset-2 ring-offset-white':
+                                    attendanceType === 'time-out',
+                                'cursor-not-allowed opacity-60':
+                                    isProcessing,
+                            }"
+                            :aria-pressed="attendanceType === 'time-out'"
+                        >
+                            <LogOut class="h-4 w-4" />
+                            <span class="text-sm">Time Out</span>
+                            <span
+                                v-if="attendanceType === 'time-out'"
+                                class="absolute right-2 top-2 h-2.5 w-2.5 rounded-full bg-brand-bg"
+                                aria-hidden="true"
+                            />
+                        </button>
+                    </div>
+
+                    <button
+                        v-if="props.attendanceSchedule.show_face_attendance_button"
+                        type="button"
+                        @click="submitFaceAttendance"
+                        :disabled="isProcessing"
+                        class="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-brand-bg/15 bg-white px-4 py-2.5 text-sm font-black text-brand-stroke shadow-sm transition hover:border-brand-bg/30 hover:bg-brand-paragraph disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                        <Camera class="h-5 w-5" />
+                        Facial Recognition
+                    </button>
+
+                    <div
+                        data-scanner-status-version="20260715-always-on"
+                        class="mt-3 rounded-xl border border-brand-bg/15 bg-brand-paragraph px-4 py-2.5 text-center"
+                        :class="{
+                            'border-red-200 bg-red-50':
+                                scannerStatusTone === 'error',
+                        }"
+                    >
+                        <p
+                            class="text-xs font-black text-brand-stroke"
+                            :class="{
+                                'text-red-800': scannerStatusTone === 'error',
+                            }"
+                        >
+                            {{ scannerStatusText }}
+                        </p>
+                    </div>
+
+                    <div
+                        v-if="isProcessing"
+                        class="mt-3 flex items-center gap-3 rounded-xl border border-brand-bg/15 bg-brand-paragraph px-4 py-2.5 text-left"
+                    >
+                        <LoaderCircle class="h-5 w-5 shrink-0 animate-spin text-brand-stroke" />
+                        <p
+                            class="text-xs font-black text-brand-stroke"
+                        >
+                            {{ processingLabel }}
+                        </p>
+                    </div>
+
+                    <div class="flex flex-col justify-center gap-3" v-else>
+                        <div class="w-full">
+                            <input
+                                ref="rfidInput"
+                                type="text"
+                                autocomplete="off"
+                                class="absolute -top-96"
+                                style="opacity: 0; pointer-events: none"
+                                @input="onRFIDInput"
+                                @keydown="onRFIDKeydown"
+                            />
+
+                            <div class="flex items-center justify-center">
+                                <div
+                                    v-if="showEmployeeIdInputField"
+                                    class="mx-auto mt-3 w-full max-w-80"
+                                >
+                                    <input
+                                        ref="empIdInput"
+                                        v-model="employeePassword"
+                                        type="text"
+                                        name="keypad-attendance-pin"
+                                        autocomplete="off"
+                                        inputmode="numeric"
+                                        pattern="[0-9]*"
+                                        autocapitalize="off"
+                                        spellcheck="false"
+                                        style="-webkit-text-security: disc"
+                                        class="mb-2 h-12 w-full rounded-lg border border-brand-bg/20 bg-white px-3 text-center text-3xl font-black text-brand-stroke shadow-inner"
+                                        @focus="onEmpIdFocus"
+                                        @input="onEmpIdInput"
+                                        @keydown="onEmpIdKeydown"
+                                    />
+
+                                    <div class="grid grid-cols-3 gap-2">
+                                        <button
+                                            v-for="digit in keypadDigits.slice(0, 9)"
+                                            :key="digit"
+                                            type="button"
+                                            class="flex h-12 items-center justify-center rounded-lg border border-brand-bg/15 bg-white text-lg font-black text-brand-stroke shadow-sm active:scale-95"
+                                            @click="appendKeypadDigit(digit)"
+                                        >
+                                            {{ digit }}
+                                        </button>
+                                        <button
+                                            type="button"
+                                            class="flex h-12 items-center justify-center rounded-lg bg-brand-tertiary text-white shadow-sm active:scale-95"
+                                            aria-label="Clear"
+                                            @click="clearKeypad"
+                                        >
+                                            <Eraser class="h-5 w-5" />
+                                        </button>
+                                        <button
+                                            type="button"
+                                            class="flex h-12 items-center justify-center rounded-lg border border-brand-bg/15 bg-white text-lg font-black text-brand-stroke shadow-sm active:scale-95"
+                                            @click="appendKeypadDigit('0')"
+                                        >
+                                            0
+                                        </button>
+                                        <button
+                                            type="button"
+                                            class="flex h-12 items-center justify-center rounded-lg border border-brand-bg/15 bg-white text-brand-stroke shadow-sm active:scale-95"
+                                            aria-label="Delete"
+                                            @click="deleteKeypadDigit"
+                                        >
+                                            <Delete class="h-5 w-5" />
+                                        </button>
+                                    </div>
+
+                                    <button
+                                        type="button"
+                                        class="mt-2 flex h-11 w-full items-center justify-center rounded-lg bg-brand-bg text-sm font-black text-white shadow-md shadow-red-950/10 active:scale-[0.98]"
+                                        @click="submitManualAttendance"
+                                    >
+                                        Enter
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <p
+                            v-if="
+                                !showEmployeeIdInputField &&
+                                faceStatusText !== 'Face verification ready.'
+                            "
+                            class="text-xs font-black text-brand-bg"
+                        >
+                            {{ faceStatusText }}
+                        </p>
+                    </div>
+                </template>
             </div>
         </div>
     </div>
