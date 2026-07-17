@@ -142,6 +142,7 @@ let stream: MediaStream | null = null
 let interval: ReturnType<typeof setInterval>
 let clockSyncInterval: ReturnType<typeof setInterval>
 let focusInterval: ReturnType<typeof setInterval>
+let locationWarmupInterval: ReturnType<typeof setInterval>
 let faceDetectionInterval: ReturnType<typeof setInterval> | null = null
 let liveFaceDetectionInterval: ReturnType<typeof setInterval> | null = null
 let autoFingerprintTimeout: ReturnType<typeof setTimeout> | null = null
@@ -164,6 +165,7 @@ const RFID_SCAN_MAX_AVG_KEY_MS = 45
 const AUTO_FINGERPRINT_RETRY_MS = 500
 const AUTO_FINGERPRINT_SCAN_WINDOW_MS = 120000
 const CLOCK_SYNC_INTERVAL_MS = 60 * 60 * 1000
+const LOCATION_WARMUP_RETRY_MS = 5000
 const CLOCK_OFFSET_STORAGE_KEY = 'timeclock.clockOffsetMs'
 const CLOCK_TIME_ZONE = 'Asia/Manila'
 const ATTENDANCE_IMAGE_MAX_WIDTH = 960
@@ -171,7 +173,7 @@ const FACE_MULTI_WARNING_MESSAGE =
     'Multiple faces detected. Please step out of the camera view.'
 const FACE_WAITING_MESSAGE = 'Waiting for face...'
 const FACE_DETECTION_POLL_MS = 900
-const FACE_FRAME_RETRY_MS = 450
+const FACE_FRAME_RETRY_MS = 250
 const FACE_SERVICE_UNAVAILABLE_MESSAGE = 'Face service unavailable.'
 const FACE_READY_REQUIRED_COUNT = 3
 const VISIBLE_FACE_GUIDE_ASPECT_RATIO = 1.45
@@ -207,21 +209,21 @@ const faceVerificationWindowMs = computed(() =>
     integerSetting(props.attendanceSchedule.face_verification_window_ms, 6000, 4000, 15000),
 )
 const scopedFaceUsableFrameTarget = computed(() =>
-    integerSetting(props.attendanceSchedule.face_usable_frame_target, 3, 3, 10),
+    integerSetting(props.attendanceSchedule.face_usable_frame_target, 3, 1, 10),
 )
 const scopedFaceRequiredMatchCount = computed(() =>
     Math.min(
         scopedFaceUsableFrameTarget.value,
-        integerSetting(props.attendanceSchedule.face_required_match_count, 2, 2, 10),
+        integerSetting(props.attendanceSchedule.face_required_match_count, 2, 1, 10),
     ),
 )
 const faceOnlyUsableFrameTarget = computed(() =>
-    integerSetting(props.attendanceSchedule.face_only_usable_frame_target, 5, 3, 10),
+    integerSetting(props.attendanceSchedule.face_only_usable_frame_target, 5, 1, 10),
 )
 const faceOnlyRequiredMatchCount = computed(() =>
     Math.min(
         faceOnlyUsableFrameTarget.value,
-        integerSetting(props.attendanceSchedule.face_only_required_match_count, 3, 2, 10),
+        integerSetting(props.attendanceSchedule.face_only_required_match_count, 3, 1, 10),
     ),
 )
 const hasMultipleFacesInView = ref(false)
@@ -1365,6 +1367,8 @@ const verifyEmployeeAndSubmit = async (
         return false
     }
 
+    stopCamera()
+
     await submitAttendance(
         employee.employee_id,
         method,
@@ -1396,8 +1400,14 @@ const submitFaceAttendance = async () => {
             return
         }
 
+        stopCamera()
+
         const employee = await verifyEmployeeIdentifier(result.employeeId, 'face')
-        if (!employee) return
+        if (!employee) {
+            stopProcessing()
+            scheduleAutoFingerprintScan()
+            return
+        }
 
         await submitAttendance(
             employee.employee_id,
@@ -1993,13 +2003,25 @@ const onDocumentClick = (e: MouseEvent) => {
     focusRFID()
 }
 
+const warmLocation = () => {
+    if (locationLoading.value || isLocationReady.value) return
+
+    getLocation().catch(() => null)
+}
+
+const onWindowOnline = () => {
+    syncClockQuietly()
+    warmLocation()
+}
+
 onMounted(async () => {
     loadClockOffset()
     updateTime()
     interval = setInterval(updateTime, 1000)
     syncClockQuietly()
     clockSyncInterval = setInterval(syncClockQuietly, CLOCK_SYNC_INTERVAL_MS)
-    getLocation().catch(() => null)
+    warmLocation()
+    locationWarmupInterval = setInterval(warmLocation, LOCATION_WARMUP_RETRY_MS)
 
     ensureRFIDFocus()
 
@@ -2009,7 +2031,7 @@ onMounted(async () => {
 
     document.addEventListener('click', onDocumentClick)
     document.addEventListener('touchend', onDocumentClick)
-    window.addEventListener('online', syncClockQuietly)
+    window.addEventListener('online', onWindowOnline)
 
     scheduleAutoFingerprintScan(1000)
 })
@@ -2022,6 +2044,7 @@ onUnmounted(() => {
     clearInterval(interval)
     clearInterval(clockSyncInterval)
     clearInterval(focusInterval)
+    clearInterval(locationWarmupInterval)
     if (scannerStatusResetTimeout) clearTimeout(scannerStatusResetTimeout)
     clearAutoFingerprintScan()
     closeZktecoEvents()
@@ -2029,7 +2052,7 @@ onUnmounted(() => {
 
     document.removeEventListener('click', onDocumentClick)
     document.removeEventListener('touchend', onDocumentClick)
-    window.removeEventListener('online', syncClockQuietly)
+    window.removeEventListener('online', onWindowOnline)
     if (rfidTimeout) clearTimeout(rfidTimeout)
 })
 </script>

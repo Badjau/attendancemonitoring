@@ -115,22 +115,22 @@ class AttendanceScheduleSettings
 
     public function faceUsableFrameTarget(): int
     {
-        return $this->integerSetting('face_usable_frame_target', 3, 10);
+        return $this->integerSetting('face_usable_frame_target', 1, 20);
     }
 
     public function faceRequiredMatchCount(): int
     {
-        return min($this->faceUsableFrameTarget(), $this->integerSetting('face_required_match_count', 2, 10));
+        return min($this->faceUsableFrameTarget(), $this->integerSetting('face_required_match_count', 1, 20));
     }
 
     public function faceOnlyUsableFrameTarget(): int
     {
-        return $this->integerSetting('face_only_usable_frame_target', 3, 10);
+        return $this->integerSetting('face_only_usable_frame_target', 1, 20);
     }
 
     public function faceOnlyRequiredMatchCount(): int
     {
-        return min($this->faceOnlyUsableFrameTarget(), $this->integerSetting('face_only_required_match_count', 2, 10));
+        return min($this->faceOnlyUsableFrameTarget(), $this->integerSetting('face_only_required_match_count', 1, 20));
     }
 
     public function showFaceAttendanceButton(): bool

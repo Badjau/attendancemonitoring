@@ -12,6 +12,7 @@ export function useGeolocator() {
     const address = ref('')
     const usingCachedLocation = ref(false)
     const locationSource = ref('')
+    let pendingLocationRequest = null
 
     const readLastKnownCoords = () => {
         try {
@@ -86,6 +87,8 @@ export function useGeolocator() {
     }
 
     const getLocation = () => {
+        if (pendingLocationRequest) return pendingLocationRequest
+
         error.value = ''
 
         if (!navigator.geolocation) {
@@ -95,7 +98,7 @@ export function useGeolocator() {
 
         loading.value = true
 
-        return new Promise((resolve, reject) => {
+        pendingLocationRequest = new Promise((resolve, reject) => {
             navigator.geolocation.getCurrentPosition(
                 (position) => {
                     const latitude = position.coords.latitude
@@ -153,10 +156,14 @@ export function useGeolocator() {
                 {
                     enableHighAccuracy: true,
                     timeout: 10000,
-                    maximumAge: 0,
+                    maximumAge: 60000,
                 },
             )
+        }).finally(() => {
+            pendingLocationRequest = null
         })
+
+        return pendingLocationRequest
     }
 
     const resetLocation = () => {
