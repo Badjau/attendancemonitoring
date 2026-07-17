@@ -31,6 +31,7 @@ class HomeController extends Controller
             'attendanceSchedule' => $this->attendanceScheduleSettings->toArray(),
             'scanStatusMessages' => $this->attendanceScheduleSettings->scanStatusMessages(),
             'zktecoBridgeUrl' => config('services.zkteco.bridge_url'),
+            'kioskApiToken' => config('services.kiosk.token'),
         ]);
     }
 }

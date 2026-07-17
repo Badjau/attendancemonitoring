@@ -22,8 +22,11 @@ use Spatie\MediaLibrary\HasMedia;
 class AttendanceService
 {
     private const TAP_TIME_IN = 'time-in';
+
     private const TAP_BREAK_START = 'break-start';
+
     private const TAP_BREAK_END = 'break-end';
+
     private const TAP_TIME_OUT = 'time-out';
 
     public function __construct(
@@ -430,6 +433,10 @@ class AttendanceService
             'attendance_method' => $this->attendanceMethod($request),
             'attendance_mode' => $request->attendance_mode ?? Mode::AutoToggle->value,
             'offline_id' => $request->offline_id,
+            'auth_cache_revision' => $request->integer('auth_cache_revision') ?: null,
+            'cache_state_at_record_time' => $request->string('cache_state_at_record_time')->toString() ?: null,
+            'matched_auth_revision' => $request->integer('matched_auth_revision') ?: null,
+            'auth_metadata' => $this->authMetadata($request),
             'attendance_date' => $now->toDateString(),
             'time_in' => $now->format('Y-m-d H:i:s'),
             'status' => $isLate ? Status::Late->value : Status::Present->value,
@@ -475,6 +482,10 @@ class AttendanceService
             'attendance_type' => Type::TimeOut->value,
             'attendance_method' => $this->attendanceMethod($request),
             'attendance_mode' => $request->attendance_mode ?? Mode::AutoToggle->value,
+            'auth_cache_revision' => $request->integer('auth_cache_revision') ?: $firstTimeInAttendance->auth_cache_revision,
+            'cache_state_at_record_time' => $request->string('cache_state_at_record_time')->toString() ?: $firstTimeInAttendance->cache_state_at_record_time,
+            'matched_auth_revision' => $request->integer('matched_auth_revision') ?: $firstTimeInAttendance->matched_auth_revision,
+            'auth_metadata' => $this->authMetadata($request) ?? $firstTimeInAttendance->auth_metadata,
             'time_out' => $now->format('Y-m-d H:i:s'),
             'total_hours' => round($workedMinutes / 60, 2),
             'status' => Status::Present->value,
@@ -490,6 +501,19 @@ class AttendanceService
         $this->attachAttendanceImage($request, $firstTimeInAttendance, 'time-out-image');
 
         return $firstTimeInAttendance->refresh();
+    }
+
+    private function authMetadata(Request $request): ?array
+    {
+        $metadata = $request->input('auth_metadata');
+
+        if (is_string($metadata)) {
+            $decoded = json_decode($metadata, true);
+
+            return is_array($decoded) ? $decoded : null;
+        }
+
+        return is_array($metadata) ? $metadata : null;
     }
 
     private function handleAutoBreakTap(Request $request, Carbon $now, Attendance $attendance): Attendance

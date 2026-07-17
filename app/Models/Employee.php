@@ -2,12 +2,14 @@
 
 namespace App\Models;
 
+use App\Services\KioskAuthSyncService;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
+use Illuminate\Support\Facades\Hash;
 use Laragear\WebAuthn\Contracts\WebAuthnAuthenticatable;
 use Laragear\WebAuthn\WebAuthnAuthentication;
 use Laragear\WebAuthn\WebAuthnData;
@@ -29,12 +31,14 @@ class Employee extends Model implements HasMedia, WebAuthnAuthenticatable
         'employee_id',
         'rfid_uid',
         'password',
+        'kiosk_pin_verifier',
         'first_name',
         'last_name',
         'middle_name',
         'date_of_birth',
         'position',
         'role',
+        'auth_revision',
     ];
 
     protected $casts = [
@@ -45,6 +49,41 @@ class Employee extends Model implements HasMedia, WebAuthnAuthenticatable
     protected $hidden = ['password'];
 
     protected $appends = ['name', 'branch'];
+
+    protected static function booted(): void
+    {
+        static::saving(function (Employee $employee): void {
+            if ($employee->isDirty([
+                'employee_id',
+                'rfid_uid',
+                'password',
+                'kiosk_pin_verifier',
+                'first_name',
+                'last_name',
+                'middle_name',
+                'position',
+                'role',
+            ])) {
+                $employee->auth_revision = max((int) $employee->auth_revision + 1, now()->getTimestamp());
+            }
+        });
+    }
+
+    protected function password(): Attribute
+    {
+        return Attribute::make(
+            set: function (?string $value): array {
+                if (! filled($value)) {
+                    return [];
+                }
+
+                return [
+                    'password' => Hash::make($value),
+                    'kiosk_pin_verifier' => app(KioskAuthSyncService::class)->pinVerifier($value),
+                ];
+            },
+        );
+    }
 
     public function registerMediaCollections(): void
     {

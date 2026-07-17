@@ -20,6 +20,12 @@ class TimeclockLockFlowTest extends TestCase
             ->assertRedirect('/unlock');
     }
 
+    public function test_offline_attendance_page_redirects_to_unlock_for_a_locked_session(): void
+    {
+        $this->get('/offline-attendance')
+            ->assertRedirect('/unlock');
+    }
+
     public function test_attendance_endpoints_reject_while_locked(): void
     {
         $this->postJson('/attendance/verify-employee', [])

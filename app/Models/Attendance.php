@@ -26,6 +26,10 @@ class Attendance extends Model implements HasMedia
         'attendance_method',
         'attendance_mode',
         'offline_id',
+        'auth_cache_revision',
+        'cache_state_at_record_time',
+        'matched_auth_revision',
+        'auth_metadata',
         'attendance_date',
         'time_in',
         'time_out',
@@ -72,6 +76,9 @@ class Attendance extends Model implements HasMedia
         'longitude' => 'float',
         'attendance_method' => AttendanceMethod::class,
         'attendance_mode' => Mode::class,
+        'auth_cache_revision' => 'integer',
+        'matched_auth_revision' => 'integer',
+        'auth_metadata' => 'array',
     ];
 
     public function registerMediaCollections(): void
@@ -114,6 +121,7 @@ class Attendance extends Model implements HasMedia
         if ($hours === null) {
             return null;
         }
+
         return (int) ($hours * 60);
     }
 

@@ -7,6 +7,7 @@ import CameraCard from '@/Components/Home/CameraCard.vue'
 import GreetingsCard from '@/Components/Home/GreetingsCard.vue'
 import Toast from '@/Components/Toast.vue'
 import { useGeolocator } from '@/Composables/useGeolocator.js'
+import { useSyncStore } from '@/Stores/sync.js'
 
 const props = defineProps<{
     attendanceToday: any
@@ -47,10 +48,12 @@ const props = defineProps<{
         attendance_recorded: string
     }
     zktecoBridgeUrl: string
+    kioskApiToken: string
 }>()
 
 const activeBranch = ref('')
 const geolocator = useGeolocator()
+useSyncStore(props.kioskApiToken)
 const detectedBranch = ref<any>(null)
 let locationWarmupInterval: ReturnType<typeof setInterval>
 const LOCATION_WARMUP_RETRY_MS = 5000

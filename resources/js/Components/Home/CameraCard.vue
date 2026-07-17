@@ -40,6 +40,13 @@ type VerifiedEmployee = {
     profile_url?: string | null
     face_ready?: boolean
     face_enrollment_count?: number
+    authDecision?: AuthDecision
+}
+type AuthDecision = {
+    authCacheRevision?: number
+    cacheStateAtRecordTime?: string
+    matchedAuthRevision?: number
+    authMetadata?: Record<string, any>
 }
 type LiveFaceMatch = {
     employee: VerifiedEmployee
@@ -1213,6 +1220,40 @@ const employeeHasReadyFace = (employee: VerifiedEmployee): boolean => {
     return Number(employee.face_enrollment_count ?? 0) >= FACE_READY_REQUIRED_COUNT
 }
 
+const employeeFromLocalAuthRecord = (record: any, decision: AuthDecision): VerifiedEmployee => ({
+    id: Number(record.employee_id),
+    employee_id: String(record.employee_number ?? ''),
+    first_name: String(record.first_name ?? ''),
+    last_name: String(record.last_name ?? ''),
+    position: String(record.position ?? ''),
+    branch: record.branch ?? null,
+    face_ready: Number(record.face_embeddings?.length ?? 0) >= FACE_READY_REQUIRED_COUNT,
+    face_enrollment_count: Number(record.face_embeddings?.length ?? 0),
+    authDecision: decision,
+})
+
+const localEmployeeLookup = async (
+    employeeIdentifier: string,
+    method: AttendanceMethod,
+): Promise<VerifiedEmployee | null> => {
+    if (method === 'fingerprint') return null
+
+    const localMatch =
+        method === 'face'
+            ? await syncStore.getCachedEmployeeByNumber(employeeIdentifier, method)
+            : await syncStore.verifyLocalCredential(method, employeeIdentifier)
+
+    if (!localMatch?.employee) return null
+
+    const employee = employeeFromLocalAuthRecord(
+        localMatch.employee,
+        localMatch.decision,
+    )
+    emit('employeeVerified', employee)
+
+    return employee
+}
+
 const requireReadyFaceEnrollment = (employee: VerifiedEmployee): boolean => {
     if (employeeHasReadyFace(employee)) return true
 
@@ -1237,6 +1278,32 @@ const verifyEmployeeIdentifier = async (
     employeeIdentifier: string,
     method: AttendanceMethod,
 ): Promise<VerifiedEmployee | null> => {
+    const localEmployee = await localEmployeeLookup(employeeIdentifier, method)
+    if (localEmployee) return localEmployee
+
+    if (!navigator.onLine && method !== 'fingerprint') {
+        const message =
+            method === 'rfid'
+                ? scanStatusMessage('rfid_not_recognized')
+                : 'Employee is not available in the kiosk auth cache.'
+
+        toast.add({
+            severity: 'error',
+            summary: 'Employee',
+            detail: message,
+            life: 5000,
+        })
+
+        if (method === 'rfid') {
+            setTemporaryScannerError('rfid_not_recognized')
+        } else {
+            faceStatusText.value = message
+        }
+        resetAttendanceSelection(method !== 'rfid')
+
+        return null
+    }
+
     try {
         faceStatusText.value = 'Checking employee...'
 
@@ -1381,6 +1448,7 @@ const verifyEmployeeAndSubmit = async (
         method,
         employeeFullName(employee),
         matchedFace.image,
+        employee.authDecision,
     )
 
     return true
@@ -1421,6 +1489,7 @@ const submitFaceAttendance = async () => {
             'face',
             employeeFullName(employee),
             result.image,
+            employee.authDecision,
         )
     } catch (error) {
         console.error('Error submitting face attendance:', error)
@@ -1929,6 +1998,7 @@ const submitAttendance = async (
     method: AttendanceMethod,
     employeeName?: string,
     image?: string,
+    authDecision?: AuthDecision,
 ): Promise<void> => {
     const attendanceAction = attendanceType.value
 
@@ -1956,6 +2026,10 @@ const submitAttendance = async (
         employeeName: employeeName || employeeIdentifier,
         attendanceMethod: method,
         attendanceType: attendanceAction || undefined,
+        authCacheRevision: authDecision?.authCacheRevision,
+        cacheStateAtRecordTime: authDecision?.cacheStateAtRecordTime,
+        matchedAuthRevision: authDecision?.matchedAuthRevision,
+        authMetadata: authDecision?.authMetadata,
         latitude: coords.value.latitude,
         longitude: coords.value.longitude,
         location: locationLabel(),
