@@ -2,10 +2,12 @@
 import { onMounted, onUnmounted, ref } from 'vue'
 
 type AttendanceAction = 'time-in' | 'time-out'
+type TapEvent = 'time-in' | 'break-start' | 'break-end' | 'time-out'
 type AttendanceGreeting = {
     first_name: string
     is_birthday: boolean
     attendance_type: AttendanceAction
+    tap_event?: TapEvent
 }
 
 const icon = ref('👋')
@@ -72,12 +74,17 @@ const speakGreeting = (message: string) => {
 
 const buildGreetingMessage = (greeting: AttendanceGreeting) => {
     const dayGreeting = getDayGreeting()
+    const tapEvent = greeting.tap_event ?? greeting.attendance_type
     const attendanceMessage =
-        greeting.attendance_type === 'time-out'
+        tapEvent === 'time-out'
             ? `${dayGreeting}, ${greeting.first_name}. Time out recorded. Take care.`
-            : `${dayGreeting}, ${greeting.first_name}. Time in recorded. Have a productive day.`
+            : tapEvent === 'break-start'
+              ? `${dayGreeting}, ${greeting.first_name}. Break started.`
+              : tapEvent === 'break-end'
+                ? `${dayGreeting}, ${greeting.first_name}. Break ended.`
+                : `${dayGreeting}, ${greeting.first_name}. Time in recorded. Have a productive day.`
 
-    if (!greeting.is_birthday || greeting.attendance_type === 'time-out')
+    if (!greeting.is_birthday || tapEvent !== 'time-in')
         return attendanceMessage
 
     return `${dayGreeting}, ${greeting.first_name}. Happy birthday! Time in recorded. Have a productive day.`
@@ -88,14 +95,19 @@ const onAttendanceGreeting = (event: Event) => {
     if (!greeting?.first_name) return
 
     const dayGreeting = getDayGreeting()
+    const tapEvent = greeting.tap_event ?? greeting.attendance_type
 
     icon.value = greeting.is_birthday ? '🎂' : '👋'
     title.value = `${dayGreeting}, ${greeting.first_name}`
-    subtitle.value = greeting.is_birthday
+    subtitle.value = greeting.is_birthday && tapEvent === 'time-in'
         ? 'Happy birthday! Attendance recorded.'
-        : greeting.attendance_type === 'time-out'
+        : tapEvent === 'time-out'
           ? 'Time out recorded. Take care.'
-          : 'Time in recorded. Have a productive day.'
+          : tapEvent === 'break-start'
+            ? 'Break started.'
+            : tapEvent === 'break-end'
+              ? 'Break ended.'
+              : 'Time in recorded. Have a productive day.'
 
     speakGreeting(buildGreetingMessage(greeting))
 }

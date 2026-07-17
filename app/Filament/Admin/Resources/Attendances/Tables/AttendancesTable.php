@@ -75,6 +75,21 @@ class AttendancesTable
                     ->formatStateUsing(fn (Attendance $record): string => $record->formattedDailyTotalHours())
                     ->sortable(),
 
+                TextColumn::make('break_count')
+                    ->label('Breaks')
+                    ->numeric()
+                    ->sortable(),
+
+                TextColumn::make('break_minutes')
+                    ->label('Break Minutes')
+                    ->formatStateUsing(fn (?int $state): string => ((int) $state).' min')
+                    ->sortable(),
+
+                TextColumn::make('break_exceeded_minutes')
+                    ->label('Break Overage')
+                    ->formatStateUsing(fn (?int $state): string => ((int) $state).' min')
+                    ->sortable(),
+
                 TextColumn::make('status')
                     ->badge()
                     ->searchable()

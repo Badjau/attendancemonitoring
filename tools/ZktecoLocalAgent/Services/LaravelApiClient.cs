@@ -214,5 +214,6 @@ public sealed class LaravelApiClient
 public sealed record AttendanceDto(
     [property: System.Text.Json.Serialization.JsonPropertyName("id")] int Id,
     [property: System.Text.Json.Serialization.JsonPropertyName("attendance_type")] string? AttendanceType,
+    [property: System.Text.Json.Serialization.JsonPropertyName("tap_event")] string? TapEvent,
     [property: System.Text.Json.Serialization.JsonPropertyName("employee")] EmployeeDto? Employee
 );

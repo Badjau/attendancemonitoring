@@ -236,7 +236,7 @@ public sealed class CommandCoordinator : IDisposable
         }, cancellationToken);
 
         ClearActive();
-        await PublishAsync(Event(commandId, AgentStates.Success, $"Attendance recorded for {attendance?.Employee?.Name ?? match.Template.EmployeeName ?? match.Template.EmployeeCode}.", match.Template, attendance?.AttendanceType, match.Score), cancellationToken);
+        await PublishAsync(Event(commandId, AgentStates.Success, $"Attendance recorded for {attendance?.Employee?.Name ?? match.Template.EmployeeName ?? match.Template.EmployeeCode}.", match.Template, attendance?.AttendanceType, attendance?.TapEvent, match.Score), cancellationToken);
         return Results.Ok(new { message = "Attendance recorded successfully." });
     }
 
@@ -641,6 +641,11 @@ public sealed class CommandCoordinator : IDisposable
 
     private static CommandEvent Event(string commandId, string state, string message, LocalFingerprintTemplate template, string? attendanceType, int score)
     {
+        return Event(commandId, state, message, template, attendanceType, null, score);
+    }
+
+    private static CommandEvent Event(string commandId, string state, string message, LocalFingerprintTemplate template, string? attendanceType, string? tapEvent, int score)
+    {
         return new CommandEvent(
             commandId,
             state,
@@ -652,6 +657,7 @@ public sealed class CommandCoordinator : IDisposable
             template.EmployeeBranch,
             template.IsBirthday,
             attendanceType,
+            tapEvent,
             template.ServerTemplateId,
             score
         );

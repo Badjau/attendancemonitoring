@@ -11,7 +11,6 @@ use App\Services\AttendanceService;
 use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Request;
-use Illuminate\Validation\ValidationException;
 use Joaopaulolndev\FilamentGeneralSettings\Models\GeneralSetting;
 use Tests\TestCase;
 
@@ -99,28 +98,22 @@ class Attendance24HourWindowTest extends TestCase
         $this->assertSame(1, Attendance::query()->count());
     }
 
-    public function test_same_employee_auth_within_configured_cooldown_is_rejected(): void
+    public function test_same_employee_auth_cooldown_does_not_block_valid_break_taps_inside_open_attendance(): void
     {
         $employee = $this->employee();
 
-        $this->record($employee, [
+        $timeIn = $this->record($employee, [
             'attendance_method' => AttendanceMethod::RFID->value,
             'occurred_at' => '2026-06-17 07:55:00',
         ]);
 
-        try {
-            $this->record($employee, [
-                'attendance_method' => AttendanceMethod::RFID->value,
-                'occurred_at' => '2026-06-17 08:10:00',
-            ]);
+        $breakStart = $this->record($employee, [
+            'attendance_method' => AttendanceMethod::RFID->value,
+            'occurred_at' => '2026-06-17 08:10:00',
+        ]);
 
-            $this->fail('Expected the same employee auth cooldown to reject the scan.');
-        } catch (ValidationException $exception) {
-            $this->assertSame(
-                'Attendance was already recorded recently. Please wait 45 minutes before trying again.',
-                $exception->errors()['employee_id'][0],
-            );
-        }
+        $this->assertSame($timeIn->id, $breakStart->id);
+        $this->assertSame('break-start', $breakStart->tap_event);
     }
 
     public function test_same_employee_auth_after_configured_cooldown_is_allowed(): void
@@ -132,14 +125,14 @@ class Attendance24HourWindowTest extends TestCase
             'occurred_at' => '2026-06-17 07:55:00',
         ]);
 
-        $timeOut = $this->record($employee, [
+        $breakStart = $this->record($employee, [
             'attendance_method' => AttendanceMethod::RFID->value,
             'occurred_at' => '2026-06-17 08:55:00',
         ]);
 
-        $this->assertSame($timeIn->id, $timeOut->id);
-        $this->assertSame(Type::TimeOut->value, $timeOut->attendance_type->value);
-        $this->assertSame('2026-06-17 08:55:00', Carbon::parse($timeOut->getRawOriginal('time_out'))->format('Y-m-d H:i:s'));
+        $this->assertSame($timeIn->id, $breakStart->id);
+        $this->assertSame('break-start', $breakStart->tap_event);
+        $this->assertSame(Type::TimeIn->value, $breakStart->attendance_type->value);
     }
 
     public function test_next_day_scan_closes_previous_open_time_in_at_configured_time_out_then_records_today_time_in(): void

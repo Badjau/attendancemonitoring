@@ -66,10 +66,12 @@ class AttendanceController extends Controller
             if ($request->expectsJson()) {
                 return response()->json([
                     'message' => 'Attendance recorded successfully.',
+                    'tap_event' => $attendance->tap_event,
                     'greeting' => [
                         'first_name' => $employee->first_name,
                         'is_birthday' => $employee->date_of_birth?->isBirthday() ?? false,
                         'attendance_type' => $attendance->attendance_type->value,
+                        'tap_event' => $attendance->tap_event,
                     ],
                     'employee' => [
                         'id' => $employee->id,
@@ -88,6 +90,7 @@ class AttendanceController extends Controller
                     'first_name' => $employee->first_name,
                     'is_birthday' => $employee->date_of_birth?->isBirthday() ?? false,
                     'attendance_type' => $attendance->attendance_type->value,
+                    'tap_event' => $attendance->tap_event,
                 ]);
         } catch (ValidationException $e) {
             if ($request->expectsJson()) {

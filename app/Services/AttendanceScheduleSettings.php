@@ -11,6 +11,9 @@ class AttendanceScheduleSettings
     private const DEFAULTS = [
         'time_in_start' => '08:00',
         'time_out_start' => '18:00',
+        'max_breaks_per_day' => '2',
+        'first_break_limit_minutes' => '60',
+        'additional_break_limit_minutes' => '15',
         'duplicate_scan_window_seconds' => '60',
         'same_employee_auth_cooldown_minutes' => '60',
         'face_capture_width_ratio' => '0.50',
@@ -47,6 +50,9 @@ class AttendanceScheduleSettings
         return [
             'time_in_start' => $this->setting('time_in_start'),
             'time_out_start' => $this->setting('time_out_start'),
+            'max_breaks_per_day' => (string) $this->maxBreaksPerDay(),
+            'first_break_limit_minutes' => (string) $this->firstBreakLimitMinutes(),
+            'additional_break_limit_minutes' => (string) $this->additionalBreakLimitMinutes(),
             'duplicate_scan_window_seconds' => (string) $this->duplicateScanWindowSeconds(),
             'same_employee_auth_cooldown_minutes' => (string) $this->sameEmployeeAuthCooldownMinutes(),
             'face_capture_width_ratio' => (string) $this->faceCaptureWidthRatio(),
@@ -93,6 +99,21 @@ class AttendanceScheduleSettings
         return max(0, min(3600, (int) $value));
     }
 
+    public function maxBreaksPerDay(): int
+    {
+        return $this->integerSetting('max_breaks_per_day', 0, 24);
+    }
+
+    public function firstBreakLimitMinutes(): int
+    {
+        return $this->integerSetting('first_break_limit_minutes', 1, 1440);
+    }
+
+    public function additionalBreakLimitMinutes(): int
+    {
+        return $this->integerSetting('additional_break_limit_minutes', 1, 1440);
+    }
+
     public function sameEmployeeAuthCooldownMinutes(): int
     {
         return $this->integerSetting('same_employee_auth_cooldown_minutes', 0, 1440);
@@ -125,12 +146,12 @@ class AttendanceScheduleSettings
 
     public function faceOnlyUsableFrameTarget(): int
     {
-        return $this->integerSetting('face_only_usable_frame_target', 1, 20);
+        return $this->integerSetting('face_only_usable_frame_target', 3, 20);
     }
 
     public function faceOnlyRequiredMatchCount(): int
     {
-        return min($this->faceOnlyUsableFrameTarget(), $this->integerSetting('face_only_required_match_count', 1, 20));
+        return min($this->faceOnlyUsableFrameTarget(), $this->integerSetting('face_only_required_match_count', 2, 20));
     }
 
     public function showFaceAttendanceButton(): bool

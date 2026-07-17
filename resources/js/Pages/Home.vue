@@ -15,6 +15,9 @@ const props = defineProps<{
     attendanceSchedule: {
         time_in_start: string
         time_out_start: string
+        max_breaks_per_day: string
+        first_break_limit_minutes: string
+        additional_break_limit_minutes: string
         duplicate_scan_window_seconds: string
         same_employee_auth_cooldown_minutes: string
         face_capture_width_ratio: string

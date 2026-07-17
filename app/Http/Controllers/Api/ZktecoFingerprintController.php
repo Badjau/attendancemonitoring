@@ -188,9 +188,11 @@ class ZktecoFingerprintController extends Controller
         return response()->json([
             'message' => 'Attendance recorded successfully.',
             'attendance_type' => $this->enumValue($attendance->attendance_type),
+            'tap_event' => $attendance->tap_event,
             'data' => [
                 'id' => $attendance->id,
                 'attendance_type' => $this->enumValue($attendance->attendance_type),
+                'tap_event' => $attendance->tap_event,
                 'attendance_mode' => $this->enumValue($attendance->attendance_mode),
                 'attendance_date' => $attendance->attendance_date?->toDateString(),
                 'time_in' => $this->dateTimeValue($attendance->time_in),

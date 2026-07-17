@@ -8,6 +8,7 @@ use App\Enums\Attendance\OvertimeStatus;
 use App\Enums\Attendance\Status;
 use App\Enums\Attendance\Type;
 use App\Models\Attendance;
+use App\Models\AttendanceBreak;
 use App\Models\Employee;
 use App\Models\User;
 use App\Support\PasswordVerifier;
@@ -16,9 +17,15 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
+use Spatie\MediaLibrary\HasMedia;
 
 class AttendanceService
 {
+    private const TAP_TIME_IN = 'time-in';
+    private const TAP_BREAK_START = 'break-start';
+    private const TAP_BREAK_END = 'break-end';
+    private const TAP_TIME_OUT = 'time-out';
+
     public function __construct(
         public Attendance $model,
         protected GeofenceService $geofenceService,
@@ -33,7 +40,7 @@ class AttendanceService
                 ->first();
 
             if ($existingAttendance) {
-                return $existingAttendance;
+                return $this->withTapEvent($existingAttendance, $this->latestTapEvent($existingAttendance));
             }
         }
 
@@ -46,27 +53,36 @@ class AttendanceService
             $duplicateAttendance = $this->duplicateScanAttendance($employee, $now, $request);
 
             if ($duplicateAttendance) {
-                return $duplicateAttendance;
+                return $this->withTapEvent($duplicateAttendance, $this->latestTapEvent($duplicateAttendance));
             }
         }
 
-        $this->ensureEmployeeAuthCooldownHasElapsed($employee, $now);
+        $openAttendance = $this->latestOpenTimeInWithinWindow($employee, $now);
+
+        if (! $openAttendance) {
+            $this->ensureEmployeeAuthCooldownHasElapsed($employee, $now);
+        }
 
         $requestedAttendanceType = $request->string('attendance_type')->toString();
-        $attendanceType = in_array($requestedAttendanceType, [Type::TimeIn->value, Type::TimeOut->value], true)
+        $isManualOverride = in_array($requestedAttendanceType, [Type::TimeIn->value, Type::TimeOut->value], true);
+        $attendanceType = $isManualOverride
             ? $requestedAttendanceType
-            : $this->inferAttendanceTypeForEmployee($employee, $now);
+            : $this->inferAttendanceTypeForEmployee($employee, $now, $openAttendance);
         $request->merge([
             'attendance_type' => $attendanceType,
             'attendance_mode' => $attendanceMode,
         ]);
 
-        if ($attendanceType == Type::TimeIn->value) {
-            return $this->timeIn($request, $now, $employee);
+        if (! $isManualOverride && $openAttendance && $attendanceType === Type::TimeIn->value) {
+            return $this->handleAutoBreakTap($request, $now, $openAttendance);
         }
 
-        if ($attendanceType == Type::TimeOut->value) {
-            return $this->timeOut($request, $now, $employee);
+        if ($attendanceType === Type::TimeIn->value) {
+            return $this->withTapEvent($this->timeIn($request, $now, $employee), self::TAP_TIME_IN);
+        }
+
+        if ($attendanceType === Type::TimeOut->value) {
+            return $this->withTapEvent($this->timeOut($request, $now, $employee), self::TAP_TIME_OUT);
         }
 
         throw new \Exception('Invalid attendance type.');
@@ -100,11 +116,19 @@ class AttendanceService
         ];
     }
 
-    private function inferAttendanceTypeForEmployee(Employee $employee, Carbon $now): string
+    private function inferAttendanceTypeForEmployee(Employee $employee, Carbon $now, ?Attendance $openAttendance = null): string
     {
-        return $this->latestOpenTimeInWithinWindow($employee, $now)
-            ? Type::TimeOut->value
-            : Type::TimeIn->value;
+        $openAttendance ??= $this->latestOpenTimeInWithinWindow($employee, $now);
+
+        if (! $openAttendance) {
+            return Type::TimeIn->value;
+        }
+
+        if ($now->greaterThanOrEqualTo($this->attendanceScheduleSettings->shiftEnd($now))) {
+            return Type::TimeOut->value;
+        }
+
+        return Type::TimeIn->value;
     }
 
     private function attendanceTimestamp(Request $request): Carbon
@@ -128,9 +152,9 @@ class AttendanceService
             ->where('employee_id', $employee->id)
             ->whereNotNull('time_in')
             ->whereNull('time_out')
-            ->whereBetween('time_in', [$this->attendanceWindowStart($now), $now])
-            ->orderByDesc('time_in')
-            ->orderByDesc('id')
+            ->whereDate('attendance_date', $now->toDateString())
+            ->orderBy('time_in')
+            ->orderBy('id')
             ->first();
     }
 
@@ -163,7 +187,7 @@ class AttendanceService
 
     private function duplicateScanAttendance(Employee $employee, Carbon $now, Request $request): ?Attendance
     {
-        $windowSeconds = $this->attendanceScheduleSettings->duplicateScanWindowSeconds();
+        $windowSeconds = min($this->attendanceScheduleSettings->duplicateScanWindowSeconds(), 60);
 
         if ($windowSeconds <= 0) {
             return null;
@@ -178,16 +202,68 @@ class AttendanceService
             return null;
         }
 
+        $lastTap = $this->latestTapForDuplicateScan($employee, $now);
+
+        if (! $lastTap || $lastTap['occurred_at']->lt($now->copy()->subSeconds($windowSeconds))) {
+            return null;
+        }
+
         return $this->model
             ->where('employee_id', $employee->id)
-            ->where(function ($query) use ($now, $windowSeconds): void {
-                $threshold = $now->copy()->subSeconds($windowSeconds)->format('Y-m-d H:i:s');
+            ->whereKey($lastTap['attendance_id'])
+            ->first();
+    }
 
-                $query->where('time_in', '>=', $threshold)
-                    ->orWhere('time_out', '>=', $threshold);
+    /**
+     * @return array{attendance_id:int, occurred_at:Carbon}|null
+     */
+    private function latestTapForDuplicateScan(Employee $employee, Carbon $now): ?array
+    {
+        $nowValue = $now->format('Y-m-d H:i:s');
+
+        $attendanceEvents = $this->model
+            ->where('employee_id', $employee->id)
+            ->where(function ($query) use ($nowValue): void {
+                $query->where('time_in', '<=', $nowValue)
+                    ->orWhere('time_out', '<=', $nowValue);
             })
-            ->latest('updated_at')
-            ->latest('id')
+            ->get(['id', 'time_in', 'time_out'])
+            ->flatMap(function (Attendance $attendance): array {
+                return collect([
+                    $attendance->time_in ? [
+                        'attendance_id' => $attendance->id,
+                        'occurred_at' => Carbon::parse($attendance->getRawOriginal('time_in') ?? $attendance->time_in, 'Asia/Manila'),
+                    ] : null,
+                    $attendance->time_out ? [
+                        'attendance_id' => $attendance->id,
+                        'occurred_at' => Carbon::parse($attendance->getRawOriginal('time_out') ?? $attendance->time_out, 'Asia/Manila'),
+                    ] : null,
+                ])->filter()->all();
+            });
+
+        $breakEvents = AttendanceBreak::query()
+            ->where('employee_id', $employee->id)
+            ->where(function ($query) use ($nowValue): void {
+                $query->where('started_at', '<=', $nowValue)
+                    ->orWhere('ended_at', '<=', $nowValue);
+            })
+            ->get(['attendance_id', 'started_at', 'ended_at'])
+            ->flatMap(function (AttendanceBreak $break): array {
+                return collect([
+                    $break->started_at ? [
+                        'attendance_id' => $break->attendance_id,
+                        'occurred_at' => Carbon::parse($break->getRawOriginal('started_at') ?? $break->started_at, 'Asia/Manila'),
+                    ] : null,
+                    $break->ended_at ? [
+                        'attendance_id' => $break->attendance_id,
+                        'occurred_at' => Carbon::parse($break->getRawOriginal('ended_at') ?? $break->ended_at, 'Asia/Manila'),
+                    ] : null,
+                ])->filter()->all();
+            });
+
+        return $attendanceEvents
+            ->merge($breakEvents)
+            ->sortByDesc(fn (array $event): int => $event['occurred_at']->getTimestamp())
             ->first();
     }
 
@@ -364,7 +440,6 @@ class AttendanceService
         ]);
 
         $this->attachAttendanceImage($request, $attendance, 'time-in-image');
-        $this->markDailyLastTimeInAsTimeOut($employee, $now);
 
         return $attendance->refresh();
     }
@@ -380,9 +455,15 @@ class AttendanceService
             throw new \Exception('Please time in first.');
         }
 
+        $openBreak = $this->openBreak($firstTimeInAttendance);
+        if ($openBreak) {
+            $this->endBreak($firstTimeInAttendance, $openBreak, $now, true, $request);
+            $firstTimeInAttendance->refresh();
+        }
+
         $shiftEnd = $this->attendanceScheduleSettings->shiftEnd($now);
         $timeIn = $this->storedDateTime($firstTimeInAttendance, 'time_in');
-        $workedMinutes = $timeIn->diffInMinutes($now);
+        $workedMinutes = max(0, $timeIn->diffInMinutes($now) - (int) $firstTimeInAttendance->break_minutes);
 
         $isUndertime = $now->lt($shiftEnd);
         $undertimeMinutes = $isUndertime ? $now->diffInMinutes($shiftEnd) : 0;
@@ -411,13 +492,106 @@ class AttendanceService
         return $firstTimeInAttendance->refresh();
     }
 
+    private function handleAutoBreakTap(Request $request, Carbon $now, Attendance $attendance): Attendance
+    {
+        $openBreak = $this->openBreak($attendance);
+
+        if ($openBreak) {
+            return $this->endBreak($attendance, $openBreak, $now, false, $request);
+        }
+
+        return $this->startBreak($request, $attendance, $now);
+    }
+
+    private function startBreak(Request $request, Attendance $attendance, Carbon $now): Attendance
+    {
+        $completedBreakCount = $attendance->breaks()->count();
+
+        if ($completedBreakCount >= $this->attendanceScheduleSettings->maxBreaksPerDay()) {
+            throw ValidationException::withMessages([
+                'employee_id' => 'Maximum breaks for today have already been used.',
+            ]);
+        }
+
+        $sequenceNumber = $completedBreakCount + 1;
+
+        $break = $attendance->breaks()->create([
+            'employee_id' => $attendance->employee_id,
+            'attendance_date' => $attendance->attendance_date,
+            'sequence_number' => $sequenceNumber,
+            'break_policy_type' => $sequenceNumber === 1 ? 'lunch' : 'additional',
+            'allowed_minutes' => $sequenceNumber === 1
+                ? $this->attendanceScheduleSettings->firstBreakLimitMinutes()
+                : $this->attendanceScheduleSettings->additionalBreakLimitMinutes(),
+            'started_at' => $now->format('Y-m-d H:i:s'),
+        ]);
+
+        $this->attachTapImage($request, $break, 'break-start-images');
+        $this->syncBreakSummary($attendance);
+
+        return $this->withTapEvent($attendance->refresh(), self::TAP_BREAK_START);
+    }
+
+    private function endBreak(Attendance $attendance, AttendanceBreak $break, Carbon $now, bool $closedByTimeOut = false, ?Request $request = null): Attendance
+    {
+        $startedAt = Carbon::parse($break->getRawOriginal('started_at') ?? $break->started_at, 'Asia/Manila');
+        $durationMinutes = max(0, $startedAt->diffInMinutes($now));
+        $exceededMinutes = max(0, $durationMinutes - $break->allowed_minutes);
+
+        $break->fill([
+            'ended_at' => $now->format('Y-m-d H:i:s'),
+            'duration_minutes' => $durationMinutes,
+            'exceeded_minutes' => $exceededMinutes,
+            'closed_by_time_out' => $closedByTimeOut,
+        ])->save();
+
+        if ($request) {
+            $this->attachTapImage($request, $break, 'break-end-images');
+        }
+
+        $this->syncBreakSummary($attendance);
+
+        return $this->withTapEvent($attendance->refresh(), $closedByTimeOut ? self::TAP_TIME_OUT : self::TAP_BREAK_END);
+    }
+
+    private function openBreak(Attendance $attendance): ?AttendanceBreak
+    {
+        return $attendance->breaks()
+            ->whereNull('ended_at')
+            ->latest('started_at')
+            ->latest('id')
+            ->first();
+    }
+
+    private function syncBreakSummary(Attendance $attendance): void
+    {
+        $summary = $attendance->breaks()
+            ->reorder()
+            ->selectRaw('count(*) as break_count')
+            ->selectRaw('coalesce(sum(case when ended_at is not null then duration_minutes else 0 end), 0) as break_minutes')
+            ->selectRaw('coalesce(sum(case when ended_at is not null then exceeded_minutes else 0 end), 0) as break_exceeded_minutes')
+            ->first();
+
+        $attendance->forceFill([
+            'break_count' => (int) ($summary?->break_count ?? 0),
+            'break_minutes' => (int) ($summary?->break_minutes ?? 0),
+            'break_exceeded_minutes' => (int) ($summary?->break_exceeded_minutes ?? 0),
+        ])->save();
+    }
+
     private function closeAttendanceAtConfiguredTimeOut(Attendance $attendance): ?float
     {
         $timeIn = $this->storedDateTime($attendance, 'time_in');
         $scheduledTimeOut = $this->attendanceScheduleSettings->shiftEnd(
             Carbon::parse($attendance->attendance_date)
         );
-        $workedMinutes = max(0, $timeIn->diffInMinutes($scheduledTimeOut, false));
+        $openBreak = $this->openBreak($attendance);
+        if ($openBreak) {
+            $this->endBreak($attendance, $openBreak, $scheduledTimeOut, true);
+            $attendance->refresh();
+        }
+
+        $workedMinutes = max(0, $timeIn->diffInMinutes($scheduledTimeOut, false) - (int) $attendance->break_minutes);
         $totalHours = round($workedMinutes / 60, 2);
 
         $attendance->fill([
@@ -453,7 +627,7 @@ class AttendanceService
             ->max('time_out');
 
         $totalHours = ($firstTimeIn && $lastTimeOut)
-            ? round(Carbon::parse($firstTimeIn)->diffInMinutes(Carbon::parse($lastTimeOut)) / 60, 2)
+            ? round(max(0, Carbon::parse($firstTimeIn)->diffInMinutes(Carbon::parse($lastTimeOut)) - (int) (clone $query)->sum('break_minutes')) / 60, 2)
             : null;
 
         (clone $query)->update(['total_hours' => $totalHours]);
@@ -517,10 +691,58 @@ class AttendanceService
         return Carbon::parse($attendance->getRawOriginal($column) ?? $attendance->{$column});
     }
 
+    private function withTapEvent(Attendance $attendance, ?string $tapEvent): Attendance
+    {
+        if ($tapEvent) {
+            $attendance->setAttribute('tap_event', $tapEvent);
+        }
+
+        return $attendance;
+    }
+
+    private function latestTapEvent(Attendance $attendance): ?string
+    {
+        $events = collect([
+            $attendance->time_in ? [
+                'event' => self::TAP_TIME_IN,
+                'occurred_at' => $this->storedDateTime($attendance, 'time_in'),
+            ] : null,
+            $attendance->time_out ? [
+                'event' => self::TAP_TIME_OUT,
+                'occurred_at' => $this->storedDateTime($attendance, 'time_out'),
+            ] : null,
+        ])->filter();
+
+        $breakEvents = $attendance->breaks()
+            ->get()
+            ->flatMap(function (AttendanceBreak $break): array {
+                return collect([
+                    $break->started_at ? [
+                        'event' => self::TAP_BREAK_START,
+                        'occurred_at' => Carbon::parse($break->getRawOriginal('started_at') ?? $break->started_at, 'Asia/Manila'),
+                    ] : null,
+                    $break->ended_at ? [
+                        'event' => $break->closed_by_time_out ? self::TAP_TIME_OUT : self::TAP_BREAK_END,
+                        'occurred_at' => Carbon::parse($break->getRawOriginal('ended_at') ?? $break->ended_at, 'Asia/Manila'),
+                    ] : null,
+                ])->filter()->all();
+            });
+
+        return $events
+            ->merge($breakEvents)
+            ->sortByDesc(fn (array $event): int => $event['occurred_at']->getTimestamp())
+            ->value('event');
+    }
+
     private function attachAttendanceImage(Request $request, Attendance $attendance, string $collection): void
     {
+        $this->attachTapImage($request, $attendance, $collection);
+    }
+
+    private function attachTapImage(Request $request, HasMedia $model, string $collection): void
+    {
         if ($request->hasFile('attendance-image')) {
-            $attendance
+            $model
                 ->addMedia($request->file('attendance-image'))
                 ->toMediaCollection($collection);
 
@@ -531,9 +753,9 @@ class AttendanceService
             return;
         }
 
-        $attendance
+        $model
             ->addMediaFromBase64($request->string('attendance_image')->toString(), 'image/jpeg', 'image/png')
-            ->usingFileName("attendance_{$attendance->id}.jpg")
+            ->usingFileName("attendance_{$model->getKey()}_{$collection}.jpg")
             ->toMediaCollection($collection);
     }
 

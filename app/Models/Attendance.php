@@ -11,6 +11,7 @@ use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Spatie\MediaLibrary\HasMedia;
 use Spatie\MediaLibrary\InteractsWithMedia;
 
@@ -29,6 +30,9 @@ class Attendance extends Model implements HasMedia
         'time_in',
         'time_out',
         'total_hours',
+        'break_count',
+        'break_minutes',
+        'break_exceeded_minutes',
         'status',
         'is_late',
         'late_minutes',
@@ -53,6 +57,9 @@ class Attendance extends Model implements HasMedia
         'time_in' => 'timestamp',
         'time_out' => 'timestamp',
         'total_hours' => 'decimal:5',
+        'break_count' => 'integer',
+        'break_minutes' => 'integer',
+        'break_exceeded_minutes' => 'integer',
         'status' => Status::class,
         'is_late' => 'boolean',
         'late_minutes' => 'integer',
@@ -132,7 +139,14 @@ class Attendance extends Model implements HasMedia
             return null;
         }
 
-        return round(Carbon::parse($firstTimeIn)->diffInMinutes(Carbon::parse($lastTimeOut)) / 60, 2);
+        $breakMinutes = (int) static::query()
+            ->where('employee_id', $this->employee_id)
+            ->whereDate('attendance_date', $this->attendance_date)
+            ->sum('break_minutes');
+
+        $workedMinutes = max(0, Carbon::parse($firstTimeIn)->diffInMinutes(Carbon::parse($lastTimeOut)) - $breakMinutes);
+
+        return round($workedMinutes / 60, 2);
     }
 
     public function formattedDailyTotalHours(): string
@@ -160,6 +174,11 @@ class Attendance extends Model implements HasMedia
     public function zone(): BelongsTo
     {
         return $this->belongsTo(Zone::class);
+    }
+
+    public function breaks(): HasMany
+    {
+        return $this->hasMany(AttendanceBreak::class)->orderBy('sequence_number');
     }
 
     public function recordedBy(): BelongsTo

@@ -34,11 +34,17 @@ class AttendanceStatsOverview extends StatsOverviewWidget
             ->selectRaw('count(case when time_in is not null then 1 end) as clocked_in')
             ->selectRaw('sum(case when is_late = 1 then 1 else 0 end) as late_count')
             ->selectRaw('sum(case when overtime_status = ? then 1 else 0 end) as pending_overtime_count', [OvertimeStatus::Pending->value])
+            ->selectRaw('coalesce(sum(break_count), 0) as break_count')
+            ->selectRaw('coalesce(sum(break_minutes), 0) as break_minutes')
+            ->selectRaw('coalesce(sum(break_exceeded_minutes), 0) as break_exceeded_minutes')
             ->first();
 
         $clockedIn = (int) ($summary?->clocked_in ?? 0);
         $late = (int) ($summary?->late_count ?? 0);
         $pendingOvertime = (int) ($summary?->pending_overtime_count ?? 0);
+        $breakCount = (int) ($summary?->break_count ?? 0);
+        $breakMinutes = (int) ($summary?->break_minutes ?? 0);
+        $breakExceededMinutes = (int) ($summary?->break_exceeded_minutes ?? 0);
 
         $employeeCount = Employee::query()->count();
         $presentRate = $employeeCount === 0
@@ -64,6 +70,12 @@ class AttendanceStatsOverview extends StatsOverviewWidget
                 ->descriptionIcon(Heroicon::OutlinedClipboardDocumentCheck)
                 ->color($pendingOvertime > 0 ? 'info' : 'gray')
                 ->icon(Heroicon::OutlinedCalendarDays),
+
+            Stat::make('Break minutes', number_format($breakMinutes).' min')
+                ->description(number_format($breakCount).' breaks, '.number_format($breakExceededMinutes).' min over limit')
+                ->descriptionIcon(Heroicon::OutlinedClock)
+                ->color($breakExceededMinutes > 0 ? 'warning' : 'gray')
+                ->icon(Heroicon::OutlinedClock),
         ];
     }
 

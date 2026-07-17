@@ -22,11 +22,13 @@ import {
 } from '@/Services/faceService.js'
 
 type AttendanceAction = 'time-in' | 'time-out'
+type TapEvent = 'time-in' | 'break-start' | 'break-end' | 'time-out'
 type AttendanceMethod = 'rfid' | 'keypad' | 'fingerprint' | 'face'
 type AttendanceGreeting = {
     first_name: string
     is_birthday: boolean
     attendance_type: AttendanceAction
+    tap_event?: TapEvent
 }
 type VerifiedEmployee = {
     id: number
@@ -67,6 +69,9 @@ type RectBox = {
 type AttendanceSchedule = {
     time_in_start: string
     time_out_start: string
+    max_breaks_per_day: string
+    first_break_limit_minutes: string
+    additional_break_limit_minutes: string
     duplicate_scan_window_seconds: string
     same_employee_auth_cooldown_minutes: string
     face_capture_width_ratio: string
@@ -1784,6 +1789,7 @@ const pollZktecoBridgeStatus = async (
                         '',
                     is_birthday: Boolean(status.is_birthday),
                     attendance_type: status.attendance_type || attendanceType.value,
+                    tap_event: status.tap_event || status.attendance_type || attendanceType.value,
                 })
                 resetAttendanceSelection(false)
                 announceAttendanceRecorded({ payload: status })
