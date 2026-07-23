@@ -14,8 +14,14 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
-The first request may take longer while DeepFace downloads the SFace, YuNet,
-and anti-spoofing model weights.
+The first request may take longer while DeepFace downloads the SFace and YuNet
+weights. Liveness uses the YuNet face crop plus the facenox MiniFASNet V2 SE
+ONNX model through ONNX Runtime. The default model path is
+`models/best_model_quantized.onnx`; override it with `ANTI_SPOOFING_MODEL_PATH`
+if you want to test another compatible ONNX file.
+
+The bundled facenox model expects a cropped RGB face, letterboxed to `128x128`,
+and returns two logits: index `0` is real and index `1` is spoof.
 
 ## Run
 

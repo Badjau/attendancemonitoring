@@ -23,10 +23,19 @@ try:
 except ImportError:  # pragma: no cover - older DeepFace versions may not expose this class.
     FaceNotDetected = ValueError
 
+try:
+    import onnxruntime as ort
+except Exception as exc:  # pragma: no cover - optional until a model is configured.
+    ort = None
+    ONNXRUNTIME_IMPORT_ERROR = exc
+else:
+    ONNXRUNTIME_IMPORT_ERROR = None
+
 from .config import Settings
 from .database import FaceStore
 
 logger = logging.getLogger(__name__)
+_ANTI_SPOOF_SESSION: tuple[str, object] | None = None
 
 
 @dataclass
@@ -261,10 +270,6 @@ def detector_backends(settings: Settings) -> list[str]:
     return list(dict.fromkeys(backends))
 
 
-def anti_spoofing_detector_backend(settings: Settings) -> str:
-    return settings.anti_spoofing_detector_backend.strip() or "opencv"
-
-
 def save_failed_detection_frame(
     rgb: np.ndarray,
     settings: Settings,
@@ -338,6 +343,219 @@ def extract_faces_once(rgb: np.ndarray, detector_backend: str, anti_spoofing: bo
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
+def expanded_face_crop(rgb: np.ndarray, facial_area: dict, scale: float) -> np.ndarray | None:
+    frame_height, frame_width = rgb.shape[:2]
+    x = float(facial_area.get("x", 0) or 0)
+    y = float(facial_area.get("y", 0) or 0)
+    width = float(facial_area.get("w", 0) or 0)
+    height = float(facial_area.get("h", 0) or 0)
+
+    if width <= 0 or height <= 0:
+        return None
+
+    scale = max(1.0, float(scale or 1.0))
+    center_x = x + (width / 2.0)
+    center_y = y + (height / 2.0)
+    crop_size = max(width, height) * scale
+
+    left = max(0, int(round(center_x - (crop_size / 2.0))))
+    top = max(0, int(round(center_y - (crop_size / 2.0))))
+    right = min(frame_width, int(round(center_x + (crop_size / 2.0))))
+    bottom = min(frame_height, int(round(center_y + (crop_size / 2.0))))
+
+    if right <= left or bottom <= top:
+        return None
+
+    return rgb[top:bottom, left:right]
+
+
+def anti_spoof_session(settings: Settings):
+    global _ANTI_SPOOF_SESSION
+
+    model_path = settings.anti_spoofing_model_path
+    if model_path is None:
+        raise RuntimeError("anti_spoofing_unconfigured: set ANTI_SPOOFING_MODEL_PATH to a MiniFASNet ONNX file")
+
+    resolved = str(model_path.expanduser().resolve())
+    if _ANTI_SPOOF_SESSION is not None and _ANTI_SPOOF_SESSION[0] == resolved:
+        return _ANTI_SPOOF_SESSION[1]
+
+    if ort is None:
+        raise RuntimeError(f"anti_spoofing_unavailable: onnxruntime import failed: {ONNXRUNTIME_IMPORT_ERROR}")
+
+    if not model_path.exists():
+        raise RuntimeError(f"anti_spoofing_unavailable: model not found: {model_path}")
+
+    session = ort.InferenceSession(resolved, providers=["CPUExecutionProvider"])
+    _ANTI_SPOOF_SESSION = (resolved, session)
+    return session
+
+
+def softmax(values: np.ndarray) -> np.ndarray:
+    shifted = values - np.max(values)
+    exp = np.exp(shifted)
+    return exp / np.sum(exp)
+
+
+def anti_spoofing_probabilities(output: np.ndarray) -> np.ndarray:
+    scores = np.asarray(output, dtype=np.float32).reshape(-1)
+    if scores.size == 0:
+        raise RuntimeError("anti_spoofing_unavailable: model returned no scores")
+
+    if np.any(scores < 0) or np.any(scores > 1) or not np.isclose(np.sum(scores), 1.0, atol=0.05):
+        scores = softmax(scores)
+
+    return scores
+
+
+def facenox_preprocess_face(face_rgb: np.ndarray, input_size: int) -> np.ndarray:
+    new_size = max(1, int(input_size))
+    old_height, old_width = face_rgb.shape[:2]
+    ratio = float(new_size) / max(old_height, old_width)
+    scaled_height = max(1, int(old_height * ratio))
+    scaled_width = max(1, int(old_width * ratio))
+    interpolation = cv2.INTER_LANCZOS4 if ratio > 1.0 else cv2.INTER_AREA
+
+    image = cv2.resize(
+        face_rgb,
+        (scaled_width, scaled_height),
+        interpolation=interpolation,
+    )
+
+    delta_width = new_size - scaled_width
+    delta_height = new_size - scaled_height
+    top = delta_height // 2
+    bottom = delta_height - top
+    left = delta_width // 2
+    right = delta_width - left
+
+    image = cv2.copyMakeBorder(
+        image,
+        top,
+        bottom,
+        left,
+        right,
+        cv2.BORDER_REFLECT_101,
+    )
+
+    tensor = image.astype(np.float32) / 255.0
+    return np.transpose(tensor, (2, 0, 1))[np.newaxis, ...]
+
+
+def facenox_liveness_from_logits(logits: np.ndarray, threshold: float) -> dict:
+    scores = np.asarray(logits, dtype=np.float32).reshape(-1)
+    if scores.size < 2:
+        raise RuntimeError("anti_spoofing_unavailable: facenox model returned fewer than 2 logits")
+
+    real_logit = float(scores[0])
+    spoof_logit = float(scores[1])
+    threshold = min(0.999, max(0.001, float(threshold)))
+    logit_threshold = float(np.log(threshold / (1.0 - threshold)))
+    logit_diff = real_logit - spoof_logit
+
+    probabilities = softmax(np.array([real_logit, spoof_logit], dtype=np.float32))
+
+    return {
+        "is_real": bool(logit_diff >= logit_threshold),
+        "real_score": float(probabilities[0]),
+        "fake_score": float(probabilities[1]),
+        "real_logit": real_logit,
+        "fake_logit": spoof_logit,
+        "logit_diff": float(logit_diff),
+        "logit_threshold": logit_threshold,
+    }
+
+
+def classify_face_liveness(rgb: np.ndarray, facial_area: dict, settings: Settings) -> dict:
+    if not settings.anti_spoofing:
+        logger.info("face_liveness_skipped reason=disabled")
+        return {
+            "checked": False,
+            "required": bool(settings.require_anti_spoofing),
+            "is_real": True,
+            "error": "disabled",
+            "score": None,
+            "detector_backend": None,
+        }
+
+    crop = expanded_face_crop(rgb, facial_area, settings.anti_spoofing_crop_scale)
+    if crop is None or crop.size == 0:
+        return {
+            "checked": False,
+            "required": bool(settings.require_anti_spoofing),
+            "is_real": True,
+            "error": "invalid_face_crop",
+            "score": None,
+            "detector_backend": "yunet_crop",
+        }
+
+    started_at = time.perf_counter()
+    try:
+        session = anti_spoof_session(settings)
+        input_info = session.get_inputs()[0]
+        tensor = facenox_preprocess_face(crop, settings.anti_spoofing_input_size)
+        outputs = session.run(None, {input_info.name: tensor})
+        liveness = facenox_liveness_from_logits(
+            outputs[0],
+            settings.anti_spoofing_real_threshold,
+        )
+    except Exception as exc:
+        logger.warning("face_liveness_unavailable source=yunet_crop error=%s", exc)
+        return {
+            "checked": False,
+            "required": bool(settings.require_anti_spoofing),
+            "is_real": True,
+            "error": str(exc),
+            "score": None,
+            "detector_backend": "yunet_crop",
+        }
+
+    real_score = liveness["real_score"]
+    fake_score = liveness["fake_score"]
+    elapsed_ms = round((time.perf_counter() - started_at) * 1000, 2)
+
+    if liveness["is_real"]:
+        result = {
+            "checked": True,
+            "required": bool(settings.require_anti_spoofing),
+            "is_real": True,
+            "error": None,
+            "score": round(real_score, 4),
+            "detector_backend": "facenox_minifasnet_onnx",
+        }
+    elif fake_score >= settings.anti_spoofing_fake_threshold:
+        result = {
+            "checked": True,
+            "required": bool(settings.require_anti_spoofing),
+            "is_real": False,
+            "error": None,
+            "score": round(real_score, 4),
+            "detector_backend": "facenox_minifasnet_onnx",
+        }
+    else:
+        result = {
+            "checked": False,
+            "required": bool(settings.require_anti_spoofing),
+            "is_real": True,
+            "error": "uncertain",
+            "score": round(real_score, 4),
+            "detector_backend": "facenox_minifasnet_onnx",
+        }
+
+    logger.warning(
+        "face_liveness_crop_result source=yunet_crop model=facenox_minifasnet_onnx checked=%s is_real=%s real_score=%s fake_score=%s logit_diff=%s crop_width=%s crop_height=%s elapsed_ms=%s",
+        result["checked"],
+        result["is_real"],
+        result["score"],
+        round(fake_score, 4),
+        round(liveness["logit_diff"], 4),
+        int(crop.shape[1]),
+        int(crop.shape[0]),
+        elapsed_ms,
+    )
+    return result
+
+
 def attach_spoofing_result(
     rgb: np.ndarray,
     face: dict,
@@ -345,203 +563,22 @@ def attach_spoofing_result(
     settings: Settings,
     enabled: bool | None = None,
 ) -> None:
-    should_check = settings.anti_spoofing if enabled is None else enabled
-
-    if not should_check:
-        face["spoofing_checked"] = False
-        face["spoofing_error"] = "disabled"
-        return
-
-    if not deepface_supports_anti_spoofing():
-        face["spoofing_checked"] = False
-        face["spoofing_error"] = "unsupported"
-        return
-
-    started_at = time.perf_counter()
-    liveness_detector_backend = anti_spoofing_detector_backend(settings)
-    try:
-        spoof_faces = extract_faces_once(
-            rgb=rgb,
-            detector_backend=liveness_detector_backend,
-            anti_spoofing=True,
-        )
-    except RuntimeError as exc:
-        if is_known_anti_spoofing_error(exc):
-            face["spoofing_checked"] = False
-            face["spoofing_error"] = str(exc)
-            logger.warning(
-                "face_spoofing_unavailable detector=%s identity_detector=%s error=%s",
-                liveness_detector_backend,
-                detector_backend,
-                exc,
-            )
-            return
-        raise
-
-    elapsed_ms = round((time.perf_counter() - started_at) * 1000, 2)
-
-    if len(spoof_faces) != 1:
-        face["spoofing_checked"] = False
-        face["spoofing_error"] = f"anti_spoofing_returned_{len(spoof_faces)}_faces"
-        logger.warning(
-            "face_spoofing_unconfirmed detector=%s identity_detector=%s face_count=%s elapsed_ms=%s required=%s",
-            liveness_detector_backend,
-            detector_backend,
-            len(spoof_faces),
-            elapsed_ms,
-            settings.require_anti_spoofing,
-        )
-        return
-
-    spoof_face = spoof_faces[0]
-    face["spoofing_checked"] = True
-    face["is_real"] = bool(spoof_face.get("is_real", True))
-    face["antispoof_score"] = spoof_face.get("antispoof_score")
-    logger.warning(
-        "face_spoofing_result detector=%s identity_detector=%s is_real=%s score=%s elapsed_ms=%s",
-        liveness_detector_backend,
-        detector_backend,
-        face["is_real"],
-        face["antispoof_score"],
-        elapsed_ms,
-    )
-
-
-def attach_full_frame_spoofing_result(faces: list[dict], spoofing: dict) -> None:
-    for face in faces:
-        face["spoofing_checked"] = bool(spoofing["checked"])
-        face["is_real"] = bool(spoofing["is_real"])
-        face["antispoof_score"] = spoofing["score"]
-        face["spoofing_error"] = spoofing["error"]
-        face["spoofing_detector_backend"] = spoofing["detector_backend"]
-
-
-def full_frame_spoofing_metadata(
-    rgb: np.ndarray,
-    settings: Settings,
-    context: str,
-) -> dict:
-    if not settings.anti_spoofing:
-        logger.info("face_liveness_skipped context=%s reason=disabled", context)
-        return {
+    if enabled is False:
+        spoofing = {
             "checked": False,
-            "required": bool(settings.require_anti_spoofing),
             "is_real": True,
+            "score": None,
             "error": "disabled",
-            "score": None,
-            "face_count": 0,
             "detector_backend": None,
         }
+    else:
+        spoofing = classify_face_liveness(rgb, face.get("facial_area") or {}, settings)
 
-    if not deepface_supports_anti_spoofing():
-        logger.warning("face_liveness_skipped context=%s reason=unsupported", context)
-        return {
-            "checked": False,
-            "required": bool(settings.require_anti_spoofing),
-            "is_real": True,
-            "error": "unsupported",
-            "score": None,
-            "face_count": 0,
-            "detector_backend": None,
-        }
-
-    last_result = {
-        "checked": False,
-        "required": bool(settings.require_anti_spoofing),
-        "is_real": True,
-        "error": "not_checked",
-        "score": None,
-        "face_count": 0,
-        "detector_backend": None,
-    }
-
-    detector_backend = anti_spoofing_detector_backend(settings)
-    for detector_backend in [detector_backend]:
-        started_at = time.perf_counter()
-        logger.warning(
-            "face_liveness_full_frame_attempt context=%s detector=%s anti_spoofing=True frame_width=%s frame_height=%s",
-            context,
-            detector_backend,
-            int(rgb.shape[1]),
-            int(rgb.shape[0]),
-        )
-        try:
-            spoof_faces = extract_faces_once(
-                rgb=rgb,
-                detector_backend=detector_backend,
-                anti_spoofing=True,
-            )
-        except RuntimeError as exc:
-            if is_known_anti_spoofing_error(exc):
-                elapsed_ms = round((time.perf_counter() - started_at) * 1000, 2)
-                logger.warning(
-                    "face_liveness_unavailable context=%s detector=%s anti_spoofing=True elapsed_ms=%s error=%s",
-                    context,
-                    detector_backend,
-                    elapsed_ms,
-                    exc,
-                )
-                last_result = {
-                    **last_result,
-                    "error": str(exc),
-                    "detector_backend": detector_backend,
-                }
-                continue
-            raise
-
-        elapsed_ms = round((time.perf_counter() - started_at) * 1000, 2)
-        logger.warning(
-            "face_liveness_full_frame_completed context=%s detector=%s anti_spoofing=True face_count=%s elapsed_ms=%s",
-            context,
-            detector_backend,
-            len(spoof_faces),
-            elapsed_ms,
-        )
-
-        if len(spoof_faces) == 1:
-            spoof_face = spoof_faces[0]
-            result = {
-                "checked": True,
-                "required": bool(settings.require_anti_spoofing),
-                "is_real": bool(spoof_face.get("is_real", True)),
-                "error": None,
-                "score": (
-                    round(float(spoof_face["antispoof_score"]), 4)
-                    if spoof_face.get("antispoof_score") is not None
-                    else None
-                ),
-                "face_count": 1,
-                "detector_backend": detector_backend,
-            }
-            logger.warning(
-                "face_liveness_full_frame_result context=%s detector=%s checked=%s is_real=%s score=%s",
-                context,
-                detector_backend,
-                result["checked"],
-                result["is_real"],
-                result["score"],
-            )
-            return result
-
-        last_result = {
-            **last_result,
-            "error": f"anti_spoofing_returned_{len(spoof_faces)}_faces",
-            "face_count": len(spoof_faces),
-            "detector_backend": detector_backend,
-        }
-
-        if len(spoof_faces) > 1:
-            break
-
-    logger.warning(
-        "face_liveness_full_frame_unconfirmed context=%s detector=%s face_count=%s error=%s",
-        context,
-        last_result["detector_backend"],
-        last_result["face_count"],
-        last_result["error"],
-    )
-    return last_result
-
+    face["spoofing_checked"] = bool(spoofing["checked"])
+    face["is_real"] = bool(spoofing["is_real"])
+    face["antispoof_score"] = spoofing["score"]
+    face["spoofing_error"] = spoofing["error"]
+    face["spoofing_detector_backend"] = spoofing["detector_backend"]
 
 def extract_faces_with_spoofing(
     rgb: np.ndarray,
@@ -654,9 +691,8 @@ def extract_faces_with_spoofing(
         face["facial_area"] = area
         face["detector_backend"] = detector_backend
 
-    if faces:
-        spoofing = full_frame_spoofing_metadata(rgb, settings, context)
-        attach_full_frame_spoofing_result(faces, spoofing)
+    for face in faces:
+        attach_spoofing_result(rgb, face, detector_backend, settings)
 
     return FaceExtraction(faces=faces, diagnostics=diagnostics)
 

@@ -27,11 +27,17 @@ def patch_recognizer(monkeypatch, embedding):
         "extract_faces": staticmethod(lambda **kwargs: [{
             "facial_area": {"x": 10, "y": 10, "w": 200, "h": 200},
             "confidence": 0.99,
-            "is_real": True,
-            "antispoof_score": 0.98,
         }]),
         "represent": staticmethod(lambda **kwargs: [{"embedding": embedding}]),
     }))
+    monkeypatch.setattr(recognition, "classify_face_liveness", lambda rgb, facial_area, settings: {
+        "checked": True,
+        "required": bool(settings.require_anti_spoofing),
+        "is_real": True,
+        "error": None,
+        "score": 0.98,
+        "detector_backend": "minifasnet_onnx",
+    })
 
 
 def patch_multi_face_recognizer(monkeypatch):
@@ -209,11 +215,17 @@ def test_spoofed_face_is_rejected(monkeypatch):
         "extract_faces": staticmethod(lambda **kwargs: [{
             "facial_area": {"x": 10, "y": 10, "w": 200, "h": 200},
             "confidence": 0.99,
-            "is_real": False,
-            "antispoof_score": 0.12,
         }]),
         "represent": staticmethod(lambda **kwargs: [{"embedding": np.array([1.0, 0.0, 0.0])}]),
     }))
+    monkeypatch.setattr(recognition, "classify_face_liveness", lambda rgb, facial_area, settings: {
+        "checked": True,
+        "required": bool(settings.require_anti_spoofing),
+        "is_real": False,
+        "error": None,
+        "score": 0.12,
+        "detector_backend": "minifasnet_onnx",
+    })
 
     result = recognize(
         b"image",
@@ -226,33 +238,36 @@ def test_spoofed_face_is_rejected(monkeypatch):
     assert result["spoofing_passed"] is False
 
 
-def test_yunet_detection_invokes_full_frame_opencv_anti_spoofing(monkeypatch):
+def test_yunet_detection_passes_detected_face_crop_to_anti_spoofing(monkeypatch):
     from app import recognition
 
     calls = []
+    liveness_calls = []
 
     def fake_extract_faces(**kwargs):
         calls.append(kwargs)
-        if kwargs.get("anti_spoofing"):
-            assert kwargs["detector_backend"] == "opencv"
-            assert kwargs["img_path"].shape == (240, 240, 3)
-            return [{
-                "facial_area": {"x": 10, "y": 10, "w": 200, "h": 200},
-                "confidence": 0.99,
-                "is_real": True,
-                "antispoof_score": 0.96,
-            }]
-
         assert kwargs["detector_backend"] == "yunet"
         return [{
             "facial_area": {"x": 10, "y": 10, "w": 200, "h": 200},
             "confidence": 0.99,
         }]
 
+    def fake_liveness(rgb, facial_area, settings):
+        liveness_calls.append((rgb, facial_area, settings))
+        return {
+            "checked": True,
+            "required": bool(settings.require_anti_spoofing),
+            "is_real": True,
+            "error": None,
+            "score": 0.96,
+            "detector_backend": "minifasnet_onnx",
+        }
+
     monkeypatch.setattr(recognition, "DeepFace", type("Fake", (), {
         "extract_faces": staticmethod(fake_extract_faces),
         "represent": staticmethod(lambda **kwargs: [{"embedding": np.array([1.0, 0.0, 0.0])}]),
     }))
+    monkeypatch.setattr(recognition, "classify_face_liveness", fake_liveness)
 
     result = recognize(
         b"image",
@@ -263,8 +278,44 @@ def test_yunet_detection_invokes_full_frame_opencv_anti_spoofing(monkeypatch):
 
     assert result["matched"] is True
     assert result["spoofing_checked"] is True
-    assert [call["detector_backend"] for call in calls[:2]] == ["yunet", "opencv"]
-    assert calls[1]["anti_spoofing"] is True
+    assert len(liveness_calls) == 1
+    assert liveness_calls[0][1] == {"x": 10, "y": 10, "w": 200, "h": 200, "confidence": 0.99}
+    assert not any(call.get("anti_spoofing") for call in calls)
+
+
+def test_crop_liveness_classifier_uses_expanded_yunet_box(monkeypatch):
+    from app import recognition
+
+    inputs = []
+
+    class FakeInput:
+        name = "input"
+
+    class FakeSession:
+        def get_inputs(self):
+            return [FakeInput()]
+
+        def run(self, _outputs, feed):
+            inputs.append(feed["input"])
+            return [np.array([[2.0, 0.0]], dtype=np.float32)]
+
+    monkeypatch.setattr(recognition, "anti_spoof_session", lambda settings: FakeSession())
+
+    result = recognition.classify_face_liveness(
+        np.zeros((240, 320, 3), dtype=np.uint8),
+        {"x": 100, "y": 50, "w": 80, "h": 100},
+        Settings(
+            anti_spoofing_input_size=128,
+            anti_spoofing_crop_scale=2.0,
+            anti_spoofing_real_threshold=0.8,
+        ),
+    )
+
+    assert result["checked"] is True
+    assert result["is_real"] is True
+    assert result["score"] == 0.8808
+    assert result["detector_backend"] == "facenox_minifasnet_onnx"
+    assert inputs[0].shape == (1, 3, 128, 128)
 
 
 def test_no_face_detection_does_not_attempt_anti_spoofing(monkeypatch):
@@ -301,8 +352,6 @@ def test_face_session_rejects_spoof_before_embedding(monkeypatch):
         return [{
             "facial_area": {"x": 10, "y": 10, "w": 200, "h": 200},
             "confidence": 0.99,
-            "is_real": not kwargs.get("anti_spoofing"),
-            "antispoof_score": 0.12 if kwargs.get("anti_spoofing") else None,
         }]
 
     def fake_represent(**kwargs):
@@ -313,6 +362,14 @@ def test_face_session_rejects_spoof_before_embedding(monkeypatch):
         "extract_faces": staticmethod(fake_extract_faces),
         "represent": staticmethod(fake_represent),
     }))
+    monkeypatch.setattr(recognition, "classify_face_liveness", lambda rgb, facial_area, settings: {
+        "checked": True,
+        "required": bool(settings.require_anti_spoofing),
+        "is_real": False,
+        "error": None,
+        "score": 0.12,
+        "detector_backend": "minifasnet_onnx",
+    })
 
     result = recognize_face_session(
         [(b"image", np.zeros((240, 240, 3), dtype=np.uint8))],

@@ -1,10 +1,12 @@
 from functools import lru_cache
 from pathlib import Path
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 project_root = Path(__file__).resolve().parents[2]
+service_root = Path(__file__).resolve().parents[1]
 
 
 class Settings(BaseSettings):
@@ -24,9 +26,13 @@ class Settings(BaseSettings):
     model_name: str = "SFace"
     detector_backend: str = "yunet"
     fallback_detector_backend: str = "opencv"
-    anti_spoofing_detector_backend: str = "opencv"
     diagnostic_detector_backends: str = "yunet,opencv,ssd"
     anti_spoofing: bool = True
+    anti_spoofing_model_path: Path | None = service_root / "models" / "best_model_quantized.onnx"
+    anti_spoofing_input_size: int = 128
+    anti_spoofing_crop_scale: float = 2.7
+    anti_spoofing_real_threshold: float = 0.8
+    anti_spoofing_fake_threshold: float = 0.8
     require_anti_spoofing: bool = False
     save_failed_detection_frames: bool = True
     match_threshold: float = 0.34
@@ -44,6 +50,14 @@ class Settings(BaseSettings):
     min_blur_score: float = 10.0
     min_brightness: float = 45.0
     max_brightness: float = 215.0
+
+    @field_validator("anti_spoofing_model_path")
+    @classmethod
+    def resolve_anti_spoofing_model_path(cls, value: Path | None) -> Path | None:
+        if value is None or value.is_absolute():
+            return value
+
+        return service_root / value
 
 
 @lru_cache
