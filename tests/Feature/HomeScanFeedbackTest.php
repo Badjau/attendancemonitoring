@@ -221,6 +221,20 @@ class HomeScanFeedbackTest extends TestCase
         $this->assertStringContainsString("setTemporaryScannerError('fingerprint_not_found')", $cameraCard);
     }
 
+    public function test_live_roster_refresh_uses_latest_attendance_event_context(): void
+    {
+        $homePage = file_get_contents(resource_path('js/Pages/Home.vue'));
+        $syncStore = file_get_contents(resource_path('js/Stores/sync.js'));
+        $cameraCard = file_get_contents(resource_path('js/Components/Home/CameraCard.vue'));
+
+        $this->assertStringContainsString('attendanceRefreshInFlight', $homePage);
+        $this->assertStringContainsString('pendingAttendanceRefresh', $homePage);
+        $this->assertStringContainsString('payload?.record?.employeeBranch', $homePage);
+        $this->assertStringContainsString('payload?.record?.employeeIdentifier', $homePage);
+        $this->assertStringContainsString('employee_branch: record.employeeBranch', $syncStore);
+        $this->assertStringContainsString('employeeBranch: employeeBranch || undefined', $cameraCard);
+    }
+
     public function test_scanner_status_feedback_and_face_auth_states_are_explicit(): void
     {
         $cameraCard = file_get_contents(resource_path('js/Components/Home/CameraCard.vue'));

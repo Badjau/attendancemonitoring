@@ -143,6 +143,7 @@ const kioskApiHeaders = () =>
  * @property {string} occurredAt
  * @property {string} employeeIdentifier
  * @property {string} [employeeName]
+ * @property {string} [employeeBranch]
  * @property {string} attendanceMethod
  * @property {string} [attendanceType]
  * @property {number} [authCacheRevision]
@@ -715,6 +716,8 @@ const syncApi = {
                                         message: result.message,
                                         attendance_id: result.attendance_id,
                                         sync_status: result.status,
+                                        employee_id: record.employeeIdentifier,
+                                        employee_branch: record.employeeBranch,
                                     },
                                     record,
                                 },

@@ -63,12 +63,16 @@ const BRANCH_SWITCH_MAX_MARGIN_METERS = 300
 const employeeIdFromPayload = (payload: any) =>
     payload?.employee?.employee_id ??
     payload?.data?.employee?.employee_id ??
+    payload?.record?.employeeIdentifier ??
+    payload?.record?.employee_id ??
     payload?.employee_id ??
     ''
 
 const branchFromPayload = (payload: any) =>
     payload?.employee?.branch ??
     payload?.data?.employee?.branch ??
+    payload?.record?.employeeBranch ??
+    payload?.record?.employee_branch ??
     payload?.employee_branch ??
     ''
 
@@ -84,8 +88,21 @@ const branchFromAttendance = (employeeId?: string) => {
     return attendance?.employee?.branch?.trim() || ''
 }
 
+let attendanceRefreshInFlight = false
+let pendingAttendanceRefresh: {
+    employeeId?: string
+    branch?: string
+} | null = null
+
 const refreshAttendanceToday = (employeeId?: string, branch?: string) => {
     const requestedBranch = branch?.trim() || activeBranch.value
+
+    if (attendanceRefreshInFlight) {
+        pendingAttendanceRefresh = { employeeId, branch: requestedBranch }
+        return
+    }
+
+    attendanceRefreshInFlight = true
 
     router.reload({
         only: ['attendanceToday'],
@@ -97,6 +114,15 @@ const refreshAttendanceToday = (employeeId?: string, branch?: string) => {
 
             activeBranch.value = branchFromAttendance(employeeId)
         },
+        onFinish: () => {
+            attendanceRefreshInFlight = false
+
+            if (!pendingAttendanceRefresh) return
+
+            const nextRefresh = pendingAttendanceRefresh
+            pendingAttendanceRefresh = null
+            refreshAttendanceToday(nextRefresh.employeeId, nextRefresh.branch)
+        },
     })
 }
 
@@ -105,7 +131,11 @@ const setActiveBranch = (employee?: { branch?: string | null }) => {
 }
 
 const handleAttendanceRecorded = (event: Event) => {
-    const payload = (event as CustomEvent)?.detail?.payload
+    const detail = (event as CustomEvent)?.detail ?? {}
+    const payload = {
+        ...(detail?.payload ?? detail),
+        record: detail?.record,
+    }
     const employeeId = employeeIdFromPayload(payload)
     const branch = branchFromPayload(payload)
 

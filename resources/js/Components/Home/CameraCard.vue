@@ -1447,6 +1447,7 @@ const verifyEmployeeAndSubmit = async (
         employee.employee_id,
         method,
         employeeFullName(employee),
+        employee.branch,
         matchedFace.image,
         employee.authDecision,
     )
@@ -1488,6 +1489,7 @@ const submitFaceAttendance = async () => {
             employee.employee_id,
             'face',
             employeeFullName(employee),
+            employee.branch,
             result.image,
             employee.authDecision,
         )
@@ -1997,6 +1999,7 @@ const submitAttendance = async (
     employeeIdentifier: string,
     method: AttendanceMethod,
     employeeName?: string,
+    employeeBranch?: string | null,
     image?: string,
     authDecision?: AuthDecision,
 ): Promise<void> => {
@@ -2024,6 +2027,7 @@ const submitAttendance = async (
         occurredAt: trustedNowIso(),
         employeeIdentifier,
         employeeName: employeeName || employeeIdentifier,
+        employeeBranch: employeeBranch || undefined,
         attendanceMethod: method,
         attendanceType: attendanceAction || undefined,
         authCacheRevision: authDecision?.authCacheRevision,
