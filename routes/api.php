@@ -15,9 +15,11 @@ Route::prefix('zkteco')->controller(ZktecoFingerprintController::class)->group(f
 });
 
 Route::prefix('face')->controller(FaceController::class)->group(function () {
+    Route::get('/embeddings', 'embeddingsManifest');
     Route::get('/employees/{employee:employee_id}/embeddings', 'employeeEmbeddings');
     Route::post('/employees/{employee:employee_id}/embeddings', 'storeEmployeeEmbedding');
     Route::delete('/employees/{employee:employee_id}/embeddings', 'destroyEmployeeEmbeddings');
+    Route::post('/attempts', 'storeAttempt');
 });
 
 Route::middleware('kiosk.token')->group(function () {

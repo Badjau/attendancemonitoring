@@ -19,14 +19,17 @@ from .recognition import (
     detect_faces,
     read_upload_image,
     recognize,
+    recognize_face_session,
     verify_employee_face,
 )
 from .schemas import (
     CacheRefreshResponse,
+    CacheRebuildResponse,
     DeleteEmployeeResponse,
     DetectResponse,
     EmployeeStatusResponse,
     EnrollmentResponse,
+    FaceSessionResponse,
     RecognizeResponse,
 )
 
@@ -63,13 +66,14 @@ app.add_middleware(
 @app.on_event("startup")
 def log_startup() -> None:
     logger.info(
-        "face_service_started database=%s debug_frames=%s laravel_base_url=%s model=%s detector=%s fallback_detector=%s anti_spoofing=%s require_anti_spoofing=%s deepface_available=%s",
+        "face_service_started database=%s debug_frames=%s laravel_base_url=%s model=%s detector=%s fallback_detector=%s anti_spoofing_detector=%s anti_spoofing=%s require_anti_spoofing=%s deepface_available=%s",
         settings.database_path,
         settings.debug_frame_path,
         settings.laravel_base_url,
         settings.model_name,
         settings.detector_backend,
         settings.fallback_detector_backend,
+        settings.anti_spoofing_detector_backend,
         settings.anti_spoofing,
         settings.require_anti_spoofing,
         DeepFace is not None,
@@ -175,6 +179,26 @@ def refresh_employee_cache(employee_id: str, face_store: FaceStore, settings: Se
     }
 
 
+def rebuild_face_cache(face_store: FaceStore, settings: Settings) -> dict:
+    logger.info("face_cache_rebuild_started")
+    payload = laravel_json_request("/api/face/embeddings", settings)
+    embeddings = payload.get("embeddings") or []
+    counts = face_store.replace_all_embeddings(embeddings)
+    logger.info(
+        "face_cache_rebuild_completed embedding_count=%s employee_count=%s generated_at=%s",
+        counts["embedding_count"],
+        counts["employee_count"],
+        payload.get("generated_at"),
+    )
+
+    return {
+        "rebuilt": True,
+        "embedding_count": counts["embedding_count"],
+        "employee_count": counts["employee_count"],
+        "generated_at": payload.get("generated_at"),
+    }
+
+
 def cache_is_stale(employee_id: str, face_store: FaceStore, settings: Settings) -> bool:
     cached_at = face_store.employee_cache_refreshed_at(employee_id)
     if not cached_at:
@@ -215,6 +239,7 @@ def health(settings: Settings = Depends(get_settings)) -> dict:
         "model_name": settings.model_name,
         "detector_backend": settings.detector_backend,
         "fallback_detector_backend": settings.fallback_detector_backend,
+        "anti_spoofing_detector_backend": settings.anti_spoofing_detector_backend,
         "diagnostic_detector_backends": settings.diagnostic_detector_backends,
         "anti_spoofing": settings.anti_spoofing,
         "require_anti_spoofing": settings.require_anti_spoofing,
@@ -238,6 +263,68 @@ async def recognize_face(
         result.get("matched"),
         result.get("employee_id"),
         result.get("message"),
+    )
+    return result
+
+
+@app.post("/api/face-session/recognize", response_model=FaceSessionResponse)
+async def recognize_face_session_endpoint(
+    images: list[UploadFile] = File(...),
+    device_id: str | None = Form(default=None),
+    session_id: str | None = Form(default=None),
+    user_agent: str | None = Form(default=None),
+    settings: Settings = Depends(get_settings),
+    face_store: FaceStore = Depends(get_store),
+) -> dict:
+    logger.info(
+        "face_session_recognize_started frame_count=%s device_id=%s session_id=%s user_agent=%s",
+        len(images),
+        device_id,
+        session_id,
+        user_agent,
+    )
+    frames = [await read_upload_image(image) for image in images[: settings.session_max_frames]]
+    result = recognize_face_session(frames, face_store, settings)
+    logger.info(
+        "face_session_recognize_completed decision=%s employee_id=%s reason=%s frame_count=%s",
+        result.get("decision"),
+        result.get("employee_id"),
+        result.get("reason_code"),
+        result.get("frame_count"),
+    )
+    return result
+
+
+@app.post("/api/employees/{employee_id}/face-session/verify", response_model=FaceSessionResponse)
+async def verify_employee_face_session_endpoint(
+    employee_id: str,
+    images: list[UploadFile] = File(...),
+    device_id: str | None = Form(default=None),
+    session_id: str | None = Form(default=None),
+    user_agent: str | None = Form(default=None),
+    settings: Settings = Depends(get_settings),
+    face_store: FaceStore = Depends(get_store),
+) -> dict:
+    logger.info(
+        "face_session_verify_started employee_id=%s frame_count=%s device_id=%s session_id=%s user_agent=%s",
+        employee_id,
+        len(images),
+        device_id,
+        session_id,
+        user_agent,
+    )
+    if not face_store.employee_embeddings(employee_id) or cache_is_stale(employee_id, face_store, settings):
+        refresh_employee_cache(employee_id, face_store, settings)
+
+    frames = [await read_upload_image(image) for image in images[: settings.session_max_frames]]
+    result = recognize_face_session(frames, face_store, settings, expected_employee_id=employee_id)
+    logger.info(
+        "face_session_verify_completed employee_id=%s decision=%s matched_employee_id=%s reason=%s frame_count=%s",
+        employee_id,
+        result.get("decision"),
+        result.get("employee_id"),
+        result.get("reason_code"),
+        result.get("frame_count"),
     )
     return result
 
@@ -293,6 +380,15 @@ def refresh_employee_face_cache(
 ) -> dict:
     logger.info("manual_cache_refresh_requested employee_id=%s", employee_id)
     return refresh_employee_cache(employee_id, face_store, settings)
+
+
+@app.post("/api/cache/rebuild", response_model=CacheRebuildResponse)
+def rebuild_face_cache_endpoint(
+    settings: Settings = Depends(get_settings),
+    face_store: FaceStore = Depends(get_store),
+) -> dict:
+    logger.info("manual_cache_rebuild_requested")
+    return rebuild_face_cache(face_store, settings)
 
 
 @app.post("/api/employees/{employee_id}/enroll", response_model=EnrollmentResponse)

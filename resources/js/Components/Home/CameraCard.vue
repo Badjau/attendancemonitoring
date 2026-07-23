@@ -17,8 +17,9 @@ import { useSyncStore } from '@/Stores/sync.js'
 import {
     detectFaces,
     faceServiceHealth,
-    recognizeFace,
-    verifyEmployeeFace,
+    recognizeFaceSession,
+    recordFaceAttempt,
+    verifyEmployeeFaceSession,
 } from '@/Services/faceService.js'
 
 type AttendanceAction = 'time-in' | 'time-out'
@@ -51,6 +52,7 @@ type AuthDecision = {
 type LiveFaceMatch = {
     employee: VerifiedEmployee
     image: string
+    faceAttemptId?: number
 }
 type FaceAttemptResult = {
     matched: boolean
@@ -66,6 +68,7 @@ type FaceWindowResult = {
     validFrames: number
     matchedFrames: number
     message: string
+    faceAttemptId?: number
 }
 type RectBox = {
     x: number
@@ -817,6 +820,155 @@ const runFaceVerificationWindow = async (
     }
 }
 
+const collectFaceSessionImages = async (targetFrames: number): Promise<string[]> => {
+    const images: string[] = []
+    const startedAt = Date.now()
+
+    while (
+        Date.now() - startedAt < faceVerificationWindowMs.value &&
+        images.length < targetFrames
+    ) {
+        const image = captureImage()
+        if (image) {
+            images.push(image)
+        }
+
+        faceStatusText.value = `Checking face...\n\nCaptured ${images.length}/${targetFrames} frames.`
+        await new Promise((resolve) => setTimeout(resolve, FACE_FRAME_RETRY_MS))
+    }
+
+    return images
+}
+
+const postFaceAttemptAudit = async (
+    result: any,
+    fallbackUsed = false,
+): Promise<number | undefined> => {
+    try {
+        const payload = await recordFaceAttempt({
+            candidate_employee_id:
+                result.employee_id ?? result.candidate_employee_id ?? undefined,
+            decision: result.decision,
+            reason_code: result.reason_code,
+            match_score: result.match_score,
+            liveness_score: result.liveness_score,
+            quality_score: result.quality_score,
+            risk_score: result.risk_score,
+            frame_count: result.frame_count,
+            usable_frame_count: result.usable_frame_count,
+            matched_frame_count: result.matched_frame_count,
+            fallback_used: fallbackUsed,
+            session_id: crypto.randomUUID?.() ?? String(Date.now()),
+            metadata: {
+                confidence: result.confidence,
+                distance: result.distance,
+                margin: result.margin,
+                face_count: result.face_count,
+            },
+            evidence_image_base64: result.evidence_image_base64,
+        })
+
+        return Number(payload.id || 0) || undefined
+    } catch (error) {
+        console.error('Face attempt audit failed:', error)
+        return undefined
+    }
+}
+
+const runFaceSessionVerification = async (
+    options: {
+        expectedEmployeeId?: string
+        targetFrames: number
+        verifier: (imageBlobs: Blob[]) => Promise<any>
+    },
+): Promise<FaceWindowResult> => {
+    let attempt = 0
+    let lastRetryResult: FaceWindowResult | null = null
+
+    while (attempt < 2) {
+        attempt++
+        const images = await collectFaceSessionImages(options.targetFrames)
+
+        if (images.length === 0) {
+            return {
+                matched: false,
+                validFrames: 0,
+                matchedFrames: 0,
+                message: 'Camera photo could not be captured.',
+            }
+        }
+
+        const result = await options.verifier(
+            images.map((image) => base64ToBlob(image, 'image/jpeg')),
+        )
+        const faceAttemptId = await postFaceAttemptAudit(
+            result,
+            result.decision === 'fallback',
+        )
+
+        if (result.decision === 'retry' && attempt === 1) {
+            lastRetryResult = {
+                matched: false,
+                employeeId: result.candidate_employee_id ?? null,
+                image: images[0],
+                validFrames: Number(result.usable_frame_count ?? 0),
+                matchedFrames: Number(result.matched_frame_count ?? 0),
+                message: result.message || 'Face session could not be accepted.',
+                faceAttemptId,
+            }
+            faceStatusText.value = 'Face uncertain. Trying once more...'
+            await new Promise((resolve) => setTimeout(resolve, FACE_FRAME_RETRY_MS))
+            continue
+        }
+
+        if (result.decision !== 'accept') {
+            return {
+                matched: false,
+                employeeId: result.candidate_employee_id ?? null,
+                image: images[0],
+                validFrames: Number(result.usable_frame_count ?? 0),
+                matchedFrames: Number(result.matched_frame_count ?? 0),
+                message: result.message || 'Face session could not be accepted.',
+                faceAttemptId,
+            }
+        }
+
+        const employeeId = String(result.employee_id ?? '')
+        if (
+            options.expectedEmployeeId &&
+            normalizeEmployeeCode(employeeId) !==
+                normalizeEmployeeCode(options.expectedEmployeeId)
+        ) {
+            return {
+                matched: false,
+                employeeId,
+                image: images[0],
+                validFrames: Number(result.usable_frame_count ?? 0),
+                matchedFrames: Number(result.matched_frame_count ?? 0),
+                message: 'Face does not match the selected employee.',
+                faceAttemptId,
+            }
+        }
+
+        return {
+            matched: true,
+            employeeId,
+            image: images[0],
+            validFrames: Number(result.usable_frame_count ?? 0),
+            matchedFrames: Number(result.matched_frame_count ?? 0),
+            message: result.message || 'Face matched.',
+            faceAttemptId,
+        }
+    }
+
+    return lastRetryResult ?? {
+        matched: false,
+        validFrames: 0,
+        matchedFrames: 0,
+        message: 'Face frames did not agree. Please try again.',
+    }
+}
+
 const loadClockOffset = () => {
     const storedOffset = Number(localStorage.getItem(CLOCK_OFFSET_STORAGE_KEY))
 
@@ -1362,13 +1514,11 @@ const verifyLiveFaceMatchesEmployee = async (
 
     try {
         faceStatusText.value = `Checking face for ${employeeFullName(employee)}...`
-        const result = await runFaceVerificationWindow({
+        const result = await runFaceSessionVerification({
             expectedEmployeeId: employee.employee_id,
             targetFrames: scopedFaceUsableFrameTarget.value,
-            requiredMatches: scopedFaceRequiredMatchCount.value,
-            statusPrefix: `Checking face for ${employeeFullName(employee)}...`,
-            verifier: (_image, imageBlob) =>
-                verifyEmployeeFace(employee.employee_id, imageBlob),
+            verifier: (imageBlobs) =>
+                verifyEmployeeFaceSession(employee.employee_id, imageBlobs),
         })
 
         if (!result.matched || !result.image) {
@@ -1385,6 +1535,7 @@ const verifyLiveFaceMatchesEmployee = async (
         return {
             employee,
             image: result.image,
+            faceAttemptId: result.faceAttemptId,
         }
     } catch (error) {
         console.error('Face verification failed:', error)
@@ -1450,6 +1601,7 @@ const verifyEmployeeAndSubmit = async (
         employee.branch,
         matchedFace.image,
         employee.authDecision,
+        matchedFace.faceAttemptId,
     )
 
     return true
@@ -1463,11 +1615,9 @@ const submitFaceAttendance = async () => {
         await openCameraForCapture({ loadFaceVerification: true })
 
         faceStatusText.value = 'Recognizing face...'
-        const result = await runFaceVerificationWindow({
+        const result = await runFaceSessionVerification({
             targetFrames: faceOnlyUsableFrameTarget.value,
-            requiredMatches: faceOnlyRequiredMatchCount.value,
-            statusPrefix: 'Recognizing face...',
-            verifier: (_image, imageBlob) => recognizeFace(imageBlob),
+            verifier: (imageBlobs) => recognizeFaceSession(imageBlobs),
         })
 
         if (!result.matched || !result.employeeId || !result.image) {
@@ -1492,6 +1642,7 @@ const submitFaceAttendance = async () => {
             employee.branch,
             result.image,
             employee.authDecision,
+            result.faceAttemptId,
         )
     } catch (error) {
         console.error('Error submitting face attendance:', error)
@@ -2002,6 +2153,7 @@ const submitAttendance = async (
     employeeBranch?: string | null,
     image?: string,
     authDecision?: AuthDecision,
+    faceAttemptId?: number,
 ): Promise<void> => {
     const attendanceAction = attendanceType.value
 
@@ -2034,6 +2186,7 @@ const submitAttendance = async (
         cacheStateAtRecordTime: authDecision?.cacheStateAtRecordTime,
         matchedAuthRevision: authDecision?.matchedAuthRevision,
         authMetadata: authDecision?.authMetadata,
+        faceAttemptId,
         latitude: coords.value.latitude,
         longitude: coords.value.longitude,
         location: locationLabel(),

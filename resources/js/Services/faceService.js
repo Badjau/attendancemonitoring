@@ -80,6 +80,68 @@ export const verifyEmployeeFace = async (employeeId, imageBlob) => {
     return jsonPayload(response, 'Face verification failed.')
 }
 
+const appendSessionImages = (formData, imageBlobs, prefix) => {
+    imageBlobs.forEach((imageBlob, index) => {
+        formData.append('images', imageBlob, `${prefix}_${Date.now()}_${index}.jpg`)
+    })
+    formData.append('user_agent', navigator.userAgent || '')
+}
+
+export const recognizeFaceSession = async (imageBlobs) => {
+    const formData = new FormData()
+    appendSessionImages(formData, imageBlobs, 'face_session')
+
+    const response = await fetch(`${faceServiceUrl()}/api/face-session/recognize`, {
+        method: 'POST',
+        headers: {
+            Accept: 'application/json',
+        },
+        body: formData,
+    })
+
+    return jsonPayload(response, 'Face session recognition failed.')
+}
+
+export const verifyEmployeeFaceSession = async (employeeId, imageBlobs) => {
+    const formData = new FormData()
+    appendSessionImages(formData, imageBlobs, `face_session_verify_${employeeId}`)
+
+    const response = await fetch(
+        `${faceServiceUrl()}/api/employees/${encodeURIComponent(employeeId)}/face-session/verify`,
+        {
+            method: 'POST',
+            headers: {
+                Accept: 'application/json',
+            },
+            body: formData,
+        },
+    )
+
+    return jsonPayload(response, 'Face session verification failed.')
+}
+
+const csrfToken = () =>
+    document
+        .querySelector('meta[name="csrf-token"]')
+        ?.getAttribute('content') || ''
+
+export const recordFaceAttempt = async (payload) => {
+    const token = csrfToken()
+    const response = await fetch('/api/face/attempts', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: {
+            Accept: 'application/json',
+            'Content-Type': 'application/json',
+            'X-Requested-With': 'XMLHttpRequest',
+            ...(token ? { 'X-CSRF-TOKEN': token } : {}),
+        },
+        body: JSON.stringify(payload),
+    })
+
+    return jsonPayload(response, 'Face attempt audit failed.')
+}
+
 export const detectFaces = async (imageBlob) => {
     const formData = new FormData()
     formData.append('image', imageBlob, `face_detect_${Date.now()}.jpg`)

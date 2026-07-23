@@ -3,7 +3,9 @@
 namespace Tests\Feature;
 
 use App\Models\Employee;
+use App\Models\FaceAttempt;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Storage;
 use Spatie\MediaLibrary\MediaCollections\Models\Media;
@@ -87,6 +89,55 @@ class FaceRoutesTest extends TestCase
             ->assertJsonPath('enrollment_count', 2)
             ->assertJsonPath('embeddings.0.embedding', [0.1, 0.2, 0.3])
             ->assertJsonPath('embeddings.0.image_hash', $firstImageHash);
+    }
+
+    public function test_face_embedding_manifest_serves_current_server_vectors(): void
+    {
+        config(['services.face_embeddings.token' => 'test-token']);
+
+        $firstEmployee = $this->createEmployee();
+        $secondEmployee = $this->createEmployee('EMP-002', 'RFID-002');
+
+        $firstEmployee->faceEmbeddings()->create([
+            'embedding' => [0.1, 0.2, 0.3],
+            'image_hash' => hash('sha256', 'first-face'),
+            'model_name' => 'SFace',
+            'detector_backend' => 'yunet',
+        ]);
+        $secondEmployee->faceEmbeddings()->create([
+            'embedding' => [0.4, 0.5, 0.6],
+            'image_hash' => hash('sha256', 'second-face'),
+            'model_name' => 'SFace',
+            'detector_backend' => 'yunet',
+        ]);
+
+        $this->withToken('test-token')
+            ->getJson('/api/face/embeddings')
+            ->assertOk()
+            ->assertJsonPath('embedding_count', 2)
+            ->assertJsonPath('employee_count', 2)
+            ->assertJsonPath('embeddings.0.employee_id', 'EMP-001')
+            ->assertJsonPath('embeddings.0.embedding', [0.1, 0.2, 0.3])
+            ->assertJsonPath('embeddings.1.employee_id', 'EMP-002')
+            ->assertJsonPath('embeddings.1.embedding', [0.4, 0.5, 0.6]);
+    }
+
+    public function test_employee_delete_notifies_face_service_cache(): void
+    {
+        config(['services.face.url' => 'https://127.0.0.1:8001']);
+        Http::fake([
+            'https://127.0.0.1:8001/api/employees/EMP-001' => Http::response([
+                'employee_id' => 'EMP-001',
+                'deleted' => 3,
+            ]),
+        ]);
+
+        $employee = $this->createEmployee();
+
+        $employee->delete();
+
+        Http::assertSent(fn ($request): bool => $request->method() === 'DELETE'
+            && $request->url() === 'https://127.0.0.1:8001/api/employees/EMP-001');
     }
 
     public function test_face_embedding_api_can_reset_employee_vectors_and_profile_image_for_updates(): void
@@ -229,11 +280,46 @@ class FaceRoutesTest extends TestCase
         $this->assertCount(1, $employee->getMedia('employee-profile'));
     }
 
-    private function createEmployee(): Employee
+    public function test_face_attempt_api_stores_suspicious_audit_record_with_evidence(): void
+    {
+        Storage::fake('public');
+
+        $employee = $this->createEmployee();
+
+        $this->postJson('/api/face/attempts', [
+            'candidate_employee_id' => $employee->employee_id,
+            'decision' => 'fallback',
+            'reason_code' => 'session_high_risk',
+            'match_score' => 0.3,
+            'liveness_score' => 0.2,
+            'quality_score' => 0.7,
+            'risk_score' => 0.8,
+            'frame_count' => 4,
+            'usable_frame_count' => 3,
+            'matched_frame_count' => 1,
+            'fallback_used' => true,
+            'device_id' => 'kiosk-1',
+            'session_id' => 'session-1',
+            'metadata' => ['confidence' => 0.4],
+            'evidence_image_base64' => $this->pngBase64('attempt'),
+        ])
+            ->assertCreated()
+            ->assertJsonPath('suspicious', true);
+
+        $attempt = FaceAttempt::query()->sole();
+
+        $this->assertTrue($attempt->suspicious);
+        $this->assertTrue($attempt->fallback_used);
+        $this->assertSame($employee->id, $attempt->employee_id);
+        $this->assertSame('session_high_risk', $attempt->reason_code);
+        $this->assertCount(1, $attempt->getMedia('face-attempt-evidence'));
+    }
+
+    private function createEmployee(string $employeeId = 'EMP-001', string $rfidUid = 'RFID-001'): Employee
     {
         return Employee::query()->create([
-            'employee_id' => 'EMP-001',
-            'rfid_uid' => 'RFID-001',
+            'employee_id' => $employeeId,
+            'rfid_uid' => $rfidUid,
             'first_name' => 'Ada',
             'last_name' => 'Lovelace',
             'middle_name' => 'Byron',

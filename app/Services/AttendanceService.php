@@ -10,6 +10,7 @@ use App\Enums\Attendance\Type;
 use App\Models\Attendance;
 use App\Models\AttendanceBreak;
 use App\Models\Employee;
+use App\Models\FaceAttempt;
 use App\Models\User;
 use App\Support\PasswordVerifier;
 use Carbon\Carbon;
@@ -43,7 +44,7 @@ class AttendanceService
                 ->first();
 
             if ($existingAttendance) {
-                return $this->withTapEvent($existingAttendance, $this->latestTapEvent($existingAttendance));
+                return $this->linkFaceAttempt($request, $this->withTapEvent($existingAttendance, $this->latestTapEvent($existingAttendance)));
             }
         }
 
@@ -56,7 +57,7 @@ class AttendanceService
             $duplicateAttendance = $this->duplicateScanAttendance($employee, $now, $request);
 
             if ($duplicateAttendance) {
-                return $this->withTapEvent($duplicateAttendance, $this->latestTapEvent($duplicateAttendance));
+                return $this->linkFaceAttempt($request, $this->withTapEvent($duplicateAttendance, $this->latestTapEvent($duplicateAttendance)));
             }
         }
 
@@ -77,15 +78,15 @@ class AttendanceService
         ]);
 
         if (! $isManualOverride && $openAttendance && $attendanceType === Type::TimeIn->value) {
-            return $this->handleAutoBreakTap($request, $now, $openAttendance);
+            return $this->linkFaceAttempt($request, $this->handleAutoBreakTap($request, $now, $openAttendance));
         }
 
         if ($attendanceType === Type::TimeIn->value) {
-            return $this->withTapEvent($this->timeIn($request, $now, $employee), self::TAP_TIME_IN);
+            return $this->linkFaceAttempt($request, $this->withTapEvent($this->timeIn($request, $now, $employee), self::TAP_TIME_IN));
         }
 
         if ($attendanceType === Type::TimeOut->value) {
-            return $this->withTapEvent($this->timeOut($request, $now, $employee), self::TAP_TIME_OUT);
+            return $this->linkFaceAttempt($request, $this->withTapEvent($this->timeOut($request, $now, $employee), self::TAP_TIME_OUT));
         }
 
         throw new \Exception('Invalid attendance type.');
@@ -132,6 +133,23 @@ class AttendanceService
         }
 
         return Type::TimeIn->value;
+    }
+
+    private function linkFaceAttempt(Request $request, Attendance $attendance): Attendance
+    {
+        if (! $request->filled('face_attempt_id')) {
+            return $attendance;
+        }
+
+        FaceAttempt::query()
+            ->whereKey($request->integer('face_attempt_id'))
+            ->whereNull('attendance_id')
+            ->update([
+                'attendance_id' => $attendance->id,
+                'fallback_used' => false,
+            ]);
+
+        return $attendance;
     }
 
     private function attendanceTimestamp(Request $request): Carbon

@@ -105,7 +105,7 @@ return [
                     'placeholder' => '3',
                     'tooltip' => 'Frames to collect after RFID, keypad, or fingerprint already identified the employee.',
                     'required' => true,
-                    'rules' => ['required', 'integer', 'min:3', 'max:10'],
+                    'rules' => ['required', 'integer', 'min:1', 'max:10'],
                 ],
                 'face_required_match_count' => [
                     'type' => TypeFieldEnum::Text->value,
@@ -113,7 +113,7 @@ return [
                     'placeholder' => '2',
                     'tooltip' => 'How many scoped usable frames must match the already identified employee.',
                     'required' => true,
-                    'rules' => ['required', 'integer', 'min:2', 'max:10'],
+                    'rules' => ['required', 'integer', 'min:1', 'max:10'],
                 ],
                 'face_only_usable_frame_target' => [
                     'type' => TypeFieldEnum::Text->value,
@@ -121,7 +121,7 @@ return [
                     'placeholder' => '5',
                     'tooltip' => 'Frames to collect when face recognition starts without RFID, keypad, or fingerprint.',
                     'required' => true,
-                    'rules' => ['required', 'integer', 'min:3', 'max:10'],
+                    'rules' => ['required', 'integer', 'min:1', 'max:10'],
                 ],
                 'face_only_required_match_count' => [
                     'type' => TypeFieldEnum::Text->value,
@@ -129,7 +129,7 @@ return [
                     'placeholder' => '3',
                     'tooltip' => 'How many face-only frames must agree on the same recognized employee.',
                     'required' => true,
-                    'rules' => ['required', 'integer', 'min:2', 'max:10'],
+                    'rules' => ['required', 'integer', 'min:1', 'max:10'],
                 ],
                 'show_face_attendance_button' => [
                     'type' => TypeFieldEnum::Boolean->value,

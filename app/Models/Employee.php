@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Services\FaceServiceClient;
 use App\Services\KioskAuthSyncService;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Model;
@@ -65,6 +66,15 @@ class Employee extends Model implements HasMedia, WebAuthnAuthenticatable
                 'role',
             ])) {
                 $employee->auth_revision = max((int) $employee->auth_revision + 1, now()->getTimestamp());
+            }
+        });
+
+        static::deleted(function (Employee $employee): void {
+            if (filled($employee->employee_id)) {
+                rescue(
+                    fn () => app(FaceServiceClient::class)->deleteEmployeeCache($employee->employee_id),
+                    report: true,
+                );
             }
         });
     }

@@ -62,19 +62,23 @@ def test_accepts_valid_quality(monkeypatch):
     assert analysis.quality["width"] == 200
 
 
-def test_enrollment_does_not_require_anti_spoofing(monkeypatch):
+def test_enrollment_allows_unconfirmed_liveness_when_optional(monkeypatch):
     from app import recognition
 
     image = np.indices((260, 260)).sum(axis=0).astype(np.uint8)
     rgb = np.stack([image, image, image], axis=2)
 
-    monkeypatch.setattr(recognition, "DeepFace", type("Fake", (), {
-        "extract_faces": staticmethod(lambda **kwargs: [{
+    def fake_extract_faces(**kwargs):
+        if kwargs.get("anti_spoofing"):
+            return []
+
+        return [{
             "facial_area": {"x": 20, "y": 20, "w": 200, "h": 200},
             "confidence": 0.99,
-            "is_real": False,
-            "antispoof_score": 0.14,
-        }]),
+        }]
+
+    monkeypatch.setattr(recognition, "DeepFace", type("Fake", (), {
+        "extract_faces": staticmethod(fake_extract_faces),
         "represent": staticmethod(lambda **kwargs: [{"embedding": np.ones(128)}]),
     }))
 
@@ -82,6 +86,31 @@ def test_enrollment_does_not_require_anti_spoofing(monkeypatch):
 
     assert analysis.embedding.shape == (128,)
     assert analysis.spoofing["checked"] is False
+
+
+def test_enrollment_rejects_confirmed_spoof(monkeypatch):
+    from app import recognition
+
+    image = np.indices((260, 260)).sum(axis=0).astype(np.uint8)
+    rgb = np.stack([image, image, image], axis=2)
+
+    def fake_extract_faces(**kwargs):
+        return [{
+            "facial_area": {"x": 20, "y": 20, "w": 200, "h": 200},
+            "confidence": 0.99,
+            "is_real": False,
+            "antispoof_score": 0.14,
+        }]
+
+    monkeypatch.setattr(recognition, "DeepFace", type("Fake", (), {
+        "extract_faces": staticmethod(fake_extract_faces),
+        "represent": staticmethod(lambda **kwargs: [{"embedding": np.ones(128)}]),
+    }))
+
+    with pytest.raises(HTTPException) as exc:
+        analyze_single_face(b"image", rgb, Settings(min_blur_score=1))
+
+    assert "Spoofed face" in exc.value.detail
 
 
 def test_recognition_rejects_dark_frames_before_matching(monkeypatch):

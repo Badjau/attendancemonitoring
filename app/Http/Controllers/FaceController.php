@@ -3,6 +3,8 @@
 namespace App\Http\Controllers;
 
 use App\Models\Employee;
+use App\Models\FaceAttempt;
+use App\Models\FaceEmbedding;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
@@ -10,6 +12,37 @@ use Illuminate\Validation\ValidationException;
 
 class FaceController extends Controller
 {
+    public function embeddingsManifest(Request $request): JsonResponse
+    {
+        $this->authorizeFaceService($request);
+
+        $embeddings = FaceEmbedding::query()
+            ->with('employee:id,employee_id')
+            ->oldest('id')
+            ->get()
+            ->filter(fn (FaceEmbedding $embedding): bool => $embedding->employee !== null)
+            ->map(fn (FaceEmbedding $embedding): array => [
+                'id' => $embedding->id,
+                'employee_id' => $embedding->employee->employee_id,
+                'embedding' => $embedding->embedding,
+                'image_hash' => $embedding->image_hash,
+                'pose_label' => $embedding->pose_label,
+                'model_name' => $embedding->model_name,
+                'detector_backend' => $embedding->detector_backend,
+                'quality' => $embedding->quality,
+                'created_at' => $embedding->created_at?->toISOString(),
+                'updated_at' => $embedding->updated_at?->toISOString(),
+            ])
+            ->values();
+
+        return response()->json([
+            'embeddings' => $embeddings,
+            'embedding_count' => $embeddings->count(),
+            'employee_count' => $embeddings->pluck('employee_id')->unique()->count(),
+            'generated_at' => now()->toISOString(),
+        ]);
+    }
+
     public function employeeEmbeddings(Request $request, Employee $employee): JsonResponse
     {
         $this->authorizeFaceService($request);
@@ -111,6 +144,73 @@ class FaceController extends Controller
             'deleted_embeddings' => $deletedEmbeddings,
             'deleted_profile_images' => $deletedProfileImages,
         ]);
+    }
+
+    public function storeAttempt(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'candidate_employee_id' => ['nullable', 'string', 'max:100'],
+            'decision' => ['required', 'string', 'in:accept,retry,fallback'],
+            'reason_code' => ['nullable', 'string', 'max:100'],
+            'match_score' => ['nullable', 'numeric', 'min:0', 'max:1'],
+            'liveness_score' => ['nullable', 'numeric', 'min:0', 'max:1'],
+            'quality_score' => ['nullable', 'numeric', 'min:0', 'max:1'],
+            'risk_score' => ['nullable', 'numeric', 'min:0', 'max:1'],
+            'frame_count' => ['nullable', 'integer', 'min:0'],
+            'usable_frame_count' => ['nullable', 'integer', 'min:0'],
+            'matched_frame_count' => ['nullable', 'integer', 'min:0'],
+            'fallback_used' => ['nullable', 'boolean'],
+            'device_id' => ['nullable', 'string', 'max:255'],
+            'session_id' => ['nullable', 'string', 'max:255'],
+            'metadata' => ['nullable', 'array'],
+            'evidence_image_base64' => ['nullable', 'string'],
+        ]);
+
+        $employee = null;
+        if (filled($validated['candidate_employee_id'] ?? null)) {
+            $employee = Employee::query()
+                ->where('employee_id', $validated['candidate_employee_id'])
+                ->first();
+        }
+
+        $riskScore = (float) ($validated['risk_score'] ?? 1.0);
+        $suspicious = $validated['decision'] !== 'accept'
+            || $riskScore >= 0.45
+            || in_array($validated['reason_code'] ?? null, ['multiple_faces', 'session_high_risk'], true);
+
+        $attempt = FaceAttempt::query()->create([
+            'employee_id' => $employee?->id,
+            'candidate_employee_identifier' => $validated['candidate_employee_id'] ?? null,
+            'decision' => $validated['decision'],
+            'reason_code' => $validated['reason_code'] ?? null,
+            'match_score' => $validated['match_score'] ?? null,
+            'liveness_score' => $validated['liveness_score'] ?? null,
+            'quality_score' => $validated['quality_score'] ?? null,
+            'risk_score' => $validated['risk_score'] ?? null,
+            'frame_count' => $validated['frame_count'] ?? 0,
+            'usable_frame_count' => $validated['usable_frame_count'] ?? 0,
+            'matched_frame_count' => $validated['matched_frame_count'] ?? 0,
+            'fallback_used' => (bool) ($validated['fallback_used'] ?? $validated['decision'] === 'fallback'),
+            'suspicious' => $suspicious,
+            'device_id' => $validated['device_id'] ?? null,
+            'session_id' => $validated['session_id'] ?? null,
+            'ip_address' => $request->ip(),
+            'user_agent' => Str::limit((string) $request->userAgent(), 1000, ''),
+            'metadata' => $validated['metadata'] ?? null,
+            'attempted_at' => now(),
+        ]);
+
+        if (filled($validated['evidence_image_base64'] ?? null)) {
+            $attempt
+                ->addMediaFromBase64($validated['evidence_image_base64'], 'image/jpeg', 'image/png')
+                ->usingFileName("face_attempt_{$attempt->id}.jpg")
+                ->toMediaCollection('face-attempt-evidence');
+        }
+
+        return response()->json([
+            'id' => $attempt->id,
+            'suspicious' => $attempt->suspicious,
+        ], 201);
     }
 
     private function compressedJpegBytes(string $base64Image): string

@@ -150,6 +150,7 @@ const kioskApiHeaders = () =>
  * @property {string} [cacheStateAtRecordTime]
  * @property {number} [matchedAuthRevision]
  * @property {any} [authMetadata]
+ * @property {number} [faceAttemptId]
  * @property {number} latitude
  * @property {number} longitude
  * @property {string} [location]
@@ -225,6 +226,9 @@ const buildAttendanceFormData = (record) => {
     }
     if (record.authMetadata) {
         formData.append('auth_metadata', JSON.stringify(record.authMetadata))
+    }
+    if (record.faceAttemptId) {
+        formData.append('face_attempt_id', String(record.faceAttemptId))
     }
     formData.append('latitude', String(record.latitude))
     formData.append('longitude', String(record.longitude))

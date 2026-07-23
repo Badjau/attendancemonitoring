@@ -6,7 +6,7 @@ from PIL import Image
 
 from app.config import Settings
 from app.main import app
-from app.recognition import detect_faces, recognize, verify_employee_face
+from app.recognition import detect_faces, recognize, recognize_face_session, verify_employee_face
 
 
 class MemoryStore:
@@ -226,12 +226,139 @@ def test_spoofed_face_is_rejected(monkeypatch):
     assert result["spoofing_passed"] is False
 
 
+def test_yunet_detection_invokes_full_frame_opencv_anti_spoofing(monkeypatch):
+    from app import recognition
+
+    calls = []
+
+    def fake_extract_faces(**kwargs):
+        calls.append(kwargs)
+        if kwargs.get("anti_spoofing"):
+            assert kwargs["detector_backend"] == "opencv"
+            assert kwargs["img_path"].shape == (240, 240, 3)
+            return [{
+                "facial_area": {"x": 10, "y": 10, "w": 200, "h": 200},
+                "confidence": 0.99,
+                "is_real": True,
+                "antispoof_score": 0.96,
+            }]
+
+        assert kwargs["detector_backend"] == "yunet"
+        return [{
+            "facial_area": {"x": 10, "y": 10, "w": 200, "h": 200},
+            "confidence": 0.99,
+        }]
+
+    monkeypatch.setattr(recognition, "DeepFace", type("Fake", (), {
+        "extract_faces": staticmethod(fake_extract_faces),
+        "represent": staticmethod(lambda **kwargs: [{"embedding": np.array([1.0, 0.0, 0.0])}]),
+    }))
+
+    result = recognize(
+        b"image",
+        np.zeros((240, 240, 3), dtype=np.uint8),
+        MemoryStore([{"employee_id": "EMP-001", "embedding": np.array([1.0, 0.0, 0.0])}]),
+        Settings(min_brightness=0, min_blur_score=0),
+    )
+
+    assert result["matched"] is True
+    assert result["spoofing_checked"] is True
+    assert [call["detector_backend"] for call in calls[:2]] == ["yunet", "opencv"]
+    assert calls[1]["anti_spoofing"] is True
+
+
+def test_no_face_detection_does_not_attempt_anti_spoofing(monkeypatch):
+    from app import recognition
+
+    calls = []
+
+    def fake_extract_faces(**kwargs):
+        calls.append(kwargs)
+        return []
+
+    monkeypatch.setattr(recognition, "DeepFace", type("Fake", (), {
+        "extract_faces": staticmethod(fake_extract_faces),
+        "represent": staticmethod(lambda **kwargs: [{"embedding": np.array([1.0, 0.0, 0.0])}]),
+    }))
+
+    result = recognize(
+        b"image",
+        np.zeros((240, 240, 3), dtype=np.uint8),
+        MemoryStore([{"employee_id": "EMP-001", "embedding": np.array([1.0, 0.0, 0.0])}]),
+        Settings(min_brightness=0, min_blur_score=0),
+    )
+
+    assert result["matched"] is False
+    assert not any(call.get("anti_spoofing") for call in calls)
+
+
+def test_face_session_rejects_spoof_before_embedding(monkeypatch):
+    from app import recognition
+
+    represent_calls = []
+
+    def fake_extract_faces(**kwargs):
+        return [{
+            "facial_area": {"x": 10, "y": 10, "w": 200, "h": 200},
+            "confidence": 0.99,
+            "is_real": not kwargs.get("anti_spoofing"),
+            "antispoof_score": 0.12 if kwargs.get("anti_spoofing") else None,
+        }]
+
+    def fake_represent(**kwargs):
+        represent_calls.append(kwargs)
+        return [{"embedding": np.array([1.0, 0.0, 0.0])}]
+
+    monkeypatch.setattr(recognition, "DeepFace", type("Fake", (), {
+        "extract_faces": staticmethod(fake_extract_faces),
+        "represent": staticmethod(fake_represent),
+    }))
+
+    result = recognize_face_session(
+        [(b"image", np.zeros((240, 240, 3), dtype=np.uint8))],
+        MemoryStore([{"employee_id": "EMP-001", "embedding": np.array([1.0, 0.0, 0.0])}]),
+        Settings(min_brightness=0, min_blur_score=0),
+    )
+
+    assert result["decision"] == "fallback"
+    assert result["reason_code"] == "spoof_detected"
+    assert represent_calls == []
+
+
 def test_anti_spoofing_unsupported_does_not_crash(monkeypatch):
     from app import recognition
 
     def fake_extract_faces(**kwargs):
         if kwargs.get("anti_spoofing"):
             raise TypeError("got an unexpected keyword argument 'anti_spoofing'")
+
+        return [{
+            "facial_area": {"x": 10, "y": 10, "w": 200, "h": 200},
+            "confidence": 0.99,
+        }]
+
+    monkeypatch.setattr(recognition, "DeepFace", type("Fake", (), {
+        "extract_faces": staticmethod(fake_extract_faces),
+        "represent": staticmethod(lambda **kwargs: [{"embedding": np.array([1.0, 0.0, 0.0])}]),
+    }))
+
+    result = recognize(
+        b"image",
+        np.zeros((240, 240, 3), dtype=np.uint8),
+        MemoryStore([{"employee_id": "EMP-001", "embedding": np.array([1.0, 0.0, 0.0])}]),
+        Settings(require_anti_spoofing=False, min_brightness=0, min_blur_score=0),
+    )
+
+    assert result["matched"] is True
+    assert result["spoofing_checked"] is False
+
+
+def test_optional_anti_spoofing_allows_unconfirmed_liveness(monkeypatch):
+    from app import recognition
+
+    def fake_extract_faces(**kwargs):
+        if kwargs.get("anti_spoofing"):
+            return []
 
         return [{
             "facial_area": {"x": 10, "y": 10, "w": 200, "h": 200},
