@@ -17,9 +17,8 @@ import { useSyncStore } from '@/Stores/sync.js'
 import {
     detectFaces,
     faceServiceHealth,
-    recognizeFaceSession,
-    recordFaceAttempt,
-    verifyEmployeeFaceSession,
+    recognizeFace,
+    verifyEmployeeFace,
 } from '@/Services/faceService.js'
 
 type AttendanceAction = 'time-in' | 'time-out'
@@ -52,7 +51,6 @@ type AuthDecision = {
 type LiveFaceMatch = {
     employee: VerifiedEmployee
     image: string
-    faceAttemptId?: number
 }
 type FaceAttemptResult = {
     matched: boolean
@@ -68,7 +66,6 @@ type FaceWindowResult = {
     validFrames: number
     matchedFrames: number
     message: string
-    faceAttemptId?: number
 }
 type RectBox = {
     x: number
@@ -603,37 +600,6 @@ const captureImage = (): string | null => {
     return canvas.toDataURL('image/jpeg', 0.72)
 }
 
-const captureFullViewImage = (): string | null => {
-    if (!videoRef.value || !canvasRef.value || !isVideoReady.value) return null
-
-    const video = videoRef.value
-    const canvas = canvasRef.value
-
-    if (video.videoWidth <= 0 || video.videoHeight <= 0) return null
-
-    const scale = Math.min(1, ATTENDANCE_IMAGE_MAX_WIDTH / video.videoWidth)
-
-    canvas.width = Math.round(video.videoWidth * scale)
-    canvas.height = Math.round(video.videoHeight * scale)
-
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return null
-
-    ctx.drawImage(
-        video,
-        0,
-        0,
-        video.videoWidth,
-        video.videoHeight,
-        0,
-        0,
-        canvas.width,
-        canvas.height,
-    )
-
-    return canvas.toDataURL('image/jpeg', 0.72)
-}
-
 const checkLiveFaceCount = async (): Promise<number | null> => {
     if (!isCameraActive.value || !isVideoReady.value || isSilentCameraCapture.value) {
         return null
@@ -848,225 +814,6 @@ const runFaceVerificationWindow = async (
             validFrames === 0
                 ? lastMessage
                 : 'Face frames did not agree. Please try again.',
-    }
-}
-
-const collectFaceSessionImages = async (targetFrames: number): Promise<string[]> => {
-    const images: string[] = []
-    const startedAt = Date.now()
-
-    while (
-        Date.now() - startedAt < faceVerificationWindowMs.value &&
-        images.length < targetFrames
-    ) {
-        const image = captureImage()
-        if (image) {
-            images.push(image)
-        }
-
-        faceStatusText.value = `Checking face...\n\nCaptured ${images.length}/${targetFrames} frames.`
-        await new Promise((resolve) => setTimeout(resolve, FACE_FRAME_RETRY_MS))
-    }
-
-    return images
-}
-
-const postFaceAttemptAudit = async (
-    result: any,
-    evidenceImageBase64?: string,
-    fallbackUsed = false,
-): Promise<number | undefined> => {
-    try {
-        const payload = await recordFaceAttempt({
-            candidate_employee_id:
-                result.employee_id ?? result.candidate_employee_id ?? undefined,
-            decision: result.decision,
-            reason_code: result.reason_code,
-            match_score: result.match_score,
-            liveness_score: result.liveness_score,
-            quality_score: result.quality_score,
-            risk_score: result.risk_score,
-            frame_count: result.frame_count,
-            usable_frame_count: result.usable_frame_count,
-            matched_frame_count: result.matched_frame_count,
-            fallback_used: fallbackUsed,
-            session_id: crypto.randomUUID?.() ?? String(Date.now()),
-            metadata: {
-                confidence: result.confidence,
-                distance: result.distance,
-                margin: result.margin,
-                face_count: result.face_count,
-            },
-            evidence_image_base64:
-                evidenceImageBase64 ?? result.evidence_image_base64 ?? undefined,
-        })
-
-        return Number(payload.id || 0) || undefined
-    } catch (error) {
-        console.error('Face attempt audit failed:', error)
-        return undefined
-    }
-}
-
-const faceAttemptReasonFromError = (error: unknown): string | null => {
-    if (!(error instanceof Error)) return 'face_service_error'
-
-    const normalized = error.message.toLowerCase()
-
-    if (normalized.includes('spoof')) return 'spoof_detected'
-    if (normalized.includes('liveness')) return 'liveness_unconfirmed'
-    if (normalized.includes('multiple')) return 'multiple_faces'
-    if (normalized.includes('no face')) return 'no_face'
-    if (normalized.includes('face service unavailable')) return null
-
-    return 'face_service_error'
-}
-
-const failedFaceAttemptFromError = (
-    error: unknown,
-    frameCount: number,
-): any | null => {
-    const reasonCode = faceAttemptReasonFromError(error)
-
-    if (!reasonCode) return null
-
-    const message = error instanceof Error
-        ? error.message
-        : 'Face verification failed.'
-
-    return {
-        decision: ['spoof_detected', 'multiple_faces'].includes(reasonCode)
-            ? 'fallback'
-            : 'retry',
-        reason_code: reasonCode,
-        risk_score: ['spoof_detected', 'multiple_faces'].includes(reasonCode)
-            ? 1
-            : 0.75,
-        frame_count: frameCount,
-        usable_frame_count: 0,
-        matched_frame_count: 0,
-        message,
-    }
-}
-
-const runFaceSessionVerification = async (
-    options: {
-        expectedEmployeeId?: string
-        targetFrames: number
-        verifier: (imageBlobs: Blob[]) => Promise<any>
-    },
-): Promise<FaceWindowResult> => {
-    let attempt = 0
-    let lastRetryResult: FaceWindowResult | null = null
-
-    while (attempt < 2) {
-        attempt++
-        const images = await collectFaceSessionImages(options.targetFrames)
-
-        if (images.length === 0) {
-            return {
-                matched: false,
-                validFrames: 0,
-                matchedFrames: 0,
-                message: 'Camera photo could not be captured.',
-            }
-        }
-
-        const evidenceImage = captureFullViewImage() ?? images[0]
-        let result
-
-        try {
-            result = await options.verifier(
-                images.map((image) => base64ToBlob(image, 'image/jpeg')),
-            )
-        } catch (error) {
-            const failedAttempt = failedFaceAttemptFromError(error, images.length)
-            const faceAttemptId = failedAttempt
-                ? await postFaceAttemptAudit(
-                      failedAttempt,
-                      evidenceImage,
-                      failedAttempt.decision === 'fallback',
-                  )
-                : undefined
-            const message = error instanceof Error
-                ? error.message
-                : 'Face session could not be accepted.'
-
-            return {
-                matched: false,
-                validFrames: 0,
-                matchedFrames: 0,
-                message,
-                faceAttemptId,
-            }
-        }
-
-        const faceAttemptId = await postFaceAttemptAudit(
-            result,
-            evidenceImage,
-            result.decision === 'fallback',
-        )
-
-        if (result.decision === 'retry' && attempt === 1) {
-            lastRetryResult = {
-                matched: false,
-                employeeId: result.candidate_employee_id ?? null,
-                image: images[0],
-                validFrames: Number(result.usable_frame_count ?? 0),
-                matchedFrames: Number(result.matched_frame_count ?? 0),
-                message: result.message || 'Face session could not be accepted.',
-                faceAttemptId,
-            }
-            faceStatusText.value = 'Face uncertain. Trying once more...'
-            await new Promise((resolve) => setTimeout(resolve, FACE_FRAME_RETRY_MS))
-            continue
-        }
-
-        if (result.decision !== 'accept') {
-            return {
-                matched: false,
-                employeeId: result.candidate_employee_id ?? null,
-                image: images[0],
-                validFrames: Number(result.usable_frame_count ?? 0),
-                matchedFrames: Number(result.matched_frame_count ?? 0),
-                message: result.message || 'Face session could not be accepted.',
-                faceAttemptId,
-            }
-        }
-
-        const employeeId = String(result.employee_id ?? '')
-        if (
-            options.expectedEmployeeId &&
-            normalizeEmployeeCode(employeeId) !==
-                normalizeEmployeeCode(options.expectedEmployeeId)
-        ) {
-            return {
-                matched: false,
-                employeeId,
-                image: images[0],
-                validFrames: Number(result.usable_frame_count ?? 0),
-                matchedFrames: Number(result.matched_frame_count ?? 0),
-                message: 'Face does not match the selected employee.',
-                faceAttemptId,
-            }
-        }
-
-        return {
-            matched: true,
-            employeeId,
-            image: images[0],
-            validFrames: Number(result.usable_frame_count ?? 0),
-            matchedFrames: Number(result.matched_frame_count ?? 0),
-            message: result.message || 'Face matched.',
-            faceAttemptId,
-        }
-    }
-
-    return lastRetryResult ?? {
-        matched: false,
-        validFrames: 0,
-        matchedFrames: 0,
-        message: 'Face frames did not agree. Please try again.',
     }
 }
 
@@ -1615,11 +1362,13 @@ const verifyLiveFaceMatchesEmployee = async (
 
     try {
         faceStatusText.value = `Checking face for ${employeeFullName(employee)}...`
-        const result = await runFaceSessionVerification({
+        const result = await runFaceVerificationWindow({
             expectedEmployeeId: employee.employee_id,
             targetFrames: scopedFaceUsableFrameTarget.value,
-            verifier: (imageBlobs) =>
-                verifyEmployeeFaceSession(employee.employee_id, imageBlobs),
+            requiredMatches: scopedFaceRequiredMatchCount.value,
+            statusPrefix: `Checking face for ${employeeFullName(employee)}...`,
+            verifier: (_image, imageBlob) =>
+                verifyEmployeeFace(employee.employee_id, imageBlob),
         })
 
         if (!result.matched || !result.image) {
@@ -1636,7 +1385,6 @@ const verifyLiveFaceMatchesEmployee = async (
         return {
             employee,
             image: result.image,
-            faceAttemptId: result.faceAttemptId,
         }
     } catch (error) {
         console.error('Face verification failed:', error)
@@ -1702,7 +1450,6 @@ const verifyEmployeeAndSubmit = async (
         employee.branch,
         matchedFace.image,
         employee.authDecision,
-        matchedFace.faceAttemptId,
     )
 
     return true
@@ -1716,9 +1463,11 @@ const submitFaceAttendance = async () => {
         await openCameraForCapture({ loadFaceVerification: true })
 
         faceStatusText.value = 'Recognizing face...'
-        const result = await runFaceSessionVerification({
+        const result = await runFaceVerificationWindow({
             targetFrames: faceOnlyUsableFrameTarget.value,
-            verifier: (imageBlobs) => recognizeFaceSession(imageBlobs),
+            requiredMatches: faceOnlyRequiredMatchCount.value,
+            statusPrefix: 'Recognizing face...',
+            verifier: (_image, imageBlob) => recognizeFace(imageBlob),
         })
 
         if (!result.matched || !result.employeeId || !result.image) {
@@ -1743,7 +1492,6 @@ const submitFaceAttendance = async () => {
             employee.branch,
             result.image,
             employee.authDecision,
-            result.faceAttemptId,
         )
     } catch (error) {
         console.error('Error submitting face attendance:', error)
@@ -2254,7 +2002,6 @@ const submitAttendance = async (
     employeeBranch?: string | null,
     image?: string,
     authDecision?: AuthDecision,
-    faceAttemptId?: number,
 ): Promise<void> => {
     const attendanceAction = attendanceType.value
 
@@ -2287,7 +2034,6 @@ const submitAttendance = async (
         cacheStateAtRecordTime: authDecision?.cacheStateAtRecordTime,
         matchedAuthRevision: authDecision?.matchedAuthRevision,
         authMetadata: authDecision?.authMetadata,
-        faceAttemptId,
         latitude: coords.value.latitude,
         longitude: coords.value.longitude,
         location: locationLabel(),

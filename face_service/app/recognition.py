@@ -197,6 +197,14 @@ def compare_probe_to_rows(probe: np.ndarray, rows: list[dict], settings: Setting
     next_distance = ranked[1][1] if len(ranked) > 1 else None
     margin = None if next_distance is None else round(next_distance - best_distance, 4)
     confidence = confidence_from_distance(best_distance, settings.match_threshold)
+    candidates = [
+        {
+            "employee_id": employee_id,
+            "distance": round(distance, 4),
+            "confidence": confidence_from_distance(distance, settings.match_threshold),
+        }
+        for employee_id, distance in ranked[:5]
+    ]
 
     if best_distance > settings.match_threshold:
         return {
@@ -207,6 +215,7 @@ def compare_probe_to_rows(probe: np.ndarray, rows: list[dict], settings: Setting
             "distance": round(best_distance, 4),
             "margin": margin,
             "message": "Face not recognized.",
+            "candidates": candidates,
         }
 
     if margin is not None and margin < settings.ambiguous_margin:
@@ -218,6 +227,7 @@ def compare_probe_to_rows(probe: np.ndarray, rows: list[dict], settings: Setting
             "distance": round(best_distance, 4),
             "margin": margin,
             "message": "Face match is ambiguous. Please try again.",
+            "candidates": candidates,
         }
 
     return {
@@ -227,6 +237,7 @@ def compare_probe_to_rows(probe: np.ndarray, rows: list[dict], settings: Setting
         "distance": round(best_distance, 4),
         "margin": margin,
         "message": "Face matched.",
+        "candidates": candidates,
     }
 
 
@@ -1206,6 +1217,68 @@ def face_box_motion_score(boxes: list[dict]) -> float:
     return round(max(0.0, min(1.0, float(np.mean(deltas)) * 4.0)), 4)
 
 
+def session_candidate_scores(
+    usable_frames: list[dict],
+    settings: Settings,
+    expected_employee_id: str | None = None,
+) -> list[dict]:
+    distances_by_employee: dict[str, list[float]] = {}
+    wins_by_employee: dict[str, int] = {}
+
+    for frame in usable_frames:
+        top_employee_id = None
+        for candidate in frame.get("candidates") or []:
+            employee_id = str(candidate.get("employee_id") or "")
+            if not employee_id:
+                continue
+
+            if expected_employee_id is not None and employee_id != str(expected_employee_id):
+                continue
+
+            try:
+                distance = float(candidate["distance"])
+            except (KeyError, TypeError, ValueError):
+                continue
+
+            distances_by_employee.setdefault(employee_id, []).append(distance)
+            if top_employee_id is None:
+                top_employee_id = employee_id
+
+        if top_employee_id:
+            wins_by_employee[top_employee_id] = wins_by_employee.get(top_employee_id, 0) + 1
+
+    scores = []
+    for employee_id, distances in distances_by_employee.items():
+        median_distance = float(np.median(distances))
+        mean_distance = float(np.mean(distances))
+        scores.append({
+            "employee_id": employee_id,
+            "median_distance": median_distance,
+            "mean_distance": mean_distance,
+            "frame_count": len(distances),
+            "win_count": wins_by_employee.get(employee_id, 0),
+            "confidence": confidence_from_distance(
+                median_distance,
+                getattr(settings, "match_threshold", 0.34),
+            ),
+        })
+
+    coverage_floor = max(
+        settings.session_min_usable_frames,
+        int(np.ceil(len(usable_frames) * 0.6)),
+    )
+
+    return sorted(
+        scores,
+        key=lambda item: (
+            item["frame_count"] < coverage_floor,
+            item["median_distance"],
+            item["mean_distance"],
+            -item["win_count"],
+        ),
+    )
+
+
 def analyze_session_frame(
     content: bytes,
     rgb: np.ndarray,
@@ -1341,13 +1414,53 @@ def aggregate_face_session(
     elif matches_by_employee:
         employee_id, employee_matches = max(matches_by_employee.items(), key=lambda item: len(item[1]))
 
+    session_candidates = session_candidate_scores(usable_frames, settings, expected_employee_id)
+    session_candidate = session_candidates[0] if session_candidates else None
+    session_candidate_margin = None
+    if session_candidate and len(session_candidates) > 1:
+        session_candidate_margin = round(
+            session_candidates[1]["median_distance"] - session_candidate["median_distance"],
+            4,
+        )
+
+    match_threshold = getattr(settings, "match_threshold", 0.34)
+    ambiguous_margin = getattr(settings, "ambiguous_margin", 0.06)
+    session_candidate_is_clear = bool(
+        session_candidate
+        and session_candidate["frame_count"] >= max(
+            settings.session_min_usable_frames,
+            int(np.ceil(len(usable_frames) * 0.6)),
+        )
+        and session_candidate["median_distance"] <= match_threshold
+        and (
+            expected_employee_id is not None
+            or session_candidate_margin is None
+            or session_candidate_margin >= ambiguous_margin
+            or session_candidate["win_count"] > session_candidates[1]["win_count"]
+        )
+    )
+    if session_candidate_is_clear:
+        employee_id = session_candidate["employee_id"]
+        employee_matches = [
+            frame for frame in usable_frames
+            if str(frame.get("employee_id") or "") == employee_id
+        ]
+
+    minimum_match_frames = max(1, settings.session_min_usable_frames)
+    majority_match_frames = max(2, int(np.ceil(len(usable_frames) / 2.0)))
     consistency_score = (
-        len(employee_matches) / max(1, len(usable_frames))
-        if employee_matches
+        max(
+            len(employee_matches),
+            session_candidate["win_count"] if session_candidate_is_clear else 0,
+        )
+        / max(1, len(usable_frames))
+        if employee_matches or session_candidate_is_clear
         else 0.0
     )
     best_match = max(employee_matches, key=lambda frame: float(frame.get("confidence") or 0.0), default=None)
     confidence = float(best_match.get("confidence") or 0.0) if best_match else 0.0
+    if session_candidate_is_clear:
+        confidence = max(confidence, float(session_candidate["confidence"]))
     match_score = round((confidence * 0.65) + (consistency_score * 0.35), 4)
     liveness_frames = usable_frames or single_face_frames
     liveness_score = round(float(np.mean([frame.get("liveness_score", 0.55) for frame in liveness_frames])) if liveness_frames else 0.0, 4)
@@ -1371,6 +1484,16 @@ def aggregate_face_session(
         4,
     )
     risk_score = round(max(0.0, min(1.0, 1.0 - combined_score)), 4)
+    candidate_summary = [
+        (
+            candidate["employee_id"],
+            round(candidate["median_distance"], 4),
+            round(candidate["mean_distance"], 4),
+            candidate["frame_count"],
+            candidate["win_count"],
+        )
+        for candidate in session_candidates[:5]
+    ]
 
     if decision != "fallback":
         if has_confirmed_spoof:
@@ -1384,7 +1507,10 @@ def aggregate_face_session(
             reason_code = "insufficient_usable_frames"
         elif (
             employee_id
-            and len(employee_matches) >= max(2, int(np.ceil(len(usable_frames) / 2.0)))
+            and (
+                len(employee_matches) >= minimum_match_frames
+                or session_candidate_is_clear
+            )
             and combined_score >= settings.session_accept_score
         ):
             decision = "accept"
@@ -1392,12 +1518,29 @@ def aggregate_face_session(
         elif combined_score < settings.session_retry_score:
             decision = "fallback"
             reason_code = "session_high_risk"
-        elif employee_id and len(employee_matches) < max(2, int(np.ceil(len(usable_frames) / 2.0))):
+        elif employee_id and len(employee_matches) < majority_match_frames:
             decision = "retry"
-            reason_code = "identity_changed"
+            reason_code = "match_inconsistent"
 
     if employee_id is None and expected_employee_id:
         employee_id = expected_employee_id if decision != "accept" else None
+
+    logger.info(
+        "face_session_aggregate decision=%s reason=%s employee_id=%s usable=%s matched=%s min_matches=%s majority=%s confidence=%s match_score=%s combined_score=%s session_candidate=%s session_candidate_clear=%s candidates=%s",
+        decision,
+        reason_code,
+        employee_id,
+        len(usable_frames),
+        len(employee_matches),
+        minimum_match_frames,
+        majority_match_frames,
+        round(confidence, 4),
+        match_score,
+        combined_score,
+        session_candidate,
+        session_candidate_is_clear,
+        candidate_summary,
+    )
 
     messages = {
         "session_accepted": "Face session accepted.",
@@ -1406,7 +1549,7 @@ def aggregate_face_session(
         "insufficient_usable_frames": "Not enough usable face frames. Please try again.",
         "session_high_risk": "Face verification is uncertain. Use RFID, keypad, or fingerprint.",
         "session_uncertain": "Face frames did not agree. Please try again.",
-        "identity_changed": "Face identity changed during verification. Please try again.",
+        "match_inconsistent": "Face frames matched inconsistently. Please try again.",
         "spoof_detected": "Spoofed face detected. Use RFID, keypad, or fingerprint.",
         "liveness_unconfirmed": "Face detected, but liveness could not confirm it. Please try again.",
     }
@@ -1425,8 +1568,16 @@ def aggregate_face_session(
         "usable_frame_count": len(usable_frames),
         "matched_frame_count": len(employee_matches),
         "face_count": face_count,
-        "distance": best_match.get("distance") if best_match else None,
-        "margin": best_match.get("margin") if best_match else None,
+        "distance": (
+            round(session_candidate["median_distance"], 4)
+            if session_candidate_is_clear
+            else best_match.get("distance") if best_match else None
+        ),
+        "margin": (
+            session_candidate_margin
+            if session_candidate_is_clear
+            else best_match.get("margin") if best_match else None
+        ),
         "message": messages.get(reason_code, "Face session could not be accepted."),
         "evidence_image_base64": evidence_image_base64,
         "frames": frame_results,

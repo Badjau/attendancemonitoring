@@ -245,16 +245,21 @@ class HomeScanFeedbackTest extends TestCase
         $this->assertStringContainsString('faceServiceHealth()', $cameraCard);
         $this->assertStringContainsString('FACE_SERVICE_UNAVAILABLE_MESSAGE', $cameraCard);
         $this->assertStringNotContainsString('FACE_CAPTURE_STABILIZE_MS', $cameraCard);
+        $this->assertStringContainsString('verifyEmployeeFace(employee.employee_id, imageBlob)', $cameraCard);
+        $this->assertStringContainsString('recognizeFace(imageBlob)', $cameraCard);
+        $this->assertStringContainsString('requiredMatches: faceOnlyRequiredMatchCount.value', $cameraCard);
+        $this->assertStringContainsString('targetFrames: faceOnlyUsableFrameTarget.value', $cameraCard);
+        $this->assertStringContainsString('matchedFrames >= options.requiredMatches', $cameraCard);
+        $this->assertStringContainsString('validFrames < options.targetFrames', $cameraCard);
         $this->assertStringContainsString('v-if="showFaceCheckOnly"', $cameraCard);
         $this->assertStringContainsString('v-if="!showFaceCheckOnly"', $cameraCard);
         $this->assertStringContainsString('data-face-auth-status="checking-employee"', $cameraCard);
         $this->assertStringContainsString('<div v-else class="w-full">', $cameraCard);
         $this->assertStringContainsString('{{ scannerStatusText }}', $cameraCard);
         $this->assertStringContainsString('{{ processingLabel }}', $cameraCard);
-        $this->assertStringContainsString('const captureFullViewImage = (): string | null =>', $cameraCard);
-        $this->assertStringContainsString('const evidenceImage = captureFullViewImage() ?? images[0]', $cameraCard);
-        $this->assertStringContainsString('evidenceImageBase64 ?? result.evidence_image_base64 ?? undefined', $cameraCard);
-        $this->assertStringContainsString('postFaceAttemptAudit(', $cameraCard);
+        $this->assertStringNotContainsString('runFaceSessionVerification', $cameraCard);
+        $this->assertStringNotContainsString('recognizeFaceSession', $cameraCard);
+        $this->assertStringNotContainsString('verifyEmployeeFaceSession', $cameraCard);
         $this->assertStringContainsString(
             'data-scanner-status-version="20260715-always-on"',
             $cameraCard,
