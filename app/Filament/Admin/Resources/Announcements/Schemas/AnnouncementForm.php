@@ -35,7 +35,7 @@ class AnnouncementForm
 
                 Select::make('status')
                     ->options(Status::class)
-                    ->default(Status::DRAFT->value)
+                    ->default(Status::PUBLISHED->value)
                     ->live(onBlur: true)
                     ->afterStateUpdated(fn (Set $set, $state) => $state === Status::PUBLISHED->value ? $set('published_at', Carbon::now()) : null)
                     ->required(),

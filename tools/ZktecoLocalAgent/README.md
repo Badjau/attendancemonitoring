@@ -50,9 +50,9 @@ The installer writes these values into `appsettings.json` for the installed agen
   The Laravel base endpoint for ZKTeco API calls. This should be your Laravel app URL plus `/api/zkteco`.
 
   Examples:
-  - `http://attendancemonitoring.test/api/zkteco`
-  - `http://127.0.0.1:8000/api/zkteco`
-  - `https://your-domain/api/zkteco`
+  - `https://attendancemonitoring.test/api/zkteco`
+  - `https://SERVER_IP/api/zkteco`
+  - `http://127.0.0.1:8000/api/zkteco` only when `php artisan serve` is actually running on port `8000`
 
 - `ScannerToken`
   Bearer token used by the agent when calling Laravel. This must match `ZKTECO_SCANNER_TOKEN` in Laravel `.env`.
@@ -80,6 +80,8 @@ dotnet publish .\tools\ZktecoLocalAgent\ZktecoLocalAgent.csproj -c Release -r wi
 
 `dotnet build` is useful as a compile check, but the installer copies from `tools\ZktecoLocalAgent\publish`. Always run `dotnet publish` before reinstalling the agent.
 
+`tools\install-https-autostart.cmd` configures Apache HTTPS and Laravel startup. It does not publish, install, or reconfigure this fingerprint agent.
+
 ## Install On The Scanner PC
 
 Run the installer after publishing:
@@ -87,10 +89,12 @@ Run the installer after publishing:
 cd C:\laragon\www\attendancemonitoring\
 ```powershell
 .\tools\ZktecoLocalAgent\Installer\install-agent.ps1 `
-  -ApiBaseUrl "https://YOUR-APP-URL/api/zkteco" `
+  -ApiBaseUrl "https://attendancemonitoring.test/api/zkteco" `
   -ScannerToken "YOUR-SCANNER-TOKEN" `
   -DeviceSerial "ZKTECO-LOCAL"
 ```
+
+For LAN/server testing, use `https://SERVER_IP/api/zkteco` as `ApiBaseUrl`.
 
 What the installer does:
 
@@ -105,6 +109,8 @@ Default install location:
 ```text
 %LOCALAPPDATA%\ZktecoLocalAgent
 ```
+
+The installed `%LOCALAPPDATA%\ZktecoLocalAgent\appsettings.json` is the runtime config. Editing the source `tools\ZktecoLocalAgent\appsettings.json` does not change an already installed agent.
 
 ## Verify The Agent Is Running
 
@@ -232,7 +238,7 @@ To reinstall without hiding startup errors, run the installer with `-NoStart`, t
 
 ```powershell
 .\tools\ZktecoLocalAgent\Installer\install-agent.ps1 `
-  -ApiBaseUrl "https://YOUR-APP-URL/api/zkteco" `
+  -ApiBaseUrl "https://attendancemonitoring.test/api/zkteco" `
   -ScannerToken "YOUR-SCANNER-TOKEN" `
   -DeviceSerial "ZKTECO-LOCAL" `
   -NoStart
@@ -288,6 +294,12 @@ Check:
 - `ApiBaseUrl` points to the correct Laravel server
 - `ScannerToken` exactly matches `ZKTECO_SCANNER_TOKEN` in Laravel `.env`
 - the server route `/api/zkteco/...` is reachable from the scanner PC
+
+### Sync fails with `127.0.0.1:8000` connection refused
+
+The installed agent is pointing at Laravel's built-in dev server URL. Laragon Apache normally listens on port `80` or `443`, not `8000`.
+
+Open `%LOCALAPPDATA%\ZktecoLocalAgent\appsettings.json`, set `ApiBaseUrl` to the real Laravel URL such as `https://attendancemonitoring.test/api/zkteco` or `https://SERVER_IP/api/zkteco`, keep `LocalListenUrl` as `http://127.0.0.1:8765`, and restart the agent.
 
 ## Files Worth Knowing
 

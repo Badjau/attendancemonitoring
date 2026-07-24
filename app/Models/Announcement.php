@@ -18,7 +18,7 @@ class Announcement extends Model implements HasMedia
     use InteractsWithMedia;
     use SoftDeletes;
 
-    public const HOME_CACHE_KEY = 'announcements_pinned_published';
+    public const HOME_CACHE_KEY = 'announcements_home_visible_v2';
 
     protected $fillable = [
         'title',

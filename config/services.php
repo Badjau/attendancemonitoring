@@ -49,4 +49,12 @@ return [
         'token' => env('FACE_EMBEDDINGS_TOKEN', ''),
     ],
 
+    'kiosk_auth' => [
+        'hash_salt' => env('KIOSK_AUTH_HASH_SALT', env('APP_KEY', 'attendance-monitoring')),
+    ],
+
+    'kiosk' => [
+        'token' => env('KIOSK_API_TOKEN', ''),
+    ],
+
 ];

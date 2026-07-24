@@ -4,7 +4,15 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="csrf-token" content="{{ csrf_token() }}">
+    <meta name="theme-color" content="#001e1d">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="shortcut icon" href="{{ asset('images/logo-ico.png') }}" type="image/x-icon">
+    <link rel="apple-touch-icon" href="{{ asset('images/logo-ico.png') }}">
+    <link rel="manifest" href="{{ asset('manifest.json') }}">
     <title>Admin Login</title>
+    <script defer src="{{ asset('js/kiosk-fullscreen.js') }}"></script>
     <style>
         body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #abd1c6; color: #001e1d; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
         main { width: min(92vw, 420px); border: 2px solid #001e1d; border-radius: 24px; background: #fffffe; padding: 32px; box-shadow: 10px 10px 0 #001e1d; }

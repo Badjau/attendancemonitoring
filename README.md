@@ -276,6 +276,7 @@ For normal server testing, use built assets instead of Vite:
 ```bat
 npm run build
 php artisan optimize:clear
+php artisan view:cache
 ```
 
 If the browser keeps trying to load Vite on port `5174` when Vite is not running, remove the hot file and rebuild:
@@ -576,6 +577,7 @@ Clear caches and rebuild:
 ```bat
 php artisan optimize:clear
 npm run build
+php artisan view:cache
 ```
 
 If Vite is referenced when it should not be:
@@ -653,6 +655,7 @@ Then run:
 ```bat
 php artisan optimize:clear
 npm run build
+php artisan view:cache
 ```
 
 Restart Apache and the face service.
@@ -665,6 +668,7 @@ Use this when the LAN site is in a weird state:
 cd C:\laragon\www\attendancemonitoring
 php artisan optimize:clear
 npm run build
+php artisan view:cache
 ```
 
 Start Laragon Apache and MySQL, then open:

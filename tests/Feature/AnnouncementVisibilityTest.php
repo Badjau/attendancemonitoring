@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Enums\Announcement\Status;
 use App\Enums\Announcement\Type;
+use App\Filament\Admin\Resources\Announcements\Pages\CreateAnnouncement;
 use App\Models\Announcement;
 use App\Models\User;
 use App\Services\HomeService;
@@ -35,6 +36,34 @@ class AnnouncementVisibilityTest extends TestCase
 
         $announcements = app(HomeService::class)->getAnnouncements();
 
+        $this->assertTrue($announcements->contains('id', $announcement->id));
+
+        Carbon::setTestNow();
+    }
+
+    public function test_admin_created_published_announcements_are_home_visible_by_default(): void
+    {
+        Carbon::setTestNow('2026-06-18 09:00:00');
+
+        $user = User::factory()->create();
+        $this->actingAs($user);
+
+        $data = (new CreateAnnouncement)->mutateFormDataBeforeCreate([
+            'title' => 'Morning update',
+            'content' => 'Visible on the home page.',
+            'type' => Type::GENERAL->value,
+            'status' => Status::PUBLISHED->value,
+            'published_at' => null,
+            'expires_at' => Carbon::today()->addDay(),
+            'is_pinned' => true,
+        ]);
+
+        $announcement = Announcement::query()->create($data);
+
+        $announcements = app(HomeService::class)->getAnnouncements();
+
+        $this->assertSame($user->id, $announcement->created_by);
+        $this->assertNotNull($announcement->published_at);
         $this->assertTrue($announcements->contains('id', $announcement->id));
 
         Carbon::setTestNow();

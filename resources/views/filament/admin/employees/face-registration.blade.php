@@ -1,8 +1,12 @@
+@php($attendanceScheduleSettings = app(\App\Services\AttendanceScheduleSettings::class))
+
 <div
     class="space-y-4"
     x-data="faceRegistration({
         employeeId: @js($employee->employee_id),
         hasRegisteredFace: @js(filled($employee->employeeProfileUrl()) || $employee->faceEmbeddings()->exists()),
+        faceCaptureWidthRatio: @js($attendanceScheduleSettings->faceCaptureWidthRatio()),
+        faceCaptureHeightRatio: @js($attendanceScheduleSettings->faceCaptureHeightRatio()),
     })"
 >
     <div
@@ -54,6 +58,7 @@
                     x-show="! isReviewingCapture"
                     class="pointer-events-none absolute left-1/2 top-1/2 h-[76%] w-[30%] -translate-x-1/2 -translate-y-1/2 rounded-[50%] border-4 bg-transparent transition"
                     :class="ovalStatusClass"
+                    :style="captureZoneStyle"
                 ></div>
 
                 <div
@@ -95,6 +100,7 @@
             <div class="rounded-lg border border-gray-200 bg-white p-4 text-sm dark:border-gray-700 dark:bg-gray-900">
                 <div class="text-xs font-semibold uppercase text-gray-500 dark:text-gray-400">Status</div>
                 <div class="mt-1 font-medium text-gray-950 dark:text-white" x-text="statusText"></div>
+                <div class="mt-2 text-xs font-semibold uppercase text-gray-500 dark:text-gray-400" x-text="`Pose: ${currentPoseLabel}`"></div>
                 <div class="mt-2 text-xs font-medium text-warning-600 dark:text-warning-400">
                     FastAPI validates face count, blur, brightness, and face size before saving each capture.
                 </div>

@@ -20,15 +20,18 @@ class HomeController extends Controller
         $todayBirthdayCelebrants = $this->homeService->getTodayBirthdayCelebrants();
         $announcements = $this->homeService->getAnnouncements();
         $employeesWithFaces = $this->homeService->getEmployeesWithFaces();
+        $branches = $this->homeService->getActiveBranches();
 
         return Inertia::render('Home', [
             'attendanceToday' => $attendanceToday,
             'todayBirthdayCelebrants' => $todayBirthdayCelebrants,
             'announcements' => $announcements,
+            'branches' => $branches,
             'employeesWithFaces' => $employeesWithFaces,
             'attendanceSchedule' => $this->attendanceScheduleSettings->toArray(),
             'scanStatusMessages' => $this->attendanceScheduleSettings->scanStatusMessages(),
             'zktecoBridgeUrl' => config('services.zkteco.bridge_url'),
+            'kioskApiToken' => config('services.kiosk.token'),
         ]);
     }
 }

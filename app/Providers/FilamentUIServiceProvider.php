@@ -44,6 +44,14 @@ class FilamentUIServiceProvider extends ServiceProvider
                 return $component->getLabel();
             });
 
+            $field->hintIcon(function (Component $component): ?string {
+                return self::attendanceFlowTooltip($component->getName()) === null
+                    ? null
+                    : 'heroicon-m-question-mark-circle';
+            }, function (Component $component): ?string {
+                return self::attendanceFlowTooltip($component->getName());
+            });
+
             return $field;
         });
 
@@ -107,5 +115,17 @@ class FilamentUIServiceProvider extends ServiceProvider
         Table::configureUsing(function (Table $table) {
             return $table->defaultSort('created_at', 'desc');
         });
+    }
+
+    private static function attendanceFlowTooltip(string $fieldName): ?string
+    {
+        $fieldName = str($fieldName)->afterLast('.')->toString();
+        $fieldConfig = config("filament-general-settings.custom_tabs.more_configs.fields.{$fieldName}");
+
+        if (! is_array($fieldConfig) || blank($fieldConfig['tooltip'] ?? null)) {
+            return null;
+        }
+
+        return __($fieldConfig['tooltip']);
     }
 }

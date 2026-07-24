@@ -39,5 +39,8 @@ Homestead.json
 auth.json
 
 face_service/.venv
+face_service/venv
+face_service/data
+face_service/faces.sqlite
 
 AGENTS.md

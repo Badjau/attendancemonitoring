@@ -162,6 +162,7 @@ class EmployeeWebAuthnController extends Controller
 
             return response()->json([
                 'message' => 'Attendance recorded successfully.',
+                'tap_event' => $attendance->tap_event,
                 'employee' => [
                     'id' => $employee->id,
                     'employee_id' => $employee->employee_id,
@@ -173,6 +174,7 @@ class EmployeeWebAuthnController extends Controller
                     'first_name' => $employee->first_name,
                     'is_birthday' => $employee->date_of_birth?->isBirthday() ?? false,
                     'attendance_type' => $attendance->attendance_type->value,
+                    'tap_event' => $attendance->tap_event,
                 ],
             ]);
         } catch (ValidationException $exception) {

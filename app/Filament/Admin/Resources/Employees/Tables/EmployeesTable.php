@@ -18,7 +18,7 @@ class EmployeesTable
     public static function configure(Table $table): Table
     {
         return $table
-            ->modifyQueryUsing(fn ($query) => $query->with('latestZktecoFingerprintTemplate'))
+            ->modifyQueryUsing(fn ($query) => $query->with(['branches', 'latestZktecoFingerprintTemplate']))
             ->columns([
                 TextColumn::make('employee_id')
                     ->label('Employee ID')
@@ -48,7 +48,9 @@ class EmployeesTable
                     ->placeholder('-')
                     ->toggleable(),
 
-                TextColumn::make('branch')
+                TextColumn::make('branches.name')
+                    ->label('Branches')
+                    ->badge()
                     ->searchable()
                     ->sortable(),
 
@@ -93,8 +95,9 @@ class EmployeesTable
                     ->searchable()
                     ->preload(),
 
-                SelectFilter::make('branch')
-                    ->options(Employee::branchOptions())
+                SelectFilter::make('branches')
+                    ->label('Branch')
+                    ->relationship('branches', 'name')
                     ->searchable(),
 
                 SelectFilter::make('position'),

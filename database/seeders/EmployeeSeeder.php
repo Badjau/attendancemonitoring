@@ -2,6 +2,8 @@
 
 namespace Database\Seeders;
 
+use App\Models\Branch;
+use App\Models\Employee;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\DB;
 
@@ -28,6 +30,18 @@ class EmployeeSeeder extends Seeder
 
         foreach ($employees as $employee) {
             DB::table('employees')->updateOrInsert(['employee_id' => $employee['employee_id']], $employee);
+
+            $employeeModel = Employee::query()
+                ->where('employee_id', $employee['employee_id'])
+                ->first();
+
+            $branch = Branch::query()->where('name', 'Esquivel')->first();
+
+            if ($employeeModel && $branch) {
+                $employeeModel->branches()->syncWithoutDetaching([
+                    $branch->id => ['is_primary' => true],
+                ]);
+            }
         }
     }
 }

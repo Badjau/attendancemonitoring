@@ -70,8 +70,31 @@ class AttendanceInfolist
                         TextEntry::make('total_hours')
                             ->label('Total Hours')
                             ->state(fn (Attendance $record): string => $record->formattedDailyTotalHours()),
+
+                        TextEntry::make('break_count')
+                            ->label('Breaks')
+                            ->state(fn (Attendance $record): string => (string) $record->break_count),
+
+                        TextEntry::make('break_minutes')
+                            ->label('Break Minutes')
+                            ->state(fn (Attendance $record): string => "{$record->break_minutes} min"),
+
+                        TextEntry::make('break_exceeded_minutes')
+                            ->label('Break Overage')
+                            ->state(fn (Attendance $record): string => "{$record->break_exceeded_minutes} min"),
                     ])
                     ->columns(4)
+                    ->columnSpanFull(),
+
+                Section::make('Break Intervals')
+                    ->schema([
+                        ViewEntry::make('break_intervals')
+                            ->label('')
+                            ->state(fn (Attendance $record): array => [
+                                'breaks' => $record->breaks()->get(),
+                            ])
+                            ->view('filament.admin.resources.attendances.break-intervals'),
+                    ])
                     ->columnSpanFull(),
 
                 Section::make('Status')

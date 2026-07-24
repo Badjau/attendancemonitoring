@@ -101,6 +101,7 @@ public sealed record CommandEvent(
     [property: JsonPropertyName("employee_branch")] string? EmployeeBranch = null,
     [property: JsonPropertyName("is_birthday")] bool IsBirthday = false,
     [property: JsonPropertyName("attendance_type")] string? AttendanceType = null,
+    [property: JsonPropertyName("tap_event")] string? TapEvent = null,
     [property: JsonPropertyName("template_id")] int? TemplateId = null,
     [property: JsonPropertyName("score")] int? Score = null,
     [property: JsonPropertyName("fingerprint_image_base64")] string? FingerprintImageBase64 = null,

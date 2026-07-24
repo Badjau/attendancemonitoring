@@ -14,14 +14,22 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useToast } from 'primevue'
 import { useGeolocator } from '@/Composables/useGeolocator.js'
 import { useSyncStore } from '@/Stores/sync.js'
-import { recognizeFace, verifyEmployeeFace } from '@/Services/faceService.js'
+import {
+    detectFaces,
+    faceServiceHealth,
+    recognizeFaceSession,
+    recordFaceAttempt,
+    verifyEmployeeFaceSession,
+} from '@/Services/faceService.js'
 
 type AttendanceAction = 'time-in' | 'time-out'
+type TapEvent = 'time-in' | 'break-start' | 'break-end' | 'time-out'
 type AttendanceMethod = 'rfid' | 'keypad' | 'fingerprint' | 'face'
 type AttendanceGreeting = {
     first_name: string
     is_birthday: boolean
     attendance_type: AttendanceAction
+    tap_event?: TapEvent
 }
 type VerifiedEmployee = {
     id: number
@@ -31,17 +39,59 @@ type VerifiedEmployee = {
     position: string
     branch?: string | null
     profile_url?: string | null
+    face_ready?: boolean
+    face_enrollment_count?: number
+    authDecision?: AuthDecision
+}
+type AuthDecision = {
+    authCacheRevision?: number
+    cacheStateAtRecordTime?: string
+    matchedAuthRevision?: number
+    authMetadata?: Record<string, any>
 }
 type LiveFaceMatch = {
     employee: VerifiedEmployee
     image: string
+    faceAttemptId?: number
+}
+type FaceAttemptResult = {
+    matched: boolean
+    employeeId?: string | null
+    image: string
+    message: string
+    faceCount: number
+}
+type FaceWindowResult = {
+    matched: boolean
+    employeeId?: string | null
+    image?: string
+    validFrames: number
+    matchedFrames: number
+    message: string
+    faceAttemptId?: number
+}
+type RectBox = {
+    x: number
+    y: number
+    width: number
+    height: number
 }
 type AttendanceSchedule = {
     time_in_start: string
     time_out_start: string
+    max_breaks_per_day: string
+    first_break_limit_minutes: string
+    additional_break_limit_minutes: string
     duplicate_scan_window_seconds: string
+    same_employee_auth_cooldown_minutes: string
+    face_capture_width_ratio: string
+    face_capture_height_ratio: string
+    face_verification_window_ms: string
+    face_usable_frame_target: string
+    face_required_match_count: string
+    face_only_usable_frame_target: string
+    face_only_required_match_count: string
     show_face_attendance_button: boolean
-    show_scan_status_messages: boolean
 }
 type ScanStatusMessages = {
     idle: string
@@ -58,6 +108,7 @@ const props = defineProps<{
     attendanceSchedule: AttendanceSchedule
     scanStatusMessages: ScanStatusMessages
     zktecoBridgeUrl: string
+    geolocator?: any
 }>()
 
 const emit = defineEmits<{
@@ -66,6 +117,7 @@ const emit = defineEmits<{
 
 const toast = useToast()
 const syncStore = useSyncStore()
+const activeGeolocator = props.geolocator ?? useGeolocator()
 const {
     coords,
     error: locationError,
@@ -75,7 +127,7 @@ const {
     usingCachedLocation,
     locationSource,
     getLocation,
-} = useGeolocator()
+} = activeGeolocator
 
 const attendanceType = ref<AttendanceAction | ''>('')
 const videoRef = ref<HTMLVideoElement | null>(null)
@@ -107,7 +159,9 @@ let stream: MediaStream | null = null
 let interval: ReturnType<typeof setInterval>
 let clockSyncInterval: ReturnType<typeof setInterval>
 let focusInterval: ReturnType<typeof setInterval>
+let locationWarmupInterval: ReturnType<typeof setInterval>
 let faceDetectionInterval: ReturnType<typeof setInterval> | null = null
+let liveFaceDetectionInterval: ReturnType<typeof setInterval> | null = null
 let autoFingerprintTimeout: ReturnType<typeof setTimeout> | null = null
 let scannerStatusResetTimeout: ReturnType<typeof setTimeout> | null = null
 let rfidTimeout: any = null
@@ -115,18 +169,83 @@ let isAutoFingerprintScanActive = false
 let autoFingerprintScanVersion = 0
 let zktecoEvents: EventSource | null = null
 let scannerStatusHoldUntil = 0
+let rfidScanStartedAt = 0
+let rfidLastKeyAt = 0
+let rfidKeyCount = 0
 
 const lastScannedTime = ref(0)
 const SCAN_COOLDOWN_MS = 1000
+const RFID_SCAN_MIN_LENGTH = 6
+const RFID_SCAN_IDLE_RESET_MS = 120
+const RFID_SCAN_MAX_TOTAL_MS = 350
+const RFID_SCAN_MAX_AVG_KEY_MS = 45
 const AUTO_FINGERPRINT_RETRY_MS = 500
 const AUTO_FINGERPRINT_SCAN_WINDOW_MS = 120000
 const CLOCK_SYNC_INTERVAL_MS = 60 * 60 * 1000
+const LOCATION_WARMUP_RETRY_MS = 5000
 const CLOCK_OFFSET_STORAGE_KEY = 'timeclock.clockOffsetMs'
 const CLOCK_TIME_ZONE = 'Asia/Manila'
 const ATTENDANCE_IMAGE_MAX_WIDTH = 960
-const FACE_ACTIVE_ZONE_WIDTH_RATIO = 0.58
-const FACE_ACTIVE_ZONE_HEIGHT_RATIO = 0.78
+const FACE_MULTI_WARNING_MESSAGE =
+    'Multiple faces detected. Please step out of the camera view.'
+const FACE_WAITING_MESSAGE = 'Waiting for face...'
+const FACE_DETECTION_POLL_MS = 900
+const FACE_FRAME_RETRY_MS = 250
+const FACE_SERVICE_UNAVAILABLE_MESSAGE = 'Face service unavailable.'
+const FACE_READY_REQUIRED_COUNT = 3
+const VISIBLE_FACE_GUIDE_ASPECT_RATIO = 1.45
+const VISIBLE_FACE_GUIDE_MAX_WIDTH = 340
+const VISIBLE_FACE_GUIDE_MIN_WIDTH = 220
 let clockOffsetMs = 0
+const ratioSetting = (value: string | number | undefined, fallback: number): number => {
+    const ratio = Number(value)
+
+    if (!Number.isFinite(ratio)) return fallback
+
+    return Math.max(0.25, Math.min(1, ratio))
+}
+const integerSetting = (
+    value: string | number | undefined,
+    fallback: number,
+    min: number,
+    max: number,
+): number => {
+    const integer = Number(value)
+
+    if (!Number.isFinite(integer)) return fallback
+
+    return Math.max(min, Math.min(max, Math.trunc(integer)))
+}
+const faceActiveZoneWidthRatio = computed(() =>
+    ratioSetting(props.attendanceSchedule.face_capture_width_ratio, 0.5),
+)
+const faceActiveZoneHeightRatio = computed(() =>
+    ratioSetting(props.attendanceSchedule.face_capture_height_ratio, 0.68),
+)
+const faceVerificationWindowMs = computed(() =>
+    integerSetting(props.attendanceSchedule.face_verification_window_ms, 6000, 4000, 15000),
+)
+const scopedFaceUsableFrameTarget = computed(() =>
+    integerSetting(props.attendanceSchedule.face_usable_frame_target, 3, 1, 10),
+)
+const scopedFaceRequiredMatchCount = computed(() =>
+    Math.min(
+        scopedFaceUsableFrameTarget.value,
+        integerSetting(props.attendanceSchedule.face_required_match_count, 2, 1, 10),
+    ),
+)
+const faceOnlyUsableFrameTarget = computed(() =>
+    integerSetting(props.attendanceSchedule.face_only_usable_frame_target, 5, 1, 10),
+)
+const faceOnlyRequiredMatchCount = computed(() =>
+    Math.min(
+        faceOnlyUsableFrameTarget.value,
+        integerSetting(props.attendanceSchedule.face_only_required_match_count, 3, 1, 10),
+    ),
+)
+const hasMultipleFacesInView = ref(false)
+const liveFaceCount = ref(0)
+const cameraGuidanceMessage = ref('')
 const isLocationReady = computed(
     () =>
         Boolean(coords.value) &&
@@ -143,21 +262,37 @@ const processingLabel = computed(() =>
         ? faceStatusText.value
         : 'Processing, please wait...',
 )
+const showFaceCheckOnly = computed(() =>
+    isProcessing.value &&
+    isCameraActive.value &&
+    faceStatusText.value.startsWith('Checking face for '),
+)
+const cameraGuidanceText = computed(() => {
+    if (cameraGuidanceMessage.value === FACE_WAITING_MESSAGE) {
+        return 'Look straight into the camera. Waiting for face...'
+    }
+
+    if (cameraGuidanceMessage.value) {
+        return cameraGuidanceMessage.value
+    }
+
+    return 'Look straight into the camera to record your attendance.'
+})
+const cameraGuidanceIsWarning = computed(() =>
+    [FACE_MULTI_WARNING_MESSAGE, 'No face detected.'].includes(
+        cameraGuidanceMessage.value,
+    ),
+)
 const scanStatusMessage = (key: keyof ScanStatusMessages): string =>
     props.scanStatusMessages[key]
 const setScannerStatus = (
     key: keyof ScanStatusMessages,
     options: { tone?: ScannerStatusTone; force?: boolean } = {},
 ) => {
-    const heldKeys: Array<keyof ScanStatusMessages> = [
-        'idle',
-        'fingerprint_waiting',
-    ]
-
     if (
         !options.force &&
         Date.now() < scannerStatusHoldUntil &&
-        heldKeys.includes(key)
+        scannerStatusTone.value === 'error'
     ) {
         return
     }
@@ -178,7 +313,7 @@ const setTemporaryScannerError = (
         clearTimeout(scannerStatusResetTimeout)
     }
 
-    scannerStatusHoldUntil = Date.now() + 3000
+    scannerStatusHoldUntil = Date.now() + 5000
     scannerStatusText.value = scanStatusMessage(key)
     scannerStatusTone.value = 'error'
     scannerStatusResetTimeout = setTimeout(() => {
@@ -186,7 +321,7 @@ const setTemporaryScannerError = (
         scannerStatusText.value = scanStatusMessage('idle')
         scannerStatusTone.value = 'default'
         scannerStatusResetTimeout = null
-    }, 3000)
+    }, 5000)
 }
 
 const employeeFullName = (employee: VerifiedEmployee): string =>
@@ -274,6 +409,7 @@ const waitForCameraFrame = async (timeoutMs = 2500): Promise<boolean> => {
 }
 
 const stopCamera = (): any => {
+    stopLiveFaceDetection()
     stream?.getTracks().forEach((track) => track.stop())
     stream = null
     if (videoRef.value) videoRef.value.srcObject = null
@@ -292,6 +428,17 @@ const clearFaceDetectorOverlay = () => {
     const canvas = overlayRef.value
     const context = canvas?.getContext('2d')
     if (canvas && context) context.clearRect(0, 0, canvas.width, canvas.height)
+}
+
+const stopLiveFaceDetection = () => {
+    if (liveFaceDetectionInterval) {
+        clearInterval(liveFaceDetectionInterval)
+        liveFaceDetectionInterval = null
+    }
+
+    hasMultipleFacesInView.value = false
+    liveFaceCount.value = 0
+    cameraGuidanceMessage.value = ''
 }
 
 const clearAutoFingerprintScan = () => {
@@ -313,6 +460,61 @@ const pauseAutoFingerprintScan = () => {
     isAutoFingerprintScanActive = false
 }
 
+const visibleFaceGuideBox = (width: number, height: number): RectBox => {
+    const minimumWidth = Math.min(VISIBLE_FACE_GUIDE_MIN_WIDTH, width * 0.72)
+    const maxHeight = height * faceActiveZoneHeightRatio.value
+    const guideWidth = Math.max(
+        1,
+        Math.min(
+            Math.max(width * faceActiveZoneWidthRatio.value, minimumWidth),
+            VISIBLE_FACE_GUIDE_MAX_WIDTH,
+            width * 0.72,
+            maxHeight / VISIBLE_FACE_GUIDE_ASPECT_RATIO,
+        ),
+    )
+    const guideHeight = guideWidth * VISIBLE_FACE_GUIDE_ASPECT_RATIO
+
+    return {
+        x: (width - guideWidth) / 2,
+        y: (height - guideHeight) / 2,
+        width: guideWidth,
+        height: guideHeight,
+    }
+}
+
+const visibleBoxToVideoSourceBox = (box: RectBox, video: HTMLVideoElement): RectBox | null => {
+    const targetWidth = video.clientWidth
+    const targetHeight = video.clientHeight
+    const sourceWidth = video.videoWidth
+    const sourceHeight = video.videoHeight
+
+    if (
+        targetWidth <= 0 ||
+        targetHeight <= 0 ||
+        sourceWidth <= 0 ||
+        sourceHeight <= 0
+    ) {
+        return null
+    }
+
+    const scale = Math.max(targetWidth / sourceWidth, targetHeight / sourceHeight)
+    const renderedWidth = sourceWidth * scale
+    const renderedHeight = sourceHeight * scale
+    const offsetX = (targetWidth - renderedWidth) / 2
+    const offsetY = targetHeight - renderedHeight
+    const sourceX = Math.max(0, (box.x - offsetX) / scale)
+    const sourceY = Math.max(0, (box.y - offsetY) / scale)
+    const sourceRight = Math.min(sourceWidth, (box.x + box.width - offsetX) / scale)
+    const sourceBottom = Math.min(sourceHeight, (box.y + box.height - offsetY) / scale)
+
+    return {
+        x: sourceX,
+        y: sourceY,
+        width: Math.max(1, sourceRight - sourceX),
+        height: Math.max(1, sourceBottom - sourceY),
+    }
+}
+
 const startFaceDetectorOverlay = () => {
     clearFaceDetectorOverlay()
 
@@ -331,10 +533,11 @@ const startFaceDetectorOverlay = () => {
         context.setTransform(ratio, 0, 0, ratio, 0, 0)
         context.clearRect(0, 0, rect.width, rect.height)
 
-        const zoneWidth = rect.width * FACE_ACTIVE_ZONE_WIDTH_RATIO
-        const zoneHeight = rect.height * FACE_ACTIVE_ZONE_HEIGHT_RATIO
-        const zoneX = (rect.width - zoneWidth) / 2
-        const zoneY = (rect.height - zoneHeight) / 2
+        const guide = visibleFaceGuideBox(rect.width, rect.height)
+        const zoneX = guide.x
+        const zoneY = guide.y
+        const zoneWidth = guide.width
+        const zoneHeight = guide.height
 
         context.fillStyle = 'rgba(0, 30, 29, 0.42)'
         context.fillRect(0, 0, rect.width, zoneY)
@@ -361,10 +564,22 @@ const captureImage = (): string | null => {
 
     if (video.videoWidth <= 0 || video.videoHeight <= 0) return null
 
-    const sourceWidth = Math.round(video.videoWidth * FACE_ACTIVE_ZONE_WIDTH_RATIO)
-    const sourceHeight = Math.round(video.videoHeight * FACE_ACTIVE_ZONE_HEIGHT_RATIO)
-    const sourceX = Math.round((video.videoWidth - sourceWidth) / 2)
-    const sourceY = Math.round((video.videoHeight - sourceHeight) / 2)
+    const visibleGuide = visibleFaceGuideBox(video.clientWidth, video.clientHeight)
+    const visibleSourceBox = !isSilentCameraCapture.value
+        ? visibleBoxToVideoSourceBox(visibleGuide, video)
+        : null
+    const sourceWidth = Math.round(
+        visibleSourceBox?.width ?? video.videoWidth * faceActiveZoneWidthRatio.value,
+    )
+    const sourceHeight = Math.round(
+        visibleSourceBox?.height ?? video.videoHeight * faceActiveZoneHeightRatio.value,
+    )
+    const sourceX = Math.round(
+        visibleSourceBox?.x ?? (video.videoWidth - sourceWidth) / 2,
+    )
+    const sourceY = Math.round(
+        visibleSourceBox?.y ?? (video.videoHeight - sourceHeight) / 2,
+    )
     const scale = Math.min(1, ATTENDANCE_IMAGE_MAX_WIDTH / sourceWidth)
 
     canvas.width = Math.round(sourceWidth * scale)
@@ -386,6 +601,473 @@ const captureImage = (): string | null => {
     )
 
     return canvas.toDataURL('image/jpeg', 0.72)
+}
+
+const captureFullViewImage = (): string | null => {
+    if (!videoRef.value || !canvasRef.value || !isVideoReady.value) return null
+
+    const video = videoRef.value
+    const canvas = canvasRef.value
+
+    if (video.videoWidth <= 0 || video.videoHeight <= 0) return null
+
+    const scale = Math.min(1, ATTENDANCE_IMAGE_MAX_WIDTH / video.videoWidth)
+
+    canvas.width = Math.round(video.videoWidth * scale)
+    canvas.height = Math.round(video.videoHeight * scale)
+
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return null
+
+    ctx.drawImage(
+        video,
+        0,
+        0,
+        video.videoWidth,
+        video.videoHeight,
+        0,
+        0,
+        canvas.width,
+        canvas.height,
+    )
+
+    return canvas.toDataURL('image/jpeg', 0.72)
+}
+
+const checkLiveFaceCount = async (): Promise<number | null> => {
+    if (!isCameraActive.value || !isVideoReady.value || isSilentCameraCapture.value) {
+        return null
+    }
+
+    const image = captureImage()
+    if (!image) return null
+
+    try {
+        const result = await detectFaces(base64ToBlob(image, 'image/jpeg'))
+        const faceCount = Number(result.face_count || 0)
+        const hasMultipleFaces = faceCount > 1
+        liveFaceCount.value = faceCount
+        hasMultipleFacesInView.value = hasMultipleFaces
+
+        if (hasMultipleFaces) {
+            cameraGuidanceMessage.value = result.message || FACE_MULTI_WARNING_MESSAGE
+            return faceCount
+        }
+
+        if (faceCount === 0) {
+            cameraGuidanceMessage.value = FACE_WAITING_MESSAGE
+            return faceCount
+        }
+
+        cameraGuidanceMessage.value = ''
+
+        return faceCount
+    } catch (error) {
+        console.error('Face detection failed:', error)
+        return null
+    }
+}
+
+const startLiveFaceDetection = () => {
+    stopLiveFaceDetection()
+    void checkLiveFaceCount()
+    liveFaceDetectionInterval = setInterval(() => {
+        void checkLiveFaceCount()
+    }, FACE_DETECTION_POLL_MS)
+}
+
+const faceGuidanceFromMessage = (message = ''): string => {
+    const normalized = message.toLowerCase()
+
+    if (normalized.includes('multiple')) return FACE_MULTI_WARNING_MESSAGE
+    if (normalized.includes('move closer')) return 'Move closer'
+    if (normalized.includes('too dark')) return 'Too dark'
+    if (normalized.includes('glare') || normalized.includes('too bright')) {
+        return 'Reduce glare.'
+    }
+    if (normalized.includes('blur') || normalized.includes('hold still')) {
+        return 'Hold still'
+    }
+    if (normalized.includes('no face') || normalized.includes('waiting')) {
+        return FACE_WAITING_MESSAGE
+    }
+    if (normalized.includes('face service unavailable')) {
+        return FACE_SERVICE_UNAVAILABLE_MESSAGE
+    }
+
+    return message || FACE_WAITING_MESSAGE
+}
+
+const isRetryableFaceGuidance = (message = ''): boolean => {
+    const guidance = faceGuidanceFromMessage(message)
+
+    return [
+        FACE_WAITING_MESSAGE,
+        'Move closer',
+        'Too dark',
+        'Hold still',
+        'Reduce glare.',
+    ].includes(guidance)
+}
+
+const showFaceWindowFailure = (message: string) => {
+    const guidance = faceGuidanceFromMessage(message)
+
+    toast.add({
+        severity: guidance === FACE_MULTI_WARNING_MESSAGE ? 'warn' : 'error',
+        summary: 'Face Verification',
+        detail: guidance === FACE_WAITING_MESSAGE
+            ? 'No face detected. Look straight at the camera and try again.'
+            : guidance,
+        life: 5000,
+    })
+    cameraGuidanceMessage.value =
+        guidance === FACE_WAITING_MESSAGE ? 'No face detected.' : guidance
+}
+
+const faceAttemptIsUsable = (attempt: FaceAttemptResult): boolean =>
+    attempt.faceCount === 1 && !isRetryableFaceGuidance(attempt.message)
+
+const captureFaceAttempt = async (
+    verifier: (image: string, imageBlob: Blob) => Promise<any>,
+): Promise<FaceAttemptResult | null> => {
+    const image = captureImage()
+    if (!image) return null
+
+    const result = await verifier(image, base64ToBlob(image, 'image/jpeg'))
+    const message = String(result.message || '')
+    const faceCount = Number(result.face_count ?? 0)
+
+    return {
+        matched: Boolean(result.matched),
+        employeeId: result.employee_id ?? null,
+        image,
+        message,
+        faceCount,
+    }
+}
+
+const runFaceVerificationWindow = async (
+    options: {
+        verifier: (image: string, imageBlob: Blob) => Promise<any>
+        expectedEmployeeId?: string
+        targetFrames: number
+        requiredMatches: number
+        statusPrefix: string
+    },
+): Promise<FaceWindowResult> => {
+    const startedAt = Date.now()
+    const matchesByEmployee = new Map<string, { count: number; image: string }>()
+    let validFrames = 0
+    let matchedFrames = 0
+    let matchedImage = ''
+    let lastMessage = FACE_WAITING_MESSAGE
+
+    while (
+        Date.now() - startedAt < faceVerificationWindowMs.value &&
+        validFrames < options.targetFrames
+    ) {
+        const attempt = await captureFaceAttempt(options.verifier)
+
+        if (!attempt) {
+            lastMessage = 'Camera photo could not be captured.'
+            break
+        }
+
+        lastMessage = attempt.message
+        const guidance = faceGuidanceFromMessage(attempt.message)
+        cameraGuidanceMessage.value = guidance
+
+        if (attempt.faceCount > 1 || guidance === FACE_MULTI_WARNING_MESSAGE) {
+            return {
+                matched: false,
+                validFrames,
+                matchedFrames,
+                message: FACE_MULTI_WARNING_MESSAGE,
+            }
+        }
+
+        if (!faceAttemptIsUsable(attempt)) {
+            await new Promise((resolve) => setTimeout(resolve, FACE_FRAME_RETRY_MS))
+            continue
+        }
+
+        validFrames++
+
+        if (options.expectedEmployeeId) {
+            const expected = normalizeEmployeeCode(options.expectedEmployeeId)
+            const actual = normalizeEmployeeCode(attempt.employeeId)
+
+            if (attempt.matched && actual === expected) {
+                matchedFrames++
+                matchedImage = attempt.image
+            }
+        } else if (attempt.matched && attempt.employeeId) {
+            const employeeId = normalizeEmployeeCode(attempt.employeeId)
+            const current = matchesByEmployee.get(employeeId) ?? {
+                count: 0,
+                image: attempt.image,
+            }
+            current.count++
+            current.image = attempt.image
+            matchesByEmployee.set(employeeId, current)
+
+            if (current.count > matchedFrames) {
+                matchedFrames = current.count
+                matchedImage = current.image
+            }
+        }
+
+        faceStatusText.value =
+            `${options.statusPrefix}\n\n${matchedFrames}/${options.requiredMatches} matches from ${validFrames}/${options.targetFrames} usable frames.`
+
+        if (matchedFrames >= options.requiredMatches) {
+            const employeeId = options.expectedEmployeeId
+                ? options.expectedEmployeeId
+                : [...matchesByEmployee.entries()]
+                      .find(([, match]) => match.count >= options.requiredMatches)?.[0]
+
+            return {
+                matched: true,
+                employeeId,
+                image: matchedImage,
+                validFrames,
+                matchedFrames,
+                message: 'Face matched.',
+            }
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, FACE_FRAME_RETRY_MS))
+    }
+
+    return {
+        matched: false,
+        validFrames,
+        matchedFrames,
+        message:
+            validFrames === 0
+                ? lastMessage
+                : 'Face frames did not agree. Please try again.',
+    }
+}
+
+const collectFaceSessionImages = async (targetFrames: number): Promise<string[]> => {
+    const images: string[] = []
+    const startedAt = Date.now()
+
+    while (
+        Date.now() - startedAt < faceVerificationWindowMs.value &&
+        images.length < targetFrames
+    ) {
+        const image = captureImage()
+        if (image) {
+            images.push(image)
+        }
+
+        faceStatusText.value = `Checking face...\n\nCaptured ${images.length}/${targetFrames} frames.`
+        await new Promise((resolve) => setTimeout(resolve, FACE_FRAME_RETRY_MS))
+    }
+
+    return images
+}
+
+const postFaceAttemptAudit = async (
+    result: any,
+    evidenceImageBase64?: string,
+    fallbackUsed = false,
+): Promise<number | undefined> => {
+    try {
+        const payload = await recordFaceAttempt({
+            candidate_employee_id:
+                result.employee_id ?? result.candidate_employee_id ?? undefined,
+            decision: result.decision,
+            reason_code: result.reason_code,
+            match_score: result.match_score,
+            liveness_score: result.liveness_score,
+            quality_score: result.quality_score,
+            risk_score: result.risk_score,
+            frame_count: result.frame_count,
+            usable_frame_count: result.usable_frame_count,
+            matched_frame_count: result.matched_frame_count,
+            fallback_used: fallbackUsed,
+            session_id: crypto.randomUUID?.() ?? String(Date.now()),
+            metadata: {
+                confidence: result.confidence,
+                distance: result.distance,
+                margin: result.margin,
+                face_count: result.face_count,
+            },
+            evidence_image_base64:
+                evidenceImageBase64 ?? result.evidence_image_base64 ?? undefined,
+        })
+
+        return Number(payload.id || 0) || undefined
+    } catch (error) {
+        console.error('Face attempt audit failed:', error)
+        return undefined
+    }
+}
+
+const faceAttemptReasonFromError = (error: unknown): string | null => {
+    if (!(error instanceof Error)) return 'face_service_error'
+
+    const normalized = error.message.toLowerCase()
+
+    if (normalized.includes('spoof')) return 'spoof_detected'
+    if (normalized.includes('liveness')) return 'liveness_unconfirmed'
+    if (normalized.includes('multiple')) return 'multiple_faces'
+    if (normalized.includes('no face')) return 'no_face'
+    if (normalized.includes('face service unavailable')) return null
+
+    return 'face_service_error'
+}
+
+const failedFaceAttemptFromError = (
+    error: unknown,
+    frameCount: number,
+): any | null => {
+    const reasonCode = faceAttemptReasonFromError(error)
+
+    if (!reasonCode) return null
+
+    const message = error instanceof Error
+        ? error.message
+        : 'Face verification failed.'
+
+    return {
+        decision: ['spoof_detected', 'multiple_faces'].includes(reasonCode)
+            ? 'fallback'
+            : 'retry',
+        reason_code: reasonCode,
+        risk_score: ['spoof_detected', 'multiple_faces'].includes(reasonCode)
+            ? 1
+            : 0.75,
+        frame_count: frameCount,
+        usable_frame_count: 0,
+        matched_frame_count: 0,
+        message,
+    }
+}
+
+const runFaceSessionVerification = async (
+    options: {
+        expectedEmployeeId?: string
+        targetFrames: number
+        verifier: (imageBlobs: Blob[]) => Promise<any>
+    },
+): Promise<FaceWindowResult> => {
+    let attempt = 0
+    let lastRetryResult: FaceWindowResult | null = null
+
+    while (attempt < 2) {
+        attempt++
+        const images = await collectFaceSessionImages(options.targetFrames)
+
+        if (images.length === 0) {
+            return {
+                matched: false,
+                validFrames: 0,
+                matchedFrames: 0,
+                message: 'Camera photo could not be captured.',
+            }
+        }
+
+        const evidenceImage = captureFullViewImage() ?? images[0]
+        let result
+
+        try {
+            result = await options.verifier(
+                images.map((image) => base64ToBlob(image, 'image/jpeg')),
+            )
+        } catch (error) {
+            const failedAttempt = failedFaceAttemptFromError(error, images.length)
+            const faceAttemptId = failedAttempt
+                ? await postFaceAttemptAudit(
+                      failedAttempt,
+                      evidenceImage,
+                      failedAttempt.decision === 'fallback',
+                  )
+                : undefined
+            const message = error instanceof Error
+                ? error.message
+                : 'Face session could not be accepted.'
+
+            return {
+                matched: false,
+                validFrames: 0,
+                matchedFrames: 0,
+                message,
+                faceAttemptId,
+            }
+        }
+
+        const faceAttemptId = await postFaceAttemptAudit(
+            result,
+            evidenceImage,
+            result.decision === 'fallback',
+        )
+
+        if (result.decision === 'retry' && attempt === 1) {
+            lastRetryResult = {
+                matched: false,
+                employeeId: result.candidate_employee_id ?? null,
+                image: images[0],
+                validFrames: Number(result.usable_frame_count ?? 0),
+                matchedFrames: Number(result.matched_frame_count ?? 0),
+                message: result.message || 'Face session could not be accepted.',
+                faceAttemptId,
+            }
+            faceStatusText.value = 'Face uncertain. Trying once more...'
+            await new Promise((resolve) => setTimeout(resolve, FACE_FRAME_RETRY_MS))
+            continue
+        }
+
+        if (result.decision !== 'accept') {
+            return {
+                matched: false,
+                employeeId: result.candidate_employee_id ?? null,
+                image: images[0],
+                validFrames: Number(result.usable_frame_count ?? 0),
+                matchedFrames: Number(result.matched_frame_count ?? 0),
+                message: result.message || 'Face session could not be accepted.',
+                faceAttemptId,
+            }
+        }
+
+        const employeeId = String(result.employee_id ?? '')
+        if (
+            options.expectedEmployeeId &&
+            normalizeEmployeeCode(employeeId) !==
+                normalizeEmployeeCode(options.expectedEmployeeId)
+        ) {
+            return {
+                matched: false,
+                employeeId,
+                image: images[0],
+                validFrames: Number(result.usable_frame_count ?? 0),
+                matchedFrames: Number(result.matched_frame_count ?? 0),
+                message: 'Face does not match the selected employee.',
+                faceAttemptId,
+            }
+        }
+
+        return {
+            matched: true,
+            employeeId,
+            image: images[0],
+            validFrames: Number(result.usable_frame_count ?? 0),
+            matchedFrames: Number(result.matched_frame_count ?? 0),
+            message: result.message || 'Face matched.',
+            faceAttemptId,
+        }
+    }
+
+    return lastRetryResult ?? {
+        matched: false,
+        validFrames: 0,
+        matchedFrames: 0,
+        message: 'Face frames did not agree. Please try again.',
+    }
 }
 
 const loadClockOffset = () => {
@@ -461,6 +1143,11 @@ const openCameraForCapture = async (
     const loadFaceVerification = options.loadFaceVerification ?? true
 
     showEmployeeIdInputField.value = true
+    if (loadFaceVerification) {
+        faceStatusText.value = 'Checking face service...'
+        await faceServiceHealth()
+    }
+
     isCameraActive.value = true
     isSilentCameraCapture.value = options.silent ?? !loadFaceVerification
     await nextTick()
@@ -478,6 +1165,7 @@ const openCameraForCapture = async (
 
     faceStatusText.value = 'Face camera ready.'
     startFaceDetectorOverlay()
+    startLiveFaceDetection()
 }
 
 const handleTimeAction = async (actionName: AttendanceAction) => {
@@ -570,10 +1258,58 @@ const forceRFIDFocus = () => {
     }
 }
 
+const resetRFIDScanCapture = () => {
+    rfidScanStartedAt = 0
+    rfidLastKeyAt = 0
+    rfidKeyCount = 0
+    rfidBuffer.value = ''
+    if (rfidTimeout) clearTimeout(rfidTimeout)
+    if (rfidInput.value) rfidInput.value.value = ''
+}
+
+const trackRFIDKeystroke = (e: KeyboardEvent) => {
+    if (e.ctrlKey || e.metaKey || e.altKey || e.key.length !== 1) return
+
+    const now = performance.now()
+
+    if (
+        !rfidScanStartedAt ||
+        (rfidLastKeyAt && now - rfidLastKeyAt > RFID_SCAN_IDLE_RESET_MS)
+    ) {
+        rfidScanStartedAt = now
+        rfidKeyCount = 0
+        rfidBuffer.value = ''
+        if (rfidTimeout) clearTimeout(rfidTimeout)
+        if (rfidInput.value) rfidInput.value.value = ''
+    }
+
+    rfidLastKeyAt = now
+    rfidKeyCount += 1
+}
+
+const isLikelyRFIDScan = (data: string) => {
+    if (data.length < RFID_SCAN_MIN_LENGTH || rfidKeyCount < RFID_SCAN_MIN_LENGTH) {
+        return false
+    }
+
+    const duration = rfidLastKeyAt - rfidScanStartedAt
+    const averageKeyMs = duration / Math.max(rfidKeyCount - 1, 1)
+
+    return (
+        duration <= RFID_SCAN_MAX_TOTAL_MS ||
+        averageKeyMs <= RFID_SCAN_MAX_AVG_KEY_MS
+    )
+}
+
 const onRFIDInput = () => {
     const data = rfidInput.value?.value.trim()
 
     if (data && data.length > 0) {
+        if (!isLikelyRFIDScan(data)) {
+            if (rfidTimeout) clearTimeout(rfidTimeout)
+            return
+        }
+
         rfidBuffer.value = data
 
         if (rfidTimeout) clearTimeout(rfidTimeout)
@@ -585,12 +1321,21 @@ const onRFIDInput = () => {
 }
 
 const onRFIDKeydown = (e: KeyboardEvent) => {
+    trackRFIDKeystroke(e)
+
     if (e.key === 'Enter') {
         e.preventDefault()
 
         if (rfidTimeout) clearTimeout(rfidTimeout)
 
-        submitRFIDAttendance(rfidBuffer.value || rfidInput.value?.value)
+        const scannedRfid = (rfidBuffer.value || rfidInput.value?.value || '').trim()
+
+        if (!isLikelyRFIDScan(scannedRfid)) {
+            resetRFIDScanCapture()
+            return
+        }
+
+        submitRFIDAttendance(scannedRfid)
     }
 }
 
@@ -717,30 +1462,101 @@ const postWebAuthnJson = async (
     return payload
 }
 
-const captureAttendanceImage = (): string | null => {
-    const image = captureImage()
-
-    if (!image) {
-        toast.add({
-            severity: 'error',
-            summary: 'Error',
-            detail: 'Camera not ready. Please allow camera access.',
-            life: 5000,
-        })
-
-        return null
-    }
-
-    return image
-}
-
 const normalizeEmployeeCode = (employeeId: unknown): string =>
     String(employeeId ?? '').trim()
+
+const employeeHasReadyFace = (employee: VerifiedEmployee): boolean => {
+    if (employee.face_ready !== undefined) {
+        return Boolean(employee.face_ready)
+    }
+
+    return Number(employee.face_enrollment_count ?? 0) >= FACE_READY_REQUIRED_COUNT
+}
+
+const employeeFromLocalAuthRecord = (record: any, decision: AuthDecision): VerifiedEmployee => ({
+    id: Number(record.employee_id),
+    employee_id: String(record.employee_number ?? ''),
+    first_name: String(record.first_name ?? ''),
+    last_name: String(record.last_name ?? ''),
+    position: String(record.position ?? ''),
+    branch: record.branch ?? null,
+    face_ready: Number(record.face_embeddings?.length ?? 0) >= FACE_READY_REQUIRED_COUNT,
+    face_enrollment_count: Number(record.face_embeddings?.length ?? 0),
+    authDecision: decision,
+})
+
+const localEmployeeLookup = async (
+    employeeIdentifier: string,
+    method: AttendanceMethod,
+): Promise<VerifiedEmployee | null> => {
+    if (method === 'fingerprint') return null
+
+    const localMatch =
+        method === 'face'
+            ? await syncStore.getCachedEmployeeByNumber(employeeIdentifier, method)
+            : await syncStore.verifyLocalCredential(method, employeeIdentifier)
+
+    if (!localMatch?.employee) return null
+
+    const employee = employeeFromLocalAuthRecord(
+        localMatch.employee,
+        localMatch.decision,
+    )
+    emit('employeeVerified', employee)
+
+    return employee
+}
+
+const requireReadyFaceEnrollment = (employee: VerifiedEmployee): boolean => {
+    if (employeeHasReadyFace(employee)) return true
+
+    const enrollmentCount = Number(employee.face_enrollment_count ?? 0)
+    const message =
+        enrollmentCount > 0
+            ? `Face enrollment is incomplete (${enrollmentCount}/${FACE_READY_REQUIRED_COUNT}).`
+            : 'Employee has no ready face enrollment.'
+
+    toast.add({
+        severity: 'error',
+        summary: 'Face Verification',
+        detail: message,
+        life: 6000,
+    })
+    faceStatusText.value = message
+
+    return false
+}
 
 const verifyEmployeeIdentifier = async (
     employeeIdentifier: string,
     method: AttendanceMethod,
 ): Promise<VerifiedEmployee | null> => {
+    const localEmployee = await localEmployeeLookup(employeeIdentifier, method)
+    if (localEmployee) return localEmployee
+
+    if (!navigator.onLine && method !== 'fingerprint') {
+        const message =
+            method === 'rfid'
+                ? scanStatusMessage('rfid_not_recognized')
+                : 'Employee is not available in the kiosk auth cache.'
+
+        toast.add({
+            severity: 'error',
+            summary: 'Employee',
+            detail: message,
+            life: 5000,
+        })
+
+        if (method === 'rfid') {
+            setTemporaryScannerError('rfid_not_recognized')
+        } else {
+            faceStatusText.value = message
+        }
+        resetAttendanceSelection(method !== 'rfid')
+
+        return null
+    }
+
     try {
         faceStatusText.value = 'Checking employee...'
 
@@ -773,10 +1589,12 @@ const verifyEmployeeIdentifier = async (
 
         if (method === 'rfid') {
             setTemporaryScannerError('rfid_not_recognized')
+        } else if (method === 'fingerprint') {
+            setTemporaryScannerError('fingerprint_not_found')
         } else {
             faceStatusText.value = message
         }
-        resetAttendanceSelection(method !== 'rfid')
+        resetAttendanceSelection(method !== 'rfid' && method !== 'fingerprint')
 
         return null
     }
@@ -790,51 +1608,52 @@ const verifyLiveFaceMatchesEmployee = async (
             severity: 'error',
             summary: 'Camera',
             detail: 'Camera not ready. Please allow camera access.',
-            life: 5000,
+            life: 3000,
         })
         return null
     }
 
     try {
         faceStatusText.value = `Checking face for ${employeeFullName(employee)}...`
-        const image = captureImage()
-        if (!image) {
-            throw new Error('Camera photo could not be captured.')
-        }
+        const result = await runFaceSessionVerification({
+            expectedEmployeeId: employee.employee_id,
+            targetFrames: scopedFaceUsableFrameTarget.value,
+            verifier: (imageBlobs) =>
+                verifyEmployeeFaceSession(employee.employee_id, imageBlobs),
+        })
 
-        const result = await verifyEmployeeFace(
-            employee.employee_id,
-            base64ToBlob(image, 'image/jpeg'),
-        )
-        if (
-            !result.matched ||
-            normalizeEmployeeCode(result.employee_id) !==
-                normalizeEmployeeCode(employee.employee_id)
-        ) {
-            toast.add({
-                severity: 'error',
-                summary: 'Face Verification',
-                detail: `Face does not match ${employeeFullName(employee)}.`,
-                life: 6000,
-            })
-            faceStatusText.value = result.message || 'Face mismatch.'
+        if (!result.matched || !result.image) {
+            const message =
+                result.message === 'Face frames did not agree. Please try again.'
+                    ? `Face does not consistently match ${employeeFullName(employee)}.`
+                    : result.message
+            showFaceWindowFailure(message)
+            faceStatusText.value = faceGuidanceFromMessage(message)
             return null
         }
 
         faceStatusText.value = `Face matched ${employeeFullName(employee)}.`
         return {
             employee,
-            image,
+            image: result.image,
+            faceAttemptId: result.faceAttemptId,
         }
     } catch (error) {
         console.error('Face verification failed:', error)
+        const message =
+            error instanceof Error
+                ? faceGuidanceFromMessage(error.message)
+                : 'Unable to verify face.'
         toast.add({
             severity: 'error',
             summary: 'Face Verification',
-            detail: 'Unable to verify face. Check lighting and registered face image.',
+            detail:
+                message === FACE_SERVICE_UNAVAILABLE_MESSAGE
+                    ? FACE_SERVICE_UNAVAILABLE_MESSAGE
+                    : 'Unable to verify face. Check lighting and registered face image.',
             life: 6000,
         })
-        faceStatusText.value = 'Unable to verify face.'
+        faceStatusText.value = message
         return null
     }
 }
@@ -845,8 +1664,28 @@ const verifyEmployeeAndSubmit = async (
 ): Promise<boolean> => {
     const employee = await verifyEmployeeIdentifier(employeeIdentifier, method)
     if (!employee) return false
+    if (!requireReadyFaceEnrollment(employee)) {
+        resetAttendanceSelection(method !== 'rfid' && method !== 'fingerprint')
+        return false
+    }
 
-    await openCameraForCapture({ loadFaceVerification: true })
+    try {
+        await openCameraForCapture({ loadFaceVerification: true })
+    } catch (error) {
+        const message =
+            error instanceof Error
+                ? faceGuidanceFromMessage(error.message)
+                : FACE_SERVICE_UNAVAILABLE_MESSAGE
+        toast.add({
+            severity: 'error',
+            summary: 'Face Verification',
+            detail: message,
+            life: 6000,
+        })
+        faceStatusText.value = message
+        resetAttendanceSelection(method !== 'rfid' && method !== 'fingerprint')
+        return false
+    }
 
     const matchedFace = await verifyLiveFaceMatchesEmployee(employee)
     if (!matchedFace) {
@@ -854,11 +1693,16 @@ const verifyEmployeeAndSubmit = async (
         return false
     }
 
+    stopCamera()
+
     await submitAttendance(
         employee.employee_id,
         method,
         employeeFullName(employee),
+        employee.branch,
         matchedFace.image,
+        employee.authDecision,
+        matchedFace.faceAttemptId,
     )
 
     return true
@@ -871,45 +1715,46 @@ const submitFaceAttendance = async () => {
         startProcessing('face', 'Opening face recognition...')
         await openCameraForCapture({ loadFaceVerification: true })
 
-        const image = captureAttendanceImage()
-        if (!image) {
-            resetAttendanceSelection()
-            return
-        }
-
         faceStatusText.value = 'Recognizing face...'
-        const result = await recognizeFace(base64ToBlob(image, 'image/jpeg'))
+        const result = await runFaceSessionVerification({
+            targetFrames: faceOnlyUsableFrameTarget.value,
+            verifier: (imageBlobs) => recognizeFaceSession(imageBlobs),
+        })
 
-        if (!result.matched || !result.employee_id) {
-            toast.add({
-                severity: 'error',
-                summary: 'Face Recognition',
-                detail: result.message || 'No registered face matched.',
-                life: 6000,
-            })
-            faceStatusText.value = result.message || 'No registered face matched.'
+        if (!result.matched || !result.employeeId || !result.image) {
+            showFaceWindowFailure(result.message || 'No registered face matched.')
             resetAttendanceSelection()
             return
         }
 
-        const employee = await verifyEmployeeIdentifier(result.employee_id, 'face')
-        if (!employee) return
+        stopCamera()
+
+        const employee = await verifyEmployeeIdentifier(result.employeeId, 'face')
+        if (!employee) {
+            stopProcessing()
+            scheduleAutoFingerprintScan()
+            return
+        }
 
         await submitAttendance(
             employee.employee_id,
             'face',
             employeeFullName(employee),
-            image,
+            employee.branch,
+            result.image,
+            employee.authDecision,
+            result.faceAttemptId,
         )
     } catch (error) {
         console.error('Error submitting face attendance:', error)
+        const message =
+            error instanceof Error
+                ? faceGuidanceFromMessage(error.message)
+                : 'Unable to record face attendance.'
         toast.add({
             severity: 'error',
             summary: 'Face Recognition',
-            detail:
-                error instanceof Error
-                    ? error.message
-                    : 'Unable to record face attendance.',
+            detail: message,
             life: 6000,
         })
         stopProcessing()
@@ -922,8 +1767,7 @@ const submitRFIDAttendance = async (rfid: any) => {
 
     const scannedRfid = rfid?.trim()
 
-    rfidBuffer.value = ''
-    if (rfidInput.value) rfidInput.value.value = ''
+    resetRFIDScanCapture()
 
     setTimeout(() => ensureRFIDFocus(), 50)
 
@@ -951,6 +1795,7 @@ const submitRFIDAttendance = async (rfid: any) => {
         }
     } catch (e) {
         console.error('Error submitting RFID attendance:', e)
+        setTemporaryScannerError('rfid_not_recognized')
         stopProcessing()
         scheduleAutoFingerprintScan()
     }
@@ -1067,7 +1912,7 @@ const runFingerprintAttendance = async (
                         : 'Unable to start fingerprint attendance.',
                 life: 5000,
             })
-            resetAttendanceSelection()
+            resetAttendanceSelection(false)
         }
 
         return false
@@ -1192,7 +2037,30 @@ const pollZktecoBridgeStatus = async (
                     return
                 }
 
-                await openCameraForCapture({ loadFaceVerification: true })
+                if (!requireReadyFaceEnrollment(employee)) {
+                    resetAttendanceSelection()
+                    fail(new Error('Employee has no ready face enrollment.'))
+                    return
+                }
+
+                try {
+                    await openCameraForCapture({ loadFaceVerification: true })
+                } catch (error) {
+                    const message =
+                        error instanceof Error
+                            ? faceGuidanceFromMessage(error.message)
+                            : FACE_SERVICE_UNAVAILABLE_MESSAGE
+                    toast.add({
+                        severity: 'error',
+                        summary: 'Face Verification',
+                        detail: message,
+                        life: 6000,
+                    })
+                    faceStatusText.value = message
+                    resetAttendanceSelection()
+                    fail(new Error(message))
+                    return
+                }
 
                 const matchedFace = await verifyLiveFaceMatchesEmployee(employee)
 
@@ -1246,6 +2114,7 @@ const pollZktecoBridgeStatus = async (
                         '',
                     is_birthday: Boolean(status.is_birthday),
                     attendance_type: status.attendance_type || attendanceType.value,
+                    tap_event: status.tap_event || status.attendance_type || attendanceType.value,
                 })
                 resetAttendanceSelection(false)
                 announceAttendanceRecorded({ payload: status })
@@ -1382,7 +2251,10 @@ const submitAttendance = async (
     employeeIdentifier: string,
     method: AttendanceMethod,
     employeeName?: string,
+    employeeBranch?: string | null,
     image?: string,
+    authDecision?: AuthDecision,
+    faceAttemptId?: number,
 ): Promise<void> => {
     const attendanceAction = attendanceType.value
 
@@ -1408,8 +2280,14 @@ const submitAttendance = async (
         occurredAt: trustedNowIso(),
         employeeIdentifier,
         employeeName: employeeName || employeeIdentifier,
+        employeeBranch: employeeBranch || undefined,
         attendanceMethod: method,
         attendanceType: attendanceAction || undefined,
+        authCacheRevision: authDecision?.authCacheRevision,
+        cacheStateAtRecordTime: authDecision?.cacheStateAtRecordTime,
+        matchedAuthRevision: authDecision?.matchedAuthRevision,
+        authMetadata: authDecision?.authMetadata,
+        faceAttemptId,
         latitude: coords.value.latitude,
         longitude: coords.value.longitude,
         location: locationLabel(),
@@ -1465,13 +2343,25 @@ const onDocumentClick = (e: MouseEvent) => {
     focusRFID()
 }
 
+const warmLocation = () => {
+    if (locationLoading.value || isLocationReady.value) return
+
+    getLocation().catch(() => null)
+}
+
+const onWindowOnline = () => {
+    syncClockQuietly()
+    warmLocation()
+}
+
 onMounted(async () => {
     loadClockOffset()
     updateTime()
     interval = setInterval(updateTime, 1000)
     syncClockQuietly()
     clockSyncInterval = setInterval(syncClockQuietly, CLOCK_SYNC_INTERVAL_MS)
-    getLocation().catch(() => null)
+    warmLocation()
+    locationWarmupInterval = setInterval(warmLocation, LOCATION_WARMUP_RETRY_MS)
 
     ensureRFIDFocus()
 
@@ -1481,7 +2371,7 @@ onMounted(async () => {
 
     document.addEventListener('click', onDocumentClick)
     document.addEventListener('touchend', onDocumentClick)
-    window.addEventListener('online', syncClockQuietly)
+    window.addEventListener('online', onWindowOnline)
 
     scheduleAutoFingerprintScan(1000)
 })
@@ -1494,6 +2384,7 @@ onUnmounted(() => {
     clearInterval(interval)
     clearInterval(clockSyncInterval)
     clearInterval(focusInterval)
+    clearInterval(locationWarmupInterval)
     if (scannerStatusResetTimeout) clearTimeout(scannerStatusResetTimeout)
     clearAutoFingerprintScan()
     closeZktecoEvents()
@@ -1501,295 +2392,327 @@ onUnmounted(() => {
 
     document.removeEventListener('click', onDocumentClick)
     document.removeEventListener('touchend', onDocumentClick)
-    window.removeEventListener('online', syncClockQuietly)
+    window.removeEventListener('online', onWindowOnline)
     if (rfidTimeout) clearTimeout(rfidTimeout)
 })
 </script>
 
 <template>
     <div
-        v-if="isCameraActive"
-        class="bg-brand-card rounded-[2.5rem] p-4 shadow-[12px_12px_0px_0px_#001e1d] border-2 border-brand-stroke relative overflow-hidden flex flex-col"
-        :class="{
-            'fixed -left-[9999px] top-0 h-px w-px opacity-0 pointer-events-none':
-                isSilentCameraCapture,
-        }"
-        :aria-hidden="isSilentCameraCapture"
+        v-if="isSilentCameraCapture"
+        class="pointer-events-none fixed -left-[9999px] top-0 h-px w-px overflow-hidden opacity-0"
+        aria-hidden="true"
     >
-        <div
-            class="absolute top-8 left-8 z-10 bg-brand-stroke rounded-full px-4 py-2 flex items-center gap-2 shadow-lg"
-        >
-            <div class="w-2 h-2 rounded-full bg-brand-tertiary animate-pulse" />
-            <span class="text-brand-headline text-xs font-bold tracking-widest">
-                LIVE
-            </span>
-        </div>
-
-        <div
-            class="absolute top-8 right-8 z-10 bg-brand-card rounded-full px-4 py-2 flex items-center gap-2 shadow-lg border border-brand-stroke"
-        >
-            <LoaderCircle
-                v-if="locationLoading"
-                class="h-4 w-4 animate-spin text-brand-stroke"
-            />
-            <TriangleAlert
-                v-else-if="locationError"
-                class="h-4 w-4 text-red-600"
-            />
-            <TriangleAlert
-                v-else-if="accuracyWarning || usingCachedLocation"
-                class="h-4 w-4 text-yellow-600"
-            />
-            <MapPin v-else class="h-4 w-4 text-green-600" />
-            <span class="text-brand-stroke text-xs font-bold tracking-widest">
-                <template v-if="locationLoading">GPS...</template>
-                <template v-else-if="locationError">GPS blocked</template>
-                <template v-else-if="usingCachedLocation">Cached GPS</template>
-                <template v-else-if="accuracyWarning">Low GPS</template>
-                <template v-else-if="isLocationReady">GPS ready</template>
-                <template v-else>GPS pending</template>
-            </span>
-        </div>
-
-        <div
-            class="relative aspect-video w-full overflow-hidden rounded-4xl border-2 border-brand-stroke bg-brand-stroke"
-        >
-            <!--            <div-->
-            <!--                v-if="isLoading"-->
-            <!--                class="absolute flex flex-col items-center gap-3 text-brand-paragraph"-->
-            <!--            >-->
-            <!--                <Camera class="w-10 h-10 animate-bounce text-brand-accent"/>-->
-            <!--                <p class="text-sm font-bold uppercase tracking-widest">-->
-            <!--                    Waking up lens...-->
-            <!--                </p>-->
-            <!--            </div>-->
-
-            <video
-                ref="videoRef"
-                autoplay
-                playsinline
-                muted
-                class="home-camera-video h-full w-full object-cover"
-                :class="{ loaded: isVideoReady }"
-            />
-
-            <canvas
-                ref="overlayRef"
-                class="absolute inset-0 h-full w-full pointer-events-none"
-            />
-            <canvas ref="canvasRef" style="display: none" />
-
-            <div
-                v-if="isError"
-                class="absolute inset-0 flex items-center justify-center bg-brand-stroke/90 px-6 text-center text-brand-headline"
-            >
-                <p class="text-sm font-semibold">
-                    Camera blocked. Check browser permissions to proceed.
-                </p>
-            </div>
-        </div>
-
-        <p
-            v-if="showCamera"
-            class="text-brand-stroke text-sm text-center font-bold italic mt-5"
-        >
-            Look straight at the camera to record your attendance.
-        </p>
+        <video
+            ref="videoRef"
+            autoplay
+            playsinline
+            muted
+            class="home-camera-video h-full w-full object-cover"
+            :class="{ loaded: isVideoReady }"
+        />
+        <canvas
+            ref="overlayRef"
+            class="absolute inset-0 h-full w-full pointer-events-none"
+        />
+        <canvas ref="canvasRef" style="display: none" />
     </div>
 
-    <div class="flex flex-col gap-8">
+    <div class="flex flex-1 flex-col gap-4">
         <div
-            class="bg-brand-card rounded-4xl p-8 shadow-[8px_8px_0px_0px_#001e1d] border-2 border-brand-stroke shrink-0 animate-fade-up"
+            class="shrink-0 rounded-2xl border border-black/5 bg-white shadow-xl shadow-black/10 animate-fade-up"
+            :class="showCamera ? 'overflow-hidden p-0' : 'p-4 md:p-5'"
         >
-            <div class="flex flex-col items-center text-center space-y-1 mb-8">
-                <p
-                    class="text-brand-bg font-bold tracking-wider uppercase text-xs"
-                >
-                    {{ currentDate }}
-                </p>
-                <h1
-                    class="text-4xl lg:text-5xl font-black tracking-tight text-brand-stroke tabular-nums"
-                >
-                    {{ currentTime }}
-                </h1>
-            </div>
+            <div
+                v-if="showCamera"
+                class="relative flex min-h-[24rem] w-full overflow-hidden bg-brand-stroke lg:min-h-[calc(100vh-15rem)]"
+            >
+                <video
+                    ref="videoRef"
+                    autoplay
+                    playsinline
+                    muted
+                    class="home-camera-video absolute inset-0 h-full w-full object-cover object-bottom"
+                    :class="{ loaded: isVideoReady }"
+                />
 
-            <div class="w-full">
-                <div class="grid grid-cols-2 gap-4">
-                    <button
-                        @click="handleTimeAction('time-in')"
-                        :disabled="isProcessing"
-                        class="group relative bg-brand-accent hover:bg-[#ffcf81] text-brand-stroke border-2 border-brand-stroke rounded-2xl py-4 px-3 transition-all duration-200 ease-out font-bold shadow-[4px_4px_0px_0px_#001e1d] hover:-translate-y-1 hover:shadow-[6px_6px_0px_0px_#001e1d] active:translate-x-1 active:translate-y-1 active:shadow-none flex flex-col items-center gap-2"
-                        :class="{
-                            'ring-4 ring-brand-stroke ring-offset-2 ring-offset-brand-card shadow-none translate-x-1 translate-y-1':
-                                attendanceType === 'time-in',
-                            'opacity-60 cursor-not-allowed hover:translate-y-0 hover:shadow-[4px_4px_0px_0px_#001e1d]':
-                                isProcessing,
-                        }"
-                        :aria-pressed="attendanceType === 'time-in'"
-                    >
-                        <LogIn class="w-5 h-5" />
-                        <span class="text-sm">Time In</span>
-                        <span
-                            v-if="attendanceType === 'time-in'"
-                            class="absolute right-2 top-2 h-3 w-3 rounded-full border-2 border-brand-stroke bg-green-500"
-                            aria-hidden="true"
-                        />
-                    </button>
-
-                    <button
-                        @click="handleTimeAction('time-out')"
-                        :disabled="isProcessing"
-                        class="group relative bg-brand-tertiary hover:bg-[#f07a7b] text-brand-headline border-2 border-brand-stroke rounded-2xl py-4 px-3 transition-all duration-200 ease-out font-bold shadow-[4px_4px_0px_0px_#001e1d] hover:-translate-y-1 hover:shadow-[6px_6px_0px_0px_#001e1d] active:translate-x-1 active:translate-y-1 active:shadow-none flex flex-col items-center gap-2"
-                        :class="{
-                            'ring-4 ring-brand-stroke ring-offset-2 ring-offset-brand-card shadow-none translate-x-1 translate-y-1':
-                                attendanceType === 'time-out',
-                            'opacity-60 cursor-not-allowed hover:translate-y-0 hover:shadow-[4px_4px_0px_0px_#001e1d]':
-                                isProcessing,
-                        }"
-                        :aria-pressed="attendanceType === 'time-out'"
-                    >
-                        <LogOut class="w-5 h-5" />
-                        <span class="text-sm">Time Out</span>
-                        <span
-                            v-if="attendanceType === 'time-out'"
-                            class="absolute right-2 top-2 h-3 w-3 rounded-full border-2 border-brand-stroke bg-green-500"
-                            aria-hidden="true"
-                        />
-                    </button>
-                </div>
-
-                <button
-                    v-if="props.attendanceSchedule.show_face_attendance_button"
-                    type="button"
-                    @click="submitFaceAttendance"
-                    :disabled="isProcessing"
-                    class="mt-4 flex w-full items-center justify-center gap-2 rounded-2xl border-2 border-brand-stroke bg-brand-headline px-4 py-3 text-sm font-black text-brand-stroke shadow-[4px_4px_0px_0px_#001e1d] transition-all duration-200 ease-out hover:-translate-y-1 hover:shadow-[6px_6px_0px_0px_#001e1d] active:translate-x-1 active:translate-y-1 active:shadow-none disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:translate-y-0 disabled:hover:shadow-[4px_4px_0px_0px_#001e1d]"
-                >
-                    <Camera class="h-5 w-5" />
-                    Facial Recognition
-                </button>
+                <canvas
+                    ref="overlayRef"
+                    class="absolute inset-0 h-full w-full pointer-events-none"
+                />
+                <canvas ref="canvasRef" style="display: none" />
 
                 <div
-                    v-if="props.attendanceSchedule.show_scan_status_messages"
-                    class="mt-5 rounded-2xl border-2 border-brand-stroke bg-brand-headline px-4 py-3 text-center shadow-[3px_3px_0px_0px_#001e1d]"
-                    :class="{
-                        'border-red-700 bg-red-100 shadow-[3px_3px_0px_0px_#7f1d1d]':
-                            scannerStatusTone === 'error',
-                    }"
+                    class="absolute left-4 top-4 z-10 flex items-center gap-2 rounded-full bg-brand-bg px-4 py-2 shadow-lg md:left-6 md:top-6"
                 >
-                    <p
-                        class="text-brand-stroke text-xs font-black uppercase tracking-wide"
-                        :class="{
-                            'text-red-800': scannerStatusTone === 'error',
-                        }"
-                    >
-                        {{ scannerStatusText }}
+                    <div class="h-2 w-2 animate-pulse rounded-full bg-white" />
+                    <span class="text-xs font-black text-white">
+                        LIVE
+                    </span>
+                </div>
+
+                <div
+                    class="absolute right-4 top-4 z-10 flex items-center gap-2 rounded-full border border-black/10 bg-white px-4 py-2 shadow-lg md:right-6 md:top-6"
+                >
+                    <LoaderCircle
+                        v-if="locationLoading"
+                        class="h-4 w-4 animate-spin text-brand-stroke"
+                    />
+                    <TriangleAlert
+                        v-else-if="locationError"
+                        class="h-4 w-4 text-red-600"
+                    />
+                    <TriangleAlert
+                        v-else-if="accuracyWarning || usingCachedLocation"
+                        class="h-4 w-4 text-yellow-600"
+                    />
+                    <MapPin v-else class="h-4 w-4 text-green-600" />
+                    <span class="text-xs font-bold text-brand-stroke">
+                        <template v-if="locationLoading">GPS...</template>
+                        <template v-else-if="locationError">GPS blocked</template>
+                        <template v-else-if="usingCachedLocation">Cached GPS</template>
+                        <template v-else-if="accuracyWarning">Low GPS</template>
+                        <template v-else-if="isLocationReady">GPS ready</template>
+                        <template v-else>GPS pending</template>
+                    </span>
+                </div>
+
+                <div
+                    v-if="isError"
+                    class="absolute inset-0 flex items-center justify-center bg-brand-stroke/90 px-6 text-center text-white"
+                >
+                    <p class="text-sm font-semibold">
+                        Camera blocked. Check browser permissions to proceed.
                     </p>
                 </div>
 
                 <div
-                    v-if="isProcessing"
-                    class="mt-5 flex items-center gap-3 rounded-2xl border-2 border-brand-stroke bg-brand-headline px-4 py-3 text-left shadow-[3px_3px_0px_0px_#001e1d]"
+                    class="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/75 via-black/35 to-transparent px-6 pb-6 pt-16 text-center"
                 >
-                    <LoaderCircle class="h-5 w-5 shrink-0 animate-spin text-brand-stroke" />
                     <p
-                        class="text-brand-stroke font-bold tracking-wider uppercase text-xs"
+                        class="text-sm font-black text-white drop-shadow"
+                        :class="{
+                            'text-red-100': cameraGuidanceIsWarning,
+                        }"
                     >
-                        {{ processingLabel }}
+                        {{ cameraGuidanceText }}
                     </p>
-                </div>
-
-                <div class="flex flex-col justify-center gap-3" v-else>
-                    <div class="w-full">
-                        <input
-                            ref="rfidInput"
-                            type="text"
-                            autocomplete="off"
-                            class="absolute -top-96"
-                            style="opacity: 0; pointer-events: none"
-                            @input="onRFIDInput"
-                            @keydown="onRFIDKeydown"
-                        />
-
-                        <div class="flex items-center justify-center">
-                            <div
-                                v-if="showEmployeeIdInputField"
-                                class="mx-auto mt-4 w-full max-w-64"
-                            >
-                                <input
-                                    ref="empIdInput"
-                                    v-model="employeePassword"
-                                    type="text"
-                                    name="keypad-attendance-pin"
-                                    autocomplete="off"
-                                    inputmode="numeric"
-                                    pattern="[0-9]*"
-                                    autocapitalize="off"
-                                    spellcheck="false"
-                                    style="-webkit-text-security: disc"
-                                    class="mb-2 h-9 w-full rounded-lg border-2 border-brand-stroke bg-brand-headline px-3 text-center text-sm font-black tracking-[0.25em] text-brand-stroke"
-                                    @focus="onEmpIdFocus"
-                                    @input="onEmpIdInput"
-                                    @keydown="onEmpIdKeydown"
-                                />
-
-                                <div class="grid grid-cols-3 gap-1.5">
-                                    <button
-                                        v-for="digit in keypadDigits.slice(0, 9)"
-                                        :key="digit"
-                                        type="button"
-                                        class="flex h-9 items-center justify-center rounded-lg border-2 border-brand-stroke bg-brand-headline text-sm font-black text-brand-stroke shadow-[2px_2px_0px_0px_#001e1d] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none"
-                                        @click="appendKeypadDigit(digit)"
-                                    >
-                                        {{ digit }}
-                                    </button>
-                                    <button
-                                        type="button"
-                                        class="flex h-9 items-center justify-center rounded-lg border-2 border-brand-stroke bg-brand-tertiary text-brand-headline shadow-[2px_2px_0px_0px_#001e1d] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none"
-                                        aria-label="Clear"
-                                        @click="clearKeypad"
-                                    >
-                                        <Eraser class="h-4 w-4" />
-                                    </button>
-                                    <button
-                                        type="button"
-                                        class="flex h-9 items-center justify-center rounded-lg border-2 border-brand-stroke bg-brand-headline text-sm font-black text-brand-stroke shadow-[2px_2px_0px_0px_#001e1d] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none"
-                                        @click="appendKeypadDigit('0')"
-                                    >
-                                        0
-                                    </button>
-                                    <button
-                                        type="button"
-                                        class="flex h-9 items-center justify-center rounded-lg border-2 border-brand-stroke bg-brand-headline text-brand-stroke shadow-[2px_2px_0px_0px_#001e1d] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none"
-                                        aria-label="Delete"
-                                        @click="deleteKeypadDigit"
-                                    >
-                                        <Delete class="h-4 w-4" />
-                                    </button>
-                                </div>
-
-                                <button
-                                    type="button"
-                                    class="mt-2 flex h-9 w-full items-center justify-center rounded-lg border-2 border-brand-stroke bg-brand-accent text-xs font-black text-brand-stroke shadow-[3px_3px_0px_0px_#001e1d] active:translate-x-1 active:translate-y-1 active:shadow-none"
-                                    @click="submitManualAttendance"
-                                >
-                                    Enter
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-
                     <p
                         v-if="
-                            !showEmployeeIdInputField &&
+                            faceStatusText &&
                             faceStatusText !== 'Face verification ready.'
                         "
-                        class="text-brand-bg text-xs font-black uppercase tracking-wide"
+                        class="mt-1 text-xs font-black text-white/85 drop-shadow"
                     >
                         {{ faceStatusText }}
                     </p>
                 </div>
+            </div>
+
+            <div v-else class="w-full">
+                <div
+                    v-if="!showFaceCheckOnly"
+                    class="mb-5 flex flex-col items-center space-y-0 text-center"
+                >
+                    <p
+                        class="text-s font-bold text-brand-bg"
+                    >
+                        {{ currentDate }}
+                    </p>
+                    <h1
+                        class="font-mona-sans text-3xl font-black text-brand-stroke tabular-nums lg:text-4xl"
+                    >
+                        {{ currentTime }}
+                    </h1>
+                </div>
+
+                <div
+                    v-if="showFaceCheckOnly"
+                    data-face-auth-status="checking-employee"
+                    class="flex min-h-40 w-full items-center justify-center rounded-xl border border-brand-bg/15 bg-brand-paragraph px-4 py-7 text-center"
+                >
+                    <p class="whitespace-pre-line text-sm font-black leading-snug text-brand-stroke md:text-base">
+                        {{ faceStatusText }}
+                    </p>
+                </div>
+
+                <template v-else>
+                    <div class="grid grid-cols-2 gap-4">
+                        <button
+                            @click="handleTimeAction('time-in')"
+                            :disabled="isProcessing"
+                            class="group relative flex items-center justify-center gap-2 rounded-xl bg-brand-bg px-3 py-3 font-black text-white shadow-lg shadow-red-950/15 transition hover:bg-brand-tertiary focus:outline-none focus:ring-4 focus:ring-brand-bg/20"
+                            :class="{
+                                'ring-4 ring-brand-bg/25 ring-offset-2 ring-offset-white':
+                                    attendanceType === 'time-in',
+                                'cursor-not-allowed opacity-60':
+                                    isProcessing,
+                            }"
+                            :aria-pressed="attendanceType === 'time-in'"
+                        >
+                            <LogIn class="h-4 w-4" />
+                            <span class="text-sm">Time In</span>
+                            <span
+                                v-if="attendanceType === 'time-in'"
+                                class="absolute right-2 top-2 h-2.5 w-2.5 rounded-full bg-white"
+                                aria-hidden="true"
+                            />
+                        </button>
+
+                        <button
+                            @click="handleTimeAction('time-out')"
+                            :disabled="isProcessing"
+                            class="group relative flex items-center justify-center gap-2 rounded-xl border border-brand-bg/15 bg-brand-paragraph px-3 py-3 font-black text-brand-stroke shadow-sm transition hover:border-brand-bg/30 hover:bg-white focus:outline-none focus:ring-4 focus:ring-brand-bg/15"
+                            :class="{
+                                'ring-4 ring-brand-bg/25 ring-offset-2 ring-offset-white':
+                                    attendanceType === 'time-out',
+                                'cursor-not-allowed opacity-60':
+                                    isProcessing,
+                            }"
+                            :aria-pressed="attendanceType === 'time-out'"
+                        >
+                            <LogOut class="h-4 w-4" />
+                            <span class="text-sm">Time Out</span>
+                            <span
+                                v-if="attendanceType === 'time-out'"
+                                class="absolute right-2 top-2 h-2.5 w-2.5 rounded-full bg-brand-bg"
+                                aria-hidden="true"
+                            />
+                        </button>
+                    </div>
+
+                    <button
+                        v-if="props.attendanceSchedule.show_face_attendance_button"
+                        type="button"
+                        @click="submitFaceAttendance"
+                        :disabled="isProcessing"
+                        class="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-brand-bg/15 bg-white px-4 py-2.5 text-sm font-black text-brand-stroke shadow-sm transition hover:border-brand-bg/30 hover:bg-brand-paragraph disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                        <Camera class="h-5 w-5" />
+                        Facial Recognition
+                    </button>
+
+                    <div
+                        data-scanner-status-version="20260715-always-on"
+                        class="mt-3 rounded-xl border border-brand-bg/15 bg-brand-paragraph px-4 py-2.5 text-center"
+                        :class="{
+                            'border-red-200 bg-red-50':
+                                scannerStatusTone === 'error',
+                        }"
+                    >
+                        <p
+                            class="text-xs font-black text-brand-stroke"
+                            :class="{
+                                'text-red-800': scannerStatusTone === 'error',
+                            }"
+                        >
+                            {{ scannerStatusText }}
+                        </p>
+                    </div>
+
+                    <div
+                        v-if="isProcessing"
+                        class="mt-3 flex items-center gap-3 rounded-xl border border-brand-bg/15 bg-brand-paragraph px-4 py-2.5 text-left"
+                    >
+                        <LoaderCircle class="h-5 w-5 shrink-0 animate-spin text-brand-stroke" />
+                        <p
+                            class="text-xs font-black text-brand-stroke"
+                        >
+                            {{ processingLabel }}
+                        </p>
+                    </div>
+
+                    <div class="flex flex-col justify-center gap-3" v-else>
+                        <div class="w-full">
+                            <input
+                                ref="rfidInput"
+                                type="text"
+                                autocomplete="off"
+                                class="absolute -top-96"
+                                style="opacity: 0; pointer-events: none"
+                                @input="onRFIDInput"
+                                @keydown="onRFIDKeydown"
+                            />
+
+                            <div class="flex items-center justify-center">
+                                <div
+                                    v-if="showEmployeeIdInputField"
+                                    class="mx-auto mt-3 w-full max-w-80"
+                                >
+                                    <input
+                                        ref="empIdInput"
+                                        v-model="employeePassword"
+                                        type="text"
+                                        name="keypad-attendance-pin"
+                                        autocomplete="off"
+                                        inputmode="numeric"
+                                        pattern="[0-9]*"
+                                        autocapitalize="off"
+                                        spellcheck="false"
+                                        style="-webkit-text-security: disc"
+                                        class="mb-2 h-12 w-full rounded-lg border border-brand-bg/20 bg-white px-3 text-center text-3xl font-black text-brand-stroke shadow-inner"
+                                        @focus="onEmpIdFocus"
+                                        @input="onEmpIdInput"
+                                        @keydown="onEmpIdKeydown"
+                                    />
+
+                                    <div class="grid grid-cols-3 gap-2">
+                                        <button
+                                            v-for="digit in keypadDigits.slice(0, 9)"
+                                            :key="digit"
+                                            type="button"
+                                            class="flex h-12 items-center justify-center rounded-lg border border-brand-bg/15 bg-white text-lg font-black text-brand-stroke shadow-sm active:scale-95"
+                                            @click="appendKeypadDigit(digit)"
+                                        >
+                                            {{ digit }}
+                                        </button>
+                                        <button
+                                            type="button"
+                                            class="flex h-12 items-center justify-center rounded-lg bg-brand-tertiary text-white shadow-sm active:scale-95"
+                                            aria-label="Clear"
+                                            @click="clearKeypad"
+                                        >
+                                            <Eraser class="h-5 w-5" />
+                                        </button>
+                                        <button
+                                            type="button"
+                                            class="flex h-12 items-center justify-center rounded-lg border border-brand-bg/15 bg-white text-lg font-black text-brand-stroke shadow-sm active:scale-95"
+                                            @click="appendKeypadDigit('0')"
+                                        >
+                                            0
+                                        </button>
+                                        <button
+                                            type="button"
+                                            class="flex h-12 items-center justify-center rounded-lg border border-brand-bg/15 bg-white text-brand-stroke shadow-sm active:scale-95"
+                                            aria-label="Delete"
+                                            @click="deleteKeypadDigit"
+                                        >
+                                            <Delete class="h-5 w-5" />
+                                        </button>
+                                    </div>
+
+                                    <button
+                                        type="button"
+                                        class="mt-2 flex h-11 w-full items-center justify-center rounded-lg bg-brand-bg text-sm font-black text-white shadow-md shadow-red-950/10 active:scale-[0.98]"
+                                        @click="submitManualAttendance"
+                                    >
+                                        Enter
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <p
+                            v-if="
+                                !showEmployeeIdInputField &&
+                                faceStatusText !== 'Face verification ready.'
+                            "
+                            class="text-xs font-black text-brand-bg"
+                        >
+                            {{ faceStatusText }}
+                        </p>
+                    </div>
+                </template>
             </div>
         </div>
     </div>

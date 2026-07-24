@@ -49,61 +49,59 @@ const closeAnnouncement = () => {
 </script>
 
 <template>
-    <aside class="order-3 xl:order-1 flex flex-col gap-8">
-        <!-- Announcements -->
+    <aside class="flex h-full flex-col gap-3">
         <div
-            class="bg-brand-card rounded-4xl p-8 shadow-[8px_8px_0px_0px_#001e1d] border-2 border-brand-stroke grow flex flex-col animate-fade-up"
+            class="flex flex-1 flex-col rounded-2xl border border-black/5 bg-white p-4 shadow-xl shadow-black/5 animate-fade-up"
             style="animation-delay: 0.3s"
         >
-            <div class="flex items-center justify-between gap-3 mb-6">
+            <div class="mb-4 flex items-center justify-between gap-3">
                 <div class="flex items-center gap-3 min-w-0">
                     <div
-                        class="p-2 bg-brand-accent rounded-xl border border-brand-stroke"
+                        class="flex h-11 w-11 items-center justify-center rounded-full bg-brand-bg/10 text-brand-bg"
                     >
-                        <Bell class="w-5 h-5 text-brand-stroke" />
+                        <Bell class="h-5 w-5" />
                     </div>
-                    <h2 class="text-xl font-black text-brand-stroke">Latest</h2>
+                    <div>
+                        <h2 class="text-2xl font-black text-brand-stroke">
+                            Announcements
+                        </h2>
+                    </div>
                 </div>
 
-                <!--                <Link-->
-                <!--                    href="/announcements"-->
-                <!--                    class="inline-flex items-center gap-1 text-[11px] font-black uppercase text-brand-bg hover:text-brand-stroke transition-colors"-->
-                <!--                >-->
-                <!--                    View all-->
-                <!--                    <ArrowRight class="w-3.5 h-3.5"/>-->
-                <!--                </Link>-->
             </div>
 
             <div
-                class="space-y-5 grow custom-scrollbar overflow-y-auto pr-2 text-brand-stroke"
+                class="custom-scrollbar grow space-y-4 overflow-y-auto pr-1 text-brand-stroke"
             >
                 <div
                     v-if="!latestAnnouncements.length"
-                    class="rounded-2xl border border-brand-stroke/10 bg-white/45 p-4"
+                    class="rounded-xl border border-dashed border-black/15 bg-brand-paragraph/60 p-4"
                 >
-                    <p class="text-sm font-bold">No announcements yet.</p>
+                    <p class="text-sm font-bold text-black/55">
+                        No announcements yet.
+                    </p>
                 </div>
 
                 <div
                     v-for="announcement in latestAnnouncements"
                     :key="announcement.id"
-                    class="relative pl-6 before:absolute before:left-0 before:top-0 before:bottom-0 before:w-1 before:rounded-full before:bg-(--announcement-accent)"
+                    class="relative rounded-xl border border-black/5 bg-white p-4 shadow-sm before:absolute before:left-0 before:top-4 before:bottom-4 before:w-1 before:rounded-full before:bg-(--announcement-accent)"
                     :style="{
                         '--announcement-accent':
                             getAnnouncementStyle(announcement).accent,
                     }"
                 >
                     <p
-                        class="text-[10px] font-black text-brand-bg uppercase mb-1"
+                        class="mb-2 pl-3 text-xs font-bold text-brand-bg"
                     >
                         {{ formatAnnouncementDate(announcement.published_at) }}
                     </p>
-                    <div class="mb-1 flex items-start justify-between gap-2">
-                        <h3 class="text-sm font-bold">
+                    <div class="mb-2 flex items-start justify-between gap-2 pl-3">
+                        <h3 class="text-base font-black leading-snug">
                             {{ announcement.title }}
                         </h3>
                         <span
-                            class="shrink-0 rounded-full border border-brand-stroke px-2 py-0.5 text-[9px] font-black uppercase"
+                            class="shrink-0 rounded-full px-2 py-1 text-[10px] font-black"
                             :style="{
                                 backgroundColor:
                                     getAnnouncementStyle(announcement).soft,
@@ -113,12 +111,12 @@ const closeAnnouncement = () => {
                             {{ getAnnouncementStyle(announcement).label }}
                         </span>
                     </div>
-                    <p class="text-xs opacity-70 leading-relaxed">
+                    <p class="pl-3 text-sm leading-relaxed text-black/60">
                         {{ getAnnouncementExcerpt(announcement.content) }}
                     </p>
                     <p
                         v-if="getAnnouncementAttachments(announcement).length"
-                        class="mt-2 text-[10px] font-black uppercase text-brand-bg"
+                        class="mt-3 pl-3 text-xs font-black text-brand-bg"
                     >
                         {{ getAnnouncementAttachments(announcement).length }}
                         attachment{{
@@ -130,7 +128,7 @@ const closeAnnouncement = () => {
                     </p>
                     <button
                         type="button"
-                        class="my-2 inline-flex items-center gap-1 rounded-xl border border-brand-stroke bg-white px-3 py-1.5 text-[11px] font-black uppercase text-brand-stroke shadow-[3px_3px_0px_0px_#001e1d] transition-transform hover:-translate-y-0.5"
+                        class="ml-3 mt-4 inline-flex items-center gap-2 rounded-full bg-brand-bg px-4 py-2 text-xs font-black text-white shadow-md shadow-red-950/10 transition hover:bg-brand-tertiary"
                         @click="openAnnouncement(announcement)"
                     >
                         View more
@@ -140,53 +138,57 @@ const closeAnnouncement = () => {
             </div>
         </div>
 
-        <!-- Birthdays Card -->
         <div
             v-if="props.todayBirthdayCelebrants.length > 0"
-            class="bg-brand-card rounded-4xl p-8 shadow-[8px_8px_0px_0px_#001e1d] border-2 border-brand-stroke grow flex flex-col animate-fade-up"
+            class="flex max-h-64 flex-col rounded-2xl border border-black/5 bg-white p-4 shadow-xl shadow-black/5 animate-fade-up"
             style="animation-delay: 0.1s"
         >
-            <div class="flex items-center gap-3 mb-6">
+            <div class="mb-4 flex items-center gap-3">
                 <div
-                    class="p-2 bg-brand-paragraph rounded-xl border border-brand-stroke"
+                    class="flex h-11 w-11 items-center justify-center rounded-full bg-brand-accent/25 text-brand-bg"
                 >
-                    <Gift class="w-5 h-5 text-brand-bg" />
+                    <Gift class="h-5 w-5" />
                 </div>
-                <h2 class="text-xl font-black text-brand-stroke">
-                    Today's Birthday Celebrants
-                </h2>
+                <div>
+                    <p class="text-xs font-black text-brand-bg">
+                        Team moments
+                    </p>
+                    <h2 class="text-2xl font-black text-brand-stroke">
+                        Birthdays
+                    </h2>
+                </div>
             </div>
 
             <div
-                class="space-y-4 grow custom-scrollbar overflow-y-auto pr-2 text-brand-stroke"
+                class="custom-scrollbar grow space-y-3 overflow-y-auto pr-1 text-brand-stroke"
             >
                 <div
                     v-for="(
                         celebrant, celebrantsIndex
                     ) in props.todayBirthdayCelebrants"
                     :key="celebrantsIndex"
-                    class="flex items-center gap-4 p-3 rounded-2xl bg-white/50 border border-brand-stroke/10"
+                    class="flex items-center gap-4 rounded-xl border border-black/5 bg-brand-paragraph/55 p-3"
                 >
                     <img
                         v-if="celebrant.media.length > 0"
                         :src="celebrant.media[0].original_url"
                         alt="Employee Profile"
-                        class="w-12 h-12 rounded-full border-2 border-brand-stroke object-cover"
+                        class="h-12 w-12 rounded-full object-cover ring-2 ring-brand-bg/15"
                     />
-                    <CircleUser v-else class="w-8 h-8" />
-                    <div>
-                        <p class="font-bold text-sm">
+                    <CircleUser v-else class="h-8 w-8 text-brand-bg" />
+                    <div class="min-w-0">
+                        <p class="truncate text-sm font-black">
                             {{ celebrant.first_name }} {{ celebrant.last_name }}
                         </p>
-                        <p class="text-xs text-brand-bg font-medium">
+                        <p class="truncate text-xs font-semibold text-black/55">
                             {{ celebrant.department?.name ?? null }}
                         </p>
                     </div>
                 </div>
                 <div
-                    class="mt-6 p-4 bg-brand-accent/20 rounded-2xl text-center border-2 border-dashed"
+                    class="mt-4 rounded-xl border border-dashed border-brand-bg/25 bg-brand-accent/15 p-4 text-center"
                 >
-                    <p class="text-sm font-medium italic text-brand-bg">
+                    <p class="text-sm font-bold text-brand-bg">
                         "Enjoy your special day!"
                     </p>
                 </div>
@@ -198,14 +200,14 @@ const closeAnnouncement = () => {
     <Teleport to="body">
         <div
             v-if="selectedAnnouncement"
-            class="fixed inset-0 z-50 flex items-center justify-center bg-brand-stroke/70 px-4 py-6"
+            class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4 py-6 backdrop-blur-sm"
             @click.self="closeAnnouncement"
         >
             <article
-                class="w-full max-w-2xl max-h-[85vh] overflow-hidden rounded-3xl border-2 border-brand-stroke bg-brand-card shadow-[8px_8px_0px_0px_#001e1d]"
+                class="max-h-[85vh] w-full max-w-2xl overflow-hidden rounded-2xl bg-white shadow-2xl"
             >
                 <header
-                    class="flex items-start justify-between gap-4 border-b-2 border-t-8 border-brand-stroke px-6 py-5"
+                    class="flex items-start justify-between gap-4 border-b border-black/10 border-t-8 px-6 py-5"
                     :style="{
                         backgroundColor:
                             getAnnouncementStyle(selectedAnnouncement).soft,
@@ -215,7 +217,7 @@ const closeAnnouncement = () => {
                 >
                     <div class="min-w-0">
                         <p
-                            class="mb-2 text-[10px] font-black uppercase text-brand-stroke"
+                            class="mb-2 text-xs font-black text-brand-bg"
                         >
                             {{
                                 getAnnouncementStyle(selectedAnnouncement).label
@@ -223,14 +225,14 @@ const closeAnnouncement = () => {
                             Announcement
                         </p>
                         <h2
-                            class="text-2xl font-black leading-tight text-brand-stroke wrap-break-word"
+                            class="wrap-break-word text-2xl font-black leading-tight text-brand-stroke"
                         >
                             {{ selectedAnnouncement.title }}
                         </h2>
                     </div>
                     <button
                         type="button"
-                        class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-brand-stroke bg-white text-brand-stroke"
+                        class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white text-brand-stroke shadow-sm ring-1 ring-black/10"
                         @click="closeAnnouncement"
                     >
                         <X class="h-5 w-5" />
@@ -250,7 +252,7 @@ const closeAnnouncement = () => {
                             getAnnouncementAttachments(selectedAnnouncement)
                                 .length
                         "
-                        class="mt-6 border-t-2 border-brand-stroke/15 pt-5"
+                        class="mt-6 border-t border-black/10 pt-5"
                     >
                         <div class="grid gap-3 sm:grid-cols-2">
                             <a
@@ -261,7 +263,7 @@ const closeAnnouncement = () => {
                                 :href="getAttachmentUrl(attachment)"
                                 target="_blank"
                                 rel="noopener"
-                                class="overflow-hidden rounded-2xl border border-brand-stroke bg-white text-brand-stroke transition-transform hover:-translate-y-0.5"
+                                class="overflow-hidden rounded-xl border border-black/10 bg-white text-brand-stroke transition-transform hover:-translate-y-0.5"
                             >
                                 <img
                                     v-if="isImageAttachment(attachment)"

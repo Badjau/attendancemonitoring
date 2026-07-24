@@ -1,6 +1,18 @@
 param(
     [string]$InstallDir = "$env:LOCALAPPDATA\ZktecoLocalAgent",
-    [string]$ApiBaseUrl = "http://127.0.0.1:8000/api/zkteco",
+    [string]$ApiBaseUrl = "https://attendancemonitoring.test/api/zkteco",
+    [string[]]$ApiFallbackBaseUrls = @(
+        "https://attendancemonitoring.test/api/zkteco",
+        "http://attendancemonitoring.test/api/zkteco",
+        "https://127.0.0.1/api/zkteco",
+        "http://127.0.0.1/api/zkteco",
+        "https://localhost/api/zkteco",
+        "http://localhost/api/zkteco",
+        "https://localhost:8000/api/zkteco",
+        "http://localhost:8000/api/zkteco",
+        "https://127.0.0.1:8000/api/zkteco",
+        "http://127.0.0.1:8000/api/zkteco"
+    ),
     [string]$ScannerToken = "",
     [string]$LocalListenUrl = "http://127.0.0.1:8765",
     [string]$DeviceSerial = "ZKTECO-LOCAL",
@@ -26,6 +38,7 @@ Copy-Item -Path (Join-Path $source "publish\*") -Destination $InstallDir -Recurs
 $config = @{
     ZktecoAgent = @{
         ApiBaseUrl = $ApiBaseUrl
+        ApiFallbackBaseUrls = $ApiFallbackBaseUrls
         ScannerToken = $ScannerToken
         LocalListenUrl = $LocalListenUrl
         DeviceSerial = $DeviceSerial

@@ -30,6 +30,7 @@ class AttendanceController extends Controller
         try {
             $verifiedEmployee = $this->attendanceService->verifyEmployee($request);
             $employee = $verifiedEmployee['employee'];
+            $employee->loadMissing('branches');
 
             return response()->json([
                 'employee' => [
@@ -40,6 +41,8 @@ class AttendanceController extends Controller
                     'position' => $employee->position,
                     'branch' => $employee->branch,
                     'profile_url' => $verifiedEmployee['profile_url'],
+                    'face_ready' => $verifiedEmployee['face_ready'],
+                    'face_enrollment_count' => $verifiedEmployee['face_enrollment_count'],
                 ],
             ]);
         } catch (ValidationException $e) {
@@ -58,16 +61,18 @@ class AttendanceController extends Controller
     {
         try {
             $attendance = $this->attendanceService->recordAttendance($request);
-            $attendance->load('employee');
+            $attendance->load('employee.branches');
             $employee = $attendance->employee;
 
             if ($request->expectsJson()) {
                 return response()->json([
                     'message' => 'Attendance recorded successfully.',
+                    'tap_event' => $attendance->tap_event,
                     'greeting' => [
                         'first_name' => $employee->first_name,
                         'is_birthday' => $employee->date_of_birth?->isBirthday() ?? false,
                         'attendance_type' => $attendance->attendance_type->value,
+                        'tap_event' => $attendance->tap_event,
                     ],
                     'employee' => [
                         'id' => $employee->id,
@@ -86,6 +91,7 @@ class AttendanceController extends Controller
                     'first_name' => $employee->first_name,
                     'is_birthday' => $employee->date_of_birth?->isBirthday() ?? false,
                     'attendance_type' => $attendance->attendance_type->value,
+                    'tap_event' => $attendance->tap_event,
                 ]);
         } catch (ValidationException $e) {
             if ($request->expectsJson()) {

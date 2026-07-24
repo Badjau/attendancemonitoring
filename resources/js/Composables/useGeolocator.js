@@ -12,6 +12,8 @@ export function useGeolocator() {
     const address = ref('')
     const usingCachedLocation = ref(false)
     const locationSource = ref('')
+    let pendingLocationRequest = null
+    let locationWatchId = null
 
     const readLastKnownCoords = () => {
         try {
@@ -85,7 +87,43 @@ export function useGeolocator() {
         }
     }
 
+    const applyPosition = (position, shouldResolveAddress = true) => {
+        const latitude = position.coords.latitude
+        const longitude = position.coords.longitude
+
+        coords.value = {
+            latitude,
+            longitude,
+            accuracy: position.coords.accuracy,
+            address: coords.value.address || '',
+        }
+        usingCachedLocation.value = false
+        locationSource.value = 'live'
+        accuracyWarning.value = position.coords.accuracy > 150 //Lower is better
+        error.value = ''
+        loading.value = false
+        saveLastKnownCoords(coords.value)
+
+        // GPS coordinates are the required attendance proof.
+        // Address lookup is only a convenience, so do it later and
+        // only when a network connection is available.
+        if (shouldResolveAddress && navigator.onLine) {
+            resolveAddress(latitude, longitude).then((resolvedAddress) => {
+                if (!resolvedAddress) return
+
+                coords.value = {
+                    ...coords.value,
+                    address: resolvedAddress,
+                }
+                address.value = resolvedAddress
+                saveLastKnownCoords(coords.value)
+            })
+        }
+    }
+
     const getLocation = () => {
+        if (pendingLocationRequest) return pendingLocationRequest
+
         error.value = ''
 
         if (!navigator.geolocation) {
@@ -95,41 +133,11 @@ export function useGeolocator() {
 
         loading.value = true
 
-        return new Promise((resolve, reject) => {
+        pendingLocationRequest = new Promise((resolve, reject) => {
             navigator.geolocation.getCurrentPosition(
                 (position) => {
-                    const latitude = position.coords.latitude
-                    const longitude = position.coords.longitude
-
-                    coords.value = {
-                        latitude,
-                        longitude,
-                        accuracy: position.coords.accuracy,
-                        address: '',
-                    }
-                    usingCachedLocation.value = false
-                    locationSource.value = 'live'
-                    accuracyWarning.value = position.coords.accuracy > 150 //Lower is better
-                    loading.value = false
-                    saveLastKnownCoords(coords.value)
+                    applyPosition(position)
                     resolve(coords.value)
-
-                    // GPS coordinates are the required attendance proof.
-                    // Address lookup is only a convenience, so do it later and
-                    // only when a network connection is available.
-                    if (navigator.onLine) {
-                        resolveAddress(latitude, longitude).then(
-                            (resolvedAddress) => {
-                                if (!resolvedAddress) return
-
-                                coords.value = {
-                                    ...coords.value,
-                                    address: resolvedAddress,
-                                }
-                                address.value = resolvedAddress
-                            },
-                        )
-                    }
                 },
                 () => {
                     const cachedLocation = readLastKnownCoords()
@@ -153,13 +161,64 @@ export function useGeolocator() {
                 {
                     enableHighAccuracy: true,
                     timeout: 10000,
-                    maximumAge: 0,
+                    maximumAge: 5000,
                 },
             )
+        }).finally(() => {
+            pendingLocationRequest = null
         })
+
+        return pendingLocationRequest
+    }
+
+    const startLocationWatch = () => {
+        if (locationWatchId !== null) return
+
+        error.value = ''
+
+        if (!navigator.geolocation) {
+            error.value = 'Location access denied. Please enable GPS.'
+            return
+        }
+
+        loading.value = true
+
+        locationWatchId = navigator.geolocation.watchPosition(
+            (position) => applyPosition(position, false),
+            () => {
+                const cachedLocation = readLastKnownCoords()
+
+                if (!navigator.onLine && cachedLocation) {
+                    coords.value = cachedLocation
+                    address.value = cachedLocation.address || ''
+                    usingCachedLocation.value = true
+                    locationSource.value = 'cached'
+                    accuracyWarning.value = false
+                    error.value = ''
+                    loading.value = false
+                    return
+                }
+
+                error.value = 'Location access denied. Please enable GPS.'
+                loading.value = false
+            },
+            {
+                enableHighAccuracy: true,
+                timeout: 10000,
+                maximumAge: 0,
+            },
+        )
+    }
+
+    const stopLocationWatch = () => {
+        if (locationWatchId === null || !navigator.geolocation) return
+
+        navigator.geolocation.clearWatch(locationWatchId)
+        locationWatchId = null
     }
 
     const resetLocation = () => {
+        stopLocationWatch()
         coords.value = {
             latitude: 0,
             longitude: 0,
@@ -182,6 +241,8 @@ export function useGeolocator() {
         usingCachedLocation,
         locationSource,
         getLocation,
+        startLocationWatch,
+        stopLocationWatch,
         resetLocation,
     }
 }

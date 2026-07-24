@@ -25,25 +25,26 @@ const filteredAttendanceToday = computed(() => {
 </script>
 
 <template>
-    <aside class="order-1 xl:order-3 flex flex-col gap-8">
-        <!-- Present Today -->
+    <aside class="flex min-h-0 flex-1 flex-col">
         <div
-            class="bg-brand-card rounded-4xl p-8 shadow-[8px_8px_0px_0px_#001e1d] border-2 border-brand-stroke grow flex flex-col animate-fade-up"
+            class="flex min-h-0 grow flex-col rounded-2xl border border-black/5 bg-white p-4 shadow-xl shadow-black/5 animate-fade-up"
             style="animation-delay: 0.4s"
         >
-            <div class="flex items-center justify-between mb-6">
+            <div class="mb-4 flex items-center justify-between gap-4">
                 <div class="flex items-center gap-3">
                     <div
-                        class="p-2 bg-brand-paragraph rounded-xl border border-brand-stroke"
+                        class="flex h-11 w-11 items-center justify-center rounded-full bg-brand-bg/10 text-brand-bg"
                     >
-                        <Users class="w-5 h-5 text-brand-bg" />
+                        <Users class="h-5 w-5" />
                     </div>
-                    <h2 class="text-xl font-black text-brand-stroke">
-                        Present
-                    </h2>
+                    <div>
+                        <p class="text-xs font-black text-brand-bg">
+                            Live roster
+                        </p>
+                    </div>
                 </div>
                 <span
-                    class="text-xs font-bold bg-brand-bg text-brand-headline px-3 py-1 rounded-full"
+                    class="rounded-full bg-brand-bg px-3 py-1 text-m font-black text-white"
                     id="present-count"
                     v-if="filteredAttendanceToday.length > 0"
                 >
@@ -53,36 +54,43 @@ const filteredAttendanceToday = computed(() => {
 
             <p
                 v-if="props.activeBranch"
-                class="mb-4 text-xs font-bold uppercase tracking-wide text-brand-bg"
+                class="mb-4 rounded-full bg-brand-paragraph px-3 py-1 text-xs font-bold text-brand-bg"
             >
                 {{ props.activeBranch }}
             </p>
 
             <div
-                class="space-y-3 grow custom-scrollbar overflow-y-auto pr-2"
+                class="custom-scrollbar grow space-y-3 overflow-y-auto pr-1"
                 id="timed-in-list"
             >
+                <div
+                    v-if="filteredAttendanceToday.length === 0"
+                    class="rounded-xl border border-dashed border-black/15 bg-brand-paragraph/60 p-4 text-sm font-semibold text-black/55"
+                >
+                    No employees are currently listed as present.
+                </div>
+
                 <div
                     v-for="(
                         attendance, attendanceIndex
                     ) in filteredAttendanceToday"
                     :key="attendanceIndex"
-                    class="flex items-center gap-3 p-2 rounded-xl hover:bg-brand-paragraph/20 transition-colors"
+                    class="flex items-center gap-3 rounded-xl border border-black/5 bg-white p-3 shadow-sm transition hover:border-brand-bg/20 hover:bg-brand-paragraph/50"
                 >
                     <img
                         v-if="attendance?.employee?.media.length > 0"
                         :src="attendance?.employee?.media[0].original_url"
                         alt="Employee Profile"
-                        class="w-12 h-12 rounded-full border-2 border-brand-stroke object-cover"
+                        class="h-12 w-12 rounded-full object-cover ring-2 ring-brand-bg/15"
                     />
-                    <CircleUser v-else class="w-8 h-8 text-brand-stroke" />
+                    <CircleUser v-else class="h-8 w-8 text-brand-bg" />
 
-                    <div>
-                        <p class="font-bold text-brand-stroke text-sm">
+                    <div class="min-w-0">
+                        <p class="truncate text-sm font-black text-brand-stroke">
                             {{ attendance.employee.first_name }}
                             {{ attendance.employee.last_name }}
                         </p>
-                        <p class="text-xs text-brand-bg font-medium">
+                        <p class="truncate text-xs font-semibold text-black/55">
                             {{ attendance.employee.position }}
                         </p>
                     </div>

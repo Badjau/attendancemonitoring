@@ -51,7 +51,10 @@ Route::get('/', [HomeController::class, 'home'])
     ->middleware('timeclock.unlocked')
     ->name('home');
 
-Route::get('/offline-attendance', fn () => Inertia::render('OfflineAttendance/Index'))
+Route::get('/offline-attendance', fn () => Inertia::render('OfflineAttendance/Index', [
+    'kioskApiToken' => config('services.kiosk.token'),
+]))
+    ->middleware('timeclock.unlocked')
     ->name('offline-attendance.index');
 
 // ROUTE FOR ANNOUNCEMENT

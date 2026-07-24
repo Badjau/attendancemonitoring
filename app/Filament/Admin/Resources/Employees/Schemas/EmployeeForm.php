@@ -31,10 +31,14 @@ class EmployeeForm
                                 ->preload()
                                 ->required(),
 
-                            TextInput::make('branch')
+                            Select::make('branches')
+                                ->label('Branches')
+                                ->relationship('branches', 'name')
+                                ->multiple()
+                                ->searchable()
+                                ->preload()
                                 ->required()
-                                ->maxLength(255)
-                                ->datalist(Employee::BRANCHES),
+                                ->helperText('Select every branch this employee may report to.'),
 
                             TextInput::make('first_name')
                                 ->required(),

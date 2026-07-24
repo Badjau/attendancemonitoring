@@ -176,7 +176,7 @@
     class="space-y-2"
 >
     <div class="text-sm font-medium text-gray-700 dark:text-gray-200">
-        Zone Map
+        Map
     </div>
 
     <div class="relative">

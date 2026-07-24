@@ -154,25 +154,54 @@ class FaceStore:
         with self.connect() as connection:
             connection.execute("delete from face_embeddings where employee_id = ?", (employee_id,))
             for item in embeddings:
-                connection.execute(
-                    """
-                    insert into face_embeddings
-                        (server_id, employee_id, embedding, image_sha256, pose_label, model_name, detector_backend, quality_json, server_updated_at, cached_at, created_at)
-                    values (?, ?, ?, ?, ?, ?, ?, ?, ?, current_timestamp, coalesce(?, current_timestamp))
-                    """,
-                    (
-                        item.get("id"),
-                        employee_id,
-                        json.dumps([float(value) for value in item["embedding"]]),
-                        item.get("image_hash") or item.get("image_sha256") or "",
-                        item.get("pose_label"),
-                        item.get("model_name") or "SFace",
-                        item.get("detector_backend") or "yunet",
-                        json.dumps(item.get("quality") or {}),
-                        item.get("updated_at"),
-                        item.get("created_at"),
-                    ),
-                )
+                self._insert_embedding(connection, employee_id, item)
+
+    def replace_all_embeddings(self, embeddings: list[dict]) -> dict:
+        employee_ids = {
+            str(item.get("employee_id") or "").strip()
+            for item in embeddings
+            if str(item.get("employee_id") or "").strip()
+        }
+
+        inserted_count = 0
+        with self.connect() as connection:
+            connection.execute("delete from face_embeddings")
+            for item in embeddings:
+                employee_id = str(item.get("employee_id") or "").strip()
+                if employee_id:
+                    self._insert_embedding(connection, employee_id, item)
+                    inserted_count += 1
+
+        return {
+            "embedding_count": inserted_count,
+            "employee_count": len(employee_ids),
+        }
+
+    def _insert_embedding(
+        self,
+        connection: sqlite3.Connection,
+        employee_id: str,
+        item: dict,
+    ) -> None:
+        connection.execute(
+            """
+            insert into face_embeddings
+                (server_id, employee_id, embedding, image_sha256, pose_label, model_name, detector_backend, quality_json, server_updated_at, cached_at, created_at)
+            values (?, ?, ?, ?, ?, ?, ?, ?, ?, current_timestamp, coalesce(?, current_timestamp))
+            """,
+            (
+                item.get("id"),
+                employee_id,
+                json.dumps([float(value) for value in item["embedding"]]),
+                item.get("image_hash") or item.get("image_sha256") or "",
+                item.get("pose_label"),
+                item.get("model_name") or "SFace",
+                item.get("detector_backend") or "yunet",
+                json.dumps(item.get("quality") or {}),
+                item.get("updated_at"),
+                item.get("created_at"),
+            ),
+        )
 
     def employee_status(self, employee_id: str) -> dict:
         with self.connect() as connection:

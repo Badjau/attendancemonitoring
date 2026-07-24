@@ -31,7 +31,11 @@ type OfflineAttendance = {
     imageUrl?: string
 }
 
-const syncStore = useSyncStore()
+const props = defineProps<{
+    kioskApiToken: string
+}>()
+
+const syncStore = useSyncStore(props.kioskApiToken)
 const records = ref<OfflineAttendance[]>([])
 const isLoading = ref(true)
 const isSyncing = ref(false)

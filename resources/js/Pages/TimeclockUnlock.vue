@@ -506,45 +506,68 @@ onUnmounted(() => {
 <template>
     <Head title="Lock / Unlock" />
 
-    <main class="min-h-screen bg-brand-bg px-4 py-6 text-brand-stroke md:px-8">
-        <button
-            type="button"
-            class="fixed left-3 top-3 z-20 inline-flex items-center justify-center gap-2 rounded-2xl border-2 border-brand-stroke bg-brand-card px-4 py-3 text-xs font-black uppercase tracking-widest text-brand-stroke shadow-[4px_4px_0px_0px_#001e1d] transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[6px_6px_0px_0px_#001e1d] active:translate-x-1 active:translate-y-1 active:shadow-none md:left-5 md:top-5"
-            @click="goBack"
+    <main class="min-h-screen bg-[#f0eeea] text-brand-stroke">
+        <header
+            class="sticky top-0 z-30 border-b border-black/5 bg-white/95 px-4 py-3 shadow-sm backdrop-blur md:px-8"
         >
-            <ArrowLeft class="h-4 w-4" />
-            Back
-        </button>
+            <div class="mx-auto flex max-w-7xl items-center justify-between gap-4">
+                <div class="flex items-center gap-3">
+                    <img
+                        src="/images/mcasia-logo.png"
+                        alt="McAsia"
+                        class="h-6 w-6 rounded bg-white object-contain p-1 shadow-sm ring-1 ring-black/10 md:h-8 md:w-8"
+                    />
+                    <div class="leading-tight">
+                        <p class="text-sm font-black text-brand-bg md:text-base">
+                            McAsia Attendance
+                        </p>
+                        <p class="text-xs font-semibold text-black/55">
+                            Secure station access
+                        </p>
+                    </div>
+                </div>
+
+                <button
+                    type="button"
+                    class="inline-flex items-center justify-center gap-2 rounded-full border border-brand-bg/15 bg-white px-4 py-3 text-xs font-black text-brand-stroke shadow-sm transition hover:border-brand-bg/30 hover:bg-brand-paragraph"
+                    @click="goBack"
+                >
+                    <ArrowLeft class="h-4 w-4" />
+                    Back
+                </button>
+            </div>
+        </header>
 
         <section
-            class="mx-auto grid min-h-[calc(100vh-3rem)] max-w-xl items-center"
+            class="mx-auto flex min-h-[calc(100vh-5rem)] max-w-3xl items-center justify-center px-4 py-8 md:px-8"
         >
             <video
                 ref="videoRef"
                 autoplay
                 playsinline
                 muted
-                class="pointer-events-none fixed -left-2499.75 top-0 h-px w-px opacity-0"
+                class="pointer-events-none fixed -left-[9999px] top-0 h-px w-px opacity-0"
                 aria-hidden="true"
                 tabindex="-1"
             />
             <canvas ref="canvasRef" class="hidden" />
 
+
             <div
-                class="rounded-4xl border-2 border-brand-stroke bg-brand-card p-6 shadow-[10px_10px_0px_0px_#001e1d] md:p-8"
+                class="w-full max-w-xl rounded-2xl border border-black/5 bg-white p-5 shadow-2xl shadow-black/10 sm:p-6 md:p-7"
             >
                 <div class="mb-8 space-y-2">
                     <div
-                        class="inline-flex items-center gap-2 rounded-full bg-brand-stroke px-4 py-2 text-xs font-black uppercase tracking-widest text-brand-headline"
+                        class="inline-flex items-center gap-2 rounded-full bg-brand-bg/10 px-4 py-2 text-xl font-black text-brand-bg"
                     >
                         <LockKeyhole v-if="!isUnlocked" class="h-4 w-4" />
                         <UnlockKeyhole v-else class="h-4 w-4" />
-                        {{ isUnlocked ? 'Timeclock unlocked' : 'Timeclock locked' }}
+                        {{ isUnlocked ? 'Station currently unlocked' : 'Station currently locked' }}
                     </div>
                     <h1 class="text-3xl font-black leading-tight md:text-4xl">
                         Lock / Unlock station
                     </h1>
-                    <p class="text-sm font-semibold text-brand-bg">
+                    <p class="text-base font-semibold text-black/60 md:text-lg">
                         {{ statusText }}
                     </p>
                 </div>
@@ -560,7 +583,7 @@ onUnmounted(() => {
                     <input type="hidden" name="method" value="admin" />
                     <label class="block space-y-2">
                         <span
-                            class="text-xs font-black uppercase tracking-widest"
+                            class="text-xs font-black text-brand-bg"
                         >
                             Admin username or email
                         </span>
@@ -573,14 +596,14 @@ onUnmounted(() => {
                                 type="text"
                                 name="username"
                                 autocomplete="username"
-                                class="w-full rounded-2xl border-2 border-brand-stroke bg-white py-4 pl-12 pr-4 text-lg font-bold outline-none transition-shadow focus:shadow-[4px_4px_0px_0px_#001e1d]"
+                                class="w-full rounded-2xl border border-brand-bg/20 bg-white py-4 pl-12 pr-4 text-lg font-bold outline-none transition focus:border-brand-bg focus:ring-4 focus:ring-brand-bg/10"
                             />
                         </span>
                     </label>
 
                     <label class="block space-y-2">
                         <span
-                            class="text-xs font-black uppercase tracking-widest"
+                            class="text-xs font-black text-brand-bg"
                         >
                             Admin password
                         </span>
@@ -593,7 +616,7 @@ onUnmounted(() => {
                                 type="password"
                                 name="credential"
                                 autocomplete="current-password"
-                                class="w-full rounded-2xl border-2 border-brand-stroke bg-white py-4 pl-12 pr-4 text-lg font-bold outline-none transition-shadow focus:shadow-[4px_4px_0px_0px_#001e1d]"
+                                class="w-full rounded-2xl border border-brand-bg/20 bg-white py-4 pl-12 pr-4 text-lg font-bold outline-none transition focus:border-brand-bg focus:ring-4 focus:ring-brand-bg/10"
                             />
                         </span>
                     </label>
@@ -603,7 +626,7 @@ onUnmounted(() => {
                             type="submit"
                             name="action"
                             :value="isUnlocked ? 'lock' : 'unlock'"
-                            class="inline-flex w-full items-center justify-center gap-2 rounded-2xl border-2 border-brand-stroke bg-brand-stroke px-4 py-4 text-sm font-black uppercase tracking-widest text-brand-headline shadow-[5px_5px_0px_0px_#abd1c6] transition-all duration-200 hover:-translate-y-1 hover:shadow-[7px_7px_0px_0px_#abd1c6] active:translate-x-1 active:translate-y-1 active:shadow-none disabled:cursor-not-allowed disabled:opacity-70"
+                            class="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-brand-bg px-4 py-4 text-sm font-black text-white shadow-lg shadow-red-950/15 transition hover:bg-brand-tertiary disabled:cursor-not-allowed disabled:opacity-70"
                             :disabled="isSubmitting || !hasAdminCredentials"
                             @click="selectedAdminAction = isUnlocked ? 'lock' : 'unlock'"
                         >
@@ -624,7 +647,7 @@ onUnmounted(() => {
                             type="submit"
                             name="action"
                             value="dashboard"
-                            class="inline-flex w-full items-center justify-center gap-2 rounded-2xl border-2 border-brand-stroke bg-brand-accent px-4 py-4 text-sm font-black uppercase tracking-widest text-brand-stroke shadow-[5px_5px_0px_0px_#001e1d] transition-all duration-200 hover:-translate-y-1 hover:shadow-[7px_7px_0px_0px_#001e1d] active:translate-x-1 active:translate-y-1 active:shadow-none disabled:cursor-not-allowed disabled:opacity-70"
+                            class="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-brand-bg/15 bg-brand-paragraph px-4 py-4 text-sm font-black text-brand-stroke shadow-sm transition hover:border-brand-bg/30 hover:bg-white disabled:cursor-not-allowed disabled:opacity-70"
                             :disabled="isSubmitting"
                             @click="selectedAdminAction = 'dashboard'"
                         >
@@ -636,7 +659,7 @@ onUnmounted(() => {
 
                 <div
                     v-if="errorText"
-                    class="mt-5 flex items-start gap-2 rounded-2xl border-2 border-brand-tertiary bg-white p-4 text-brand-tertiary"
+                    class="mt-5 flex items-start gap-2 rounded-2xl border border-red-200 bg-red-50 p-4 text-red-800"
                 >
                     <TriangleAlert class="mt-0.5 h-5 w-5 shrink-0" />
                     <p class="text-sm font-bold">{{ errorText }}</p>
