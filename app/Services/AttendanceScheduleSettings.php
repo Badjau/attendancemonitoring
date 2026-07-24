@@ -23,6 +23,7 @@ class AttendanceScheduleSettings
         'face_required_match_count' => '2',
         'face_only_usable_frame_target' => '5',
         'face_only_required_match_count' => '3',
+        'face_attempt_retention_days' => '30',
         'show_face_attendance_button' => false,
         'show_scan_status_messages' => true,
         'scan_status_idle' => 'RFID and fingerprint scanners are listening.',
@@ -152,6 +153,11 @@ class AttendanceScheduleSettings
     public function faceOnlyRequiredMatchCount(): int
     {
         return min($this->faceOnlyUsableFrameTarget(), $this->integerSetting('face_only_required_match_count', 2, 20));
+    }
+
+    public function faceAttemptRetentionDays(): int
+    {
+        return $this->integerSetting('face_attempt_retention_days', 1, 3650);
     }
 
     public function showFaceAttendanceButton(): bool

@@ -131,6 +131,14 @@ return [
                     'required' => true,
                     'rules' => ['required', 'integer', 'min:1', 'max:10'],
                 ],
+                'face_attempt_retention_days' => [
+                    'type' => TypeFieldEnum::Text->value,
+                    'label' => 'Face Attempt Retention Days',
+                    'placeholder' => '30',
+                    'tooltip' => 'Days to keep face attempt logs and saved evidence media before automatic deletion.',
+                    'required' => true,
+                    'rules' => ['required', 'integer', 'min:1', 'max:3650'],
+                ],
                 'show_face_attendance_button' => [
                     'type' => TypeFieldEnum::Boolean->value,
                     'label' => 'Show Facial Recognition Attendance Button',

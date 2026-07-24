@@ -174,9 +174,15 @@ class FaceController extends Controller
         }
 
         $riskScore = (float) ($validated['risk_score'] ?? 1.0);
+        $suspiciousReasons = [
+            'liveness_unconfirmed',
+            'multiple_faces',
+            'session_high_risk',
+            'spoof_detected',
+        ];
         $suspicious = $validated['decision'] !== 'accept'
             || $riskScore >= 0.45
-            || in_array($validated['reason_code'] ?? null, ['multiple_faces', 'session_high_risk'], true);
+            || in_array($validated['reason_code'] ?? null, $suspiciousReasons, true);
 
         $attempt = FaceAttempt::query()->create([
             'employee_id' => $employee?->id,
@@ -202,7 +208,7 @@ class FaceController extends Controller
 
         if (filled($validated['evidence_image_base64'] ?? null)) {
             $attempt
-                ->addMediaFromBase64($validated['evidence_image_base64'], 'image/jpeg', 'image/png')
+                ->addMediaFromString($this->compressedAttemptJpegBytes($validated['evidence_image_base64']))
                 ->usingFileName("face_attempt_{$attempt->id}.jpg")
                 ->toMediaCollection('face-attempt-evidence');
         }
@@ -215,12 +221,22 @@ class FaceController extends Controller
 
     private function compressedJpegBytes(string $base64Image): string
     {
+        return $this->compressedImageJpegBytes($base64Image, 'profile_image_base64', 1600, 82);
+    }
+
+    private function compressedAttemptJpegBytes(string $base64Image): string
+    {
+        return $this->compressedImageJpegBytes($base64Image, 'evidence_image_base64', 960, 58);
+    }
+
+    private function compressedImageJpegBytes(string $base64Image, string $field, int $maxDimension, int $quality): string
+    {
         $base64Image = preg_replace('/^data:image\/(?:jpeg|jpg|png);base64,/', '', trim($base64Image)) ?? '';
         $imageBytes = base64_decode($base64Image, true);
 
         if ($imageBytes === false) {
             throw ValidationException::withMessages([
-                'profile_image_base64' => 'The profile image must be valid base64.',
+                $field => 'The image must be valid base64.',
             ]);
         }
 
@@ -229,7 +245,7 @@ class FaceController extends Controller
 
         if (! in_array($mimeType, ['image/jpeg', 'image/png'], true)) {
             throw ValidationException::withMessages([
-                'profile_image_base64' => 'The profile image must be a JPEG or PNG image.',
+                $field => 'The image must be a JPEG or PNG image.',
             ]);
         }
 
@@ -237,27 +253,30 @@ class FaceController extends Controller
 
         if ($source === false) {
             throw ValidationException::withMessages([
-                'profile_image_base64' => 'The profile image could not be processed.',
+                $field => 'The image could not be processed.',
             ]);
         }
 
-        $width = imagesx($source);
-        $height = imagesy($source);
+        $sourceWidth = imagesx($source);
+        $sourceHeight = imagesy($source);
+        $scale = min(1, $maxDimension / max($sourceWidth, $sourceHeight));
+        $width = max(1, (int) round($sourceWidth * $scale));
+        $height = max(1, (int) round($sourceHeight * $scale));
         $canvas = imagecreatetruecolor($width, $height);
 
         if ($canvas === false) {
             imagedestroy($source);
 
             throw ValidationException::withMessages([
-                'profile_image_base64' => 'The profile image could not be processed.',
+                $field => 'The image could not be processed.',
             ]);
         }
 
         imagefill($canvas, 0, 0, imagecolorallocate($canvas, 255, 255, 255));
-        imagecopy($canvas, $source, 0, 0, 0, 0, $width, $height);
+        imagecopyresampled($canvas, $source, 0, 0, 0, 0, $width, $height, $sourceWidth, $sourceHeight);
 
         ob_start();
-        imagejpeg($canvas, null, 82);
+        imagejpeg($canvas, null, $quality);
         $jpegBytes = ob_get_clean();
 
         imagedestroy($source);
@@ -265,7 +284,7 @@ class FaceController extends Controller
 
         if ($jpegBytes === false || $jpegBytes === '') {
             throw ValidationException::withMessages([
-                'profile_image_base64' => 'The profile image could not be compressed.',
+                $field => 'The image could not be compressed.',
             ]);
         }
 

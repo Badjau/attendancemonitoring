@@ -4,10 +4,13 @@ namespace Tests\Feature;
 
 use App\Models\Employee;
 use App\Models\FaceAttempt;
+use App\Services\AttendanceScheduleSettings;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Storage;
+use Joaopaulolndev\FilamentGeneralSettings\Models\GeneralSetting;
 use Spatie\MediaLibrary\MediaCollections\Models\Media;
 use Tests\TestCase;
 
@@ -301,7 +304,7 @@ class FaceRoutesTest extends TestCase
             'device_id' => 'kiosk-1',
             'session_id' => 'session-1',
             'metadata' => ['confidence' => 0.4],
-            'evidence_image_base64' => $this->pngBase64('attempt'),
+            'evidence_image_base64' => $this->pngBase64('attempt', 2000, 1200),
         ])
             ->assertCreated()
             ->assertJsonPath('suspicious', true);
@@ -313,6 +316,77 @@ class FaceRoutesTest extends TestCase
         $this->assertSame($employee->id, $attempt->employee_id);
         $this->assertSame('session_high_risk', $attempt->reason_code);
         $this->assertCount(1, $attempt->getMedia('face-attempt-evidence'));
+
+        $media = $attempt->getFirstMedia('face-attempt-evidence');
+        $imageSize = getimagesize($media->getPath());
+
+        $this->assertSame('image/jpeg', $media->mime_type);
+        $this->assertSame(960, max($imageSize[0], $imageSize[1]));
+    }
+
+    public function test_face_attempt_api_stores_spoof_attempt_without_candidate_employee(): void
+    {
+        Storage::fake('public');
+
+        $this->postJson('/api/face/attempts', [
+            'decision' => 'fallback',
+            'reason_code' => 'spoof_detected',
+            'risk_score' => 1,
+            'frame_count' => 3,
+            'metadata' => ['source' => 'verifier_error'],
+            'evidence_image_base64' => $this->pngBase64('spoof-attempt'),
+        ])
+            ->assertCreated()
+            ->assertJsonPath('suspicious', true);
+
+        $attempt = FaceAttempt::query()->sole();
+
+        $this->assertNull($attempt->employee_id);
+        $this->assertTrue($attempt->suspicious);
+        $this->assertTrue($attempt->fallback_used);
+        $this->assertSame('spoof_detected', $attempt->reason_code);
+        $this->assertSame(3, $attempt->frame_count);
+        $this->assertCount(1, $attempt->getMedia('face-attempt-evidence'));
+    }
+
+    public function test_prune_face_attempts_deletes_expired_logs_and_evidence_media(): void
+    {
+        Storage::fake('public');
+
+        GeneralSetting::query()->create([
+            'site_name' => 'TimeClock',
+            'more_configs' => [
+                'face_attempt_retention_days' => '7',
+            ],
+        ]);
+        $cache = new \ReflectionProperty(AttendanceScheduleSettings::class, 'cachedSettings');
+        $cache->setValue(null, null);
+
+        $oldAttempt = FaceAttempt::query()->create([
+            'decision' => 'fallback',
+            'suspicious' => true,
+            'attempted_at' => now()->subDays(8),
+        ]);
+        $oldAttempt
+            ->addMediaFromString(base64_decode($this->pngBase64('old'), true))
+            ->usingFileName('old_attempt.jpg')
+            ->toMediaCollection('face-attempt-evidence');
+
+        $freshAttempt = FaceAttempt::query()->create([
+            'decision' => 'retry',
+            'suspicious' => true,
+            'attempted_at' => now()->subDays(6),
+        ]);
+        $freshAttempt
+            ->addMediaFromString(base64_decode($this->pngBase64('fresh'), true))
+            ->usingFileName('fresh_attempt.jpg')
+            ->toMediaCollection('face-attempt-evidence');
+
+        Artisan::call('attendance:prune-face-attempts');
+
+        $this->assertDatabaseMissing('face_attempts', ['id' => $oldAttempt->id]);
+        $this->assertDatabaseHas('face_attempts', ['id' => $freshAttempt->id]);
+        $this->assertSame(1, Media::query()->where('model_type', FaceAttempt::class)->count());
     }
 
     private function createEmployee(string $employeeId = 'EMP-001', string $rfidUid = 'RFID-001'): Employee
@@ -329,10 +403,10 @@ class FaceRoutesTest extends TestCase
         ]);
     }
 
-    private function pngBase64(string $seed): string
+    private function pngBase64(string $seed, int $width = 2, int $height = 2): string
     {
         $red = (hexdec(substr(hash('sha256', $seed), 0, 2)) % 200) + 30;
-        $image = imagecreatetruecolor(2, 2);
+        $image = imagecreatetruecolor($width, $height);
 
         imagefill($image, 0, 0, imagecolorallocate($image, $red, 120, 160));
 

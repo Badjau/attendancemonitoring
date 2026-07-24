@@ -251,6 +251,10 @@ class HomeScanFeedbackTest extends TestCase
         $this->assertStringContainsString('<div v-else class="w-full">', $cameraCard);
         $this->assertStringContainsString('{{ scannerStatusText }}', $cameraCard);
         $this->assertStringContainsString('{{ processingLabel }}', $cameraCard);
+        $this->assertStringContainsString('const captureFullViewImage = (): string | null =>', $cameraCard);
+        $this->assertStringContainsString('const evidenceImage = captureFullViewImage() ?? images[0]', $cameraCard);
+        $this->assertStringContainsString('evidenceImageBase64 ?? result.evidence_image_base64 ?? undefined', $cameraCard);
+        $this->assertStringContainsString('postFaceAttemptAudit(', $cameraCard);
         $this->assertStringContainsString(
             'data-scanner-status-version="20260715-always-on"',
             $cameraCard,

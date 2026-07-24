@@ -603,6 +603,37 @@ const captureImage = (): string | null => {
     return canvas.toDataURL('image/jpeg', 0.72)
 }
 
+const captureFullViewImage = (): string | null => {
+    if (!videoRef.value || !canvasRef.value || !isVideoReady.value) return null
+
+    const video = videoRef.value
+    const canvas = canvasRef.value
+
+    if (video.videoWidth <= 0 || video.videoHeight <= 0) return null
+
+    const scale = Math.min(1, ATTENDANCE_IMAGE_MAX_WIDTH / video.videoWidth)
+
+    canvas.width = Math.round(video.videoWidth * scale)
+    canvas.height = Math.round(video.videoHeight * scale)
+
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return null
+
+    ctx.drawImage(
+        video,
+        0,
+        0,
+        video.videoWidth,
+        video.videoHeight,
+        0,
+        0,
+        canvas.width,
+        canvas.height,
+    )
+
+    return canvas.toDataURL('image/jpeg', 0.72)
+}
+
 const checkLiveFaceCount = async (): Promise<number | null> => {
     if (!isCameraActive.value || !isVideoReady.value || isSilentCameraCapture.value) {
         return null
@@ -842,6 +873,7 @@ const collectFaceSessionImages = async (targetFrames: number): Promise<string[]>
 
 const postFaceAttemptAudit = async (
     result: any,
+    evidenceImageBase64?: string,
     fallbackUsed = false,
 ): Promise<number | undefined> => {
     try {
@@ -865,13 +897,55 @@ const postFaceAttemptAudit = async (
                 margin: result.margin,
                 face_count: result.face_count,
             },
-            evidence_image_base64: result.evidence_image_base64,
+            evidence_image_base64:
+                evidenceImageBase64 ?? result.evidence_image_base64 ?? undefined,
         })
 
         return Number(payload.id || 0) || undefined
     } catch (error) {
         console.error('Face attempt audit failed:', error)
         return undefined
+    }
+}
+
+const faceAttemptReasonFromError = (error: unknown): string | null => {
+    if (!(error instanceof Error)) return 'face_service_error'
+
+    const normalized = error.message.toLowerCase()
+
+    if (normalized.includes('spoof')) return 'spoof_detected'
+    if (normalized.includes('liveness')) return 'liveness_unconfirmed'
+    if (normalized.includes('multiple')) return 'multiple_faces'
+    if (normalized.includes('no face')) return 'no_face'
+    if (normalized.includes('face service unavailable')) return null
+
+    return 'face_service_error'
+}
+
+const failedFaceAttemptFromError = (
+    error: unknown,
+    frameCount: number,
+): any | null => {
+    const reasonCode = faceAttemptReasonFromError(error)
+
+    if (!reasonCode) return null
+
+    const message = error instanceof Error
+        ? error.message
+        : 'Face verification failed.'
+
+    return {
+        decision: ['spoof_detected', 'multiple_faces'].includes(reasonCode)
+            ? 'fallback'
+            : 'retry',
+        reason_code: reasonCode,
+        risk_score: ['spoof_detected', 'multiple_faces'].includes(reasonCode)
+            ? 1
+            : 0.75,
+        frame_count: frameCount,
+        usable_frame_count: 0,
+        matched_frame_count: 0,
+        message,
     }
 }
 
@@ -898,11 +972,38 @@ const runFaceSessionVerification = async (
             }
         }
 
-        const result = await options.verifier(
-            images.map((image) => base64ToBlob(image, 'image/jpeg')),
-        )
+        const evidenceImage = captureFullViewImage() ?? images[0]
+        let result
+
+        try {
+            result = await options.verifier(
+                images.map((image) => base64ToBlob(image, 'image/jpeg')),
+            )
+        } catch (error) {
+            const failedAttempt = failedFaceAttemptFromError(error, images.length)
+            const faceAttemptId = failedAttempt
+                ? await postFaceAttemptAudit(
+                      failedAttempt,
+                      evidenceImage,
+                      failedAttempt.decision === 'fallback',
+                  )
+                : undefined
+            const message = error instanceof Error
+                ? error.message
+                : 'Face session could not be accepted.'
+
+            return {
+                matched: false,
+                validFrames: 0,
+                matchedFrames: 0,
+                message,
+                faceAttemptId,
+            }
+        }
+
         const faceAttemptId = await postFaceAttemptAudit(
             result,
+            evidenceImage,
             result.decision === 'fallback',
         )
 
